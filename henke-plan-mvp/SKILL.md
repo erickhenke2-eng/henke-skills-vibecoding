@@ -4,7 +4,6 @@ description: >
   Guilhotina de escopo: pega o conceito ou a lista de desejos e corta até sobrar
   só a versão mínima que já pode ser usada e testada hoje. Use quando o usuário
   pedir "define o MVP", "o que entra na primeira versão" ou quando a ideia estiver grande demais.
-disable-model-invocation: true
 ---
 
 # Henke | Plan : Guilhotina de Escopo & MVP
@@ -42,7 +41,7 @@ Você é um guilhotineiro de escopo — do bom tipo. Todo projeto morre do mesmo
 
 ### Fase 1: Leitura de Contexto & Memória do Projeto
 
-1. Verifique/crie `.henke/` e leia `DIARIO.md`, `DECISOES.md`, `CONCEITO.md`, `FLUXO.md`, `MVP.md` se existirem.
+1. Se existir, consulte `.henke/` e leia `DIARIO.md`, `DECISOES.md`, `CONCEITO.md`, `FLUXO.md`, `MVP.md` se existirem.
 2. Identifique a **jornada central** do produto — o caminho que o usuário percorre pra obter o valor principal.
    - Ex: "abrir o app → cadastrar receita → buscar → cozinhar seguindo os passos"
    - Se não estiver claro, deduza do conceito ou pergunte UMA vez com opções ("o núcleo é mais o catálogo, a criação ou o compartilhamento?").
@@ -149,12 +148,10 @@ Escreva `.henke/MVP.md` com a estrutura:
 
 **Handoff natural:** MVP definido → `/henke-plan-fluxo` (mapear as telas que entram) ou `/henke-plan-historias` (transformar em tarefas executáveis).
 
-## 6. Checklist Meta-Cognitivo Anti-Migué (Validação Obrigatória)
+## 6. Verificação de entrega (proporcional ao escopo)
 
-Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
-- [ ] **Sem Casca Vazia (Anti-Stub)**: Não entreguei stubs, funções vazias, prints crus fingindo ser guia de pose, ou comentários do tipo 'o motor externo que se vire depois'? A integração foi feita de verdade até a ponta?
-- [ ] **Sem Conta de Padaria**: Não reduzi cálculos de precisão (fonemas, beats, transientes, timestamps) a meras subtrações de tempo total? Processei o array real de eventos no tempo?
-- [ ] **Propagação Completa**: O dado ou configuração foi propagado até o componente filho que realmente o consome (ex: injetado nos prompts dos shots e não apenas no estilo global da obra)?
-- [ ] **Testes Reais (Zero Teatralidade)**: Meus testes realmente validam o payload e a integridade dos dados gerados, ou apenas checam se a função retornou status 200 sem capotar?
-- [ ] **Custódia Git Limpa**: Rodei `git status`? Não deixei arquivos untracked, modificados soltos ou commits pendentes sem push se o usuário pediu commit/push?
-- [ ] **Registro no Diário**: Atualizei o `.henke/DIARIO.md` com os arquivos tocados, o que foi resolvido e os testes executados?
+- **Entrega real:** não substitua funcionalidade pedida por stub, placeholder ou promessa; se houver limitação, explique-a sem fingir conclusão.
+- **Evidência concreta:** execute os testes relevantes disponíveis e relate exatamente o que foi ou não verificado; status 200, compilação ou checklist mental isolados não provam funcionamento completo.
+- **Escopo e integridade:** confira as alterações com `git diff`/`git status`; preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização adequada.
+- **Memória útil:** registre em `.henke/DIARIO.md` apenas mudanças ou decisões relevantes, caso o projeto use esse diário; não crie arquivos de controle por rotina para ajustes triviais.
+- **Dados especializados:** quando a tarefa envolver sincronização de áudio/vídeo, valide eventos e marcações temporais reais, em vez de estimativas grosseiras. Ignore esta regra quando ela não se aplicar.

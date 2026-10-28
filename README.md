@@ -3,7 +3,7 @@
 > **"De um vibecoder para vibecoders: o kit definitivo para a sua IA parar de fazer cagada, não apagar metade do seu projeto e finalmente codar como gente grande."**  
 > *(E vamos ser bem sinceros: a galera de TI 'raiz' adora torcer o nariz e zoar quem vibecoda... mas na primeira sexta-feira às 18h com o servidor caindo, até eles vão clonar esse repositório no sigilo pra salvar o dia).*
 
-Compatível nativamente com **Antigravity**, **Claude Code**, **Codex**, **Cursor** e qualquer ambiente que suporte o padrão aberto **Agent Skills (`SKILL.md`)**.
+Usa o padrão aberto **Agent Skills (`SKILL.md`)**, com instalação prevista para **Codex**, **Claude Code** e **Gemini CLI**. Outros agentes, como **Cursor** e **Antigravity**, dependem das versões, diretórios e configurações específicas de cada ferramenta; verifique a descoberta de skills no seu ambiente.
 
 ---
 
@@ -96,18 +96,28 @@ A **Suíte Henke** nasceu pra acabar de vez com essa palhaçada. São **47 Macro
 ### Opção 1: Windows (PowerShell)
 Clone o repositório e rode o instalador de 1 comando:
 ```powershell
-git clone https://github.com/ErickHenke/henke-skills.git
-cd henke-skills
+git clone https://github.com/erickhenke2-eng/henke-skills-vibecoding.git
+cd henke-skills-vibecoding
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
-> O script cria automaticamente as pastas e os hardlinks em `~/.agents/skills`, `~/.gemini/config/skills` e `~/.claude/skills`.
+> O script copia as skills para `~/.agents/skills`, `~/.gemini/skills` e `~/.claude/skills`. O Gemini CLI também reconhece o diretório compartilhado `~/.agents/skills`.
 
 ### Opção 2: Linux / macOS (Bash)
 ```bash
-git clone https://github.com/ErickHenke/henke-skills.git
-cd henke-skills
+git clone https://github.com/erickhenke2-eng/henke-skills-vibecoding.git
+cd henke-skills-vibecoding
 chmod +x install.sh && ./install.sh
 ```
+
+---
+
+## 🔎 Ativação, segurança e verificação
+
+- As skills de análise e implementação podem ser ativadas conforme a tarefa pelo agente, quando a ferramenta suporta descoberta automática. Para ações sensíveis, invoque explicitamente `henke-mem-faxina`, `henke-debug-reversao` ou `henke-ops-deploy`; a execução de remoções, reversões ou publicação ainda requer autorização adequada.
+- Skills são instruções para o agente, **não garantia de ausência de bugs**. Revise o diff e execute testes relevantes antes de aceitar mudanças.
+- O diário `.henke/DIARIO.md` é opcional e deve registrar trabalho relevante, não cada ajuste trivial.
+- Confira o inventário com `python3 scripts/validate_skills.py` (no Windows, use `py scripts/validate_skills.py`). O script usa apenas a biblioteca padrão de Python.
+- Para atualizar uma instalação por cópia, faça `git pull` e execute o instalador novamente.
 
 ---
 

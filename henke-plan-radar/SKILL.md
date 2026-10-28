@@ -4,7 +4,6 @@ description: >
   Pesquisa referências reais na web (concorrentes, designs, mecânicas de jogos,
   fluxos de apps) e entrega um dossiê visual e prático para alimentar o projeto.
   Use quando o usuário pedir inspiração, referências ou "pesquisa como os outros fazem".
-disable-model-invocation: true
 ---
 
 # Henke | Plan : Radar de Referências & Scraping
@@ -171,12 +170,10 @@ do projeto]. Decisões-chave a levar: 1) ..., 2) ..., 3) ...
 
 **Handoff natural:** quando o dossiê estiver pronto, recomende a próxima skill — normalmente `/henke-plan-fluxo` (se o produto precisa de mapa de telas) ou a skill de UI específica (se é pra executar visual direto).
 
-## 6. Checklist Meta-Cognitivo Anti-Migué (Validação Obrigatória)
+## 6. Verificação de entrega (proporcional ao escopo)
 
-Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
-- [ ] **Sem Casca Vazia (Anti-Stub)**: Não entreguei stubs, funções vazias, prints crus fingindo ser guia de pose, ou comentários do tipo 'o motor externo que se vire depois'? A integração foi feita de verdade até a ponta?
-- [ ] **Sem Conta de Padaria**: Não reduzi cálculos de precisão (fonemas, beats, transientes, timestamps) a meras subtrações de tempo total? Processei o array real de eventos no tempo?
-- [ ] **Propagação Completa**: O dado ou configuração foi propagado até o componente filho que realmente o consome (ex: injetado nos prompts dos shots e não apenas no estilo global da obra)?
-- [ ] **Testes Reais (Zero Teatralidade)**: Meus testes realmente validam o payload e a integridade dos dados gerados, ou apenas checam se a função retornou status 200 sem capotar?
-- [ ] **Custódia Git Limpa**: Rodei `git status`? Não deixei arquivos untracked, modificados soltos ou commits pendentes sem push se o usuário pediu commit/push?
-- [ ] **Registro no Diário**: Atualizei o `.henke/DIARIO.md` com os arquivos tocados, o que foi resolvido e os testes executados?
+- **Entrega real:** não substitua funcionalidade pedida por stub, placeholder ou promessa; se houver limitação, explique-a sem fingir conclusão.
+- **Evidência concreta:** execute os testes relevantes disponíveis e relate exatamente o que foi ou não verificado; status 200, compilação ou checklist mental isolados não provam funcionamento completo.
+- **Escopo e integridade:** confira as alterações com `git diff`/`git status`; preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização adequada.
+- **Memória útil:** registre em `.henke/DIARIO.md` apenas mudanças ou decisões relevantes, caso o projeto use esse diário; não crie arquivos de controle por rotina para ajustes triviais.
+- **Dados especializados:** quando a tarefa envolver sincronização de áudio/vídeo, valide eventos e marcações temporais reais, em vez de estimativas grosseiras. Ignore esta regra quando ela não se aplicar.

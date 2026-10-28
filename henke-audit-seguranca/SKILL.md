@@ -5,7 +5,6 @@ description: >
   configurações perigosas, dependências comprometidas. Relatório completo com
   severidade e plano de correção. Use quando o usuário pedir "audita a segurança"
   ou antes de colocar o app no ar.
-disable-model-invocation: true
 ---
 
 # Henke | Audit : Auditor de Segurança
@@ -41,7 +40,7 @@ Você é um auditor de segurança. O `henke-arch-seguranca` protege os pontos b�
 
 ### Fase 1: Leitura de Contexto & Memória
 
-1. Verifique/crie `.henke/` e leia `DIARIO.md`, `DECISOES.md`, `MAPA.md`, `CONTRATOS.md`, `DADOS.md`.
+1. Se existir, consulte `.henke/` e leia `DIARIO.md`, `DECISOES.md`, `MAPA.md`, `CONTRATOS.md`, `DADOS.md`.
 2. Identifique: o que o app expõe (rotas, formulários, uploads), o que guarda (dados sensíveis, auth), e o contexto (local? produção? quantos usuários?).
 
 ### Fase 2: Varredura por Vetor de Ataque
@@ -167,12 +166,10 @@ Você é um auditor de segurança. O `henke-arch-seguranca` protege os pontos b�
 
 **Papel no ecossistema:** é o pentester — pensa como atacante pra defender como engenheiro.
 
-## 6. Checklist Meta-Cognitivo Anti-Migué (Validação Obrigatória)
+## 6. Verificação de entrega (proporcional ao escopo)
 
-Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
-- [ ] **Sem Casca Vazia (Anti-Stub)**: Não entreguei stubs, funções vazias, prints crus fingindo ser guia de pose, ou comentários do tipo 'o motor externo que se vire depois'? A integração foi feita de verdade até a ponta?
-- [ ] **Sem Conta de Padaria**: Não reduzi cálculos de precisão (fonemas, beats, transientes, timestamps) a meras subtrações de tempo total? Processei o array real de eventos no tempo?
-- [ ] **Propagação Completa**: O dado ou configuração foi propagado até o componente filho que realmente o consome (ex: injetado nos prompts dos shots e não apenas no estilo global da obra)?
-- [ ] **Testes Reais (Zero Teatralidade)**: Meus testes realmente validam o payload e a integridade dos dados gerados, ou apenas checam se a função retornou status 200 sem capotar?
-- [ ] **Custódia Git Limpa**: Rodei `git status`? Não deixei arquivos untracked, modificados soltos ou commits pendentes sem push se o usuário pediu commit/push?
-- [ ] **Registro no Diário**: Atualizei o `.henke/DIARIO.md` com os arquivos tocados, o que foi resolvido e os testes executados?
+- **Entrega real:** não substitua funcionalidade pedida por stub, placeholder ou promessa; se houver limitação, explique-a sem fingir conclusão.
+- **Evidência concreta:** execute os testes relevantes disponíveis e relate exatamente o que foi ou não verificado; status 200, compilação ou checklist mental isolados não provam funcionamento completo.
+- **Escopo e integridade:** confira as alterações com `git diff`/`git status`; preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização adequada.
+- **Memória útil:** registre em `.henke/DIARIO.md` apenas mudanças ou decisões relevantes, caso o projeto use esse diário; não crie arquivos de controle por rotina para ajustes triviais.
+- **Dados especializados:** quando a tarefa envolver sincronização de áudio/vídeo, valide eventos e marcações temporais reais, em vez de estimativas grosseiras. Ignore esta regra quando ela não se aplicar.

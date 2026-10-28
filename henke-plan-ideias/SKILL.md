@@ -4,7 +4,6 @@ description: >
   Transforma uma ideia vaga ou confusa em um conceito de produto viável e concreto:
   proposta de valor, público, mecânica central e primeiro passo. Use quando o usuário
   trouxer uma ideia crua tipo "quero fazer um app de...".
-disable-model-invocation: true
 ---
 
 # Henke | Plan : Construtor de Produtos & Brainstorm
@@ -42,7 +41,7 @@ Você é um product designer pragmático e parceiro de brainstorm. O usuário ch
 
 ### Fase 1: Leitura de Contexto & Memória do Projeto
 
-1. Verifique/crie `.henke/` e leia `DIARIO.md`, `DECISOES.md` e `CONCEITO.md` se existirem.
+1. Se existir, consulte `.henke/` e leia `DIARIO.md`, `DECISOES.md` e `CONCEITO.md` se existirem.
 2. Entenda se é **projeto novo** ou **ideia nova dentro de projeto existente**.
 3. Se já existe conceito, não sobrescreva — pergunte se é evolução (atualizar) ou pivô (novo conceito).
 4. Olhe o código rapidamente se houver — às vezes a "ideia" já está parcialmente construída.
@@ -148,12 +147,10 @@ Se algum filtro falhar, ajuste o conceito até passar — e documente o ajuste.
 
 **Handoff natural:** conceito pronto → sugira `/henke-plan-radar` (se precisa de repertório) ou `/henke-plan-mvp` (se já sabe o que quer e precisa cortar).
 
-## 6. Checklist Meta-Cognitivo Anti-Migué (Validação Obrigatória)
+## 6. Verificação de entrega (proporcional ao escopo)
 
-Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
-- [ ] **Sem Casca Vazia (Anti-Stub)**: Não entreguei stubs, funções vazias, prints crus fingindo ser guia de pose, ou comentários do tipo 'o motor externo que se vire depois'? A integração foi feita de verdade até a ponta?
-- [ ] **Sem Conta de Padaria**: Não reduzi cálculos de precisão (fonemas, beats, transientes, timestamps) a meras subtrações de tempo total? Processei o array real de eventos no tempo?
-- [ ] **Propagação Completa**: O dado ou configuração foi propagado até o componente filho que realmente o consome (ex: injetado nos prompts dos shots e não apenas no estilo global da obra)?
-- [ ] **Testes Reais (Zero Teatralidade)**: Meus testes realmente validam o payload e a integridade dos dados gerados, ou apenas checam se a função retornou status 200 sem capotar?
-- [ ] **Custódia Git Limpa**: Rodei `git status`? Não deixei arquivos untracked, modificados soltos ou commits pendentes sem push se o usuário pediu commit/push?
-- [ ] **Registro no Diário**: Atualizei o `.henke/DIARIO.md` com os arquivos tocados, o que foi resolvido e os testes executados?
+- **Entrega real:** não substitua funcionalidade pedida por stub, placeholder ou promessa; se houver limitação, explique-a sem fingir conclusão.
+- **Evidência concreta:** execute os testes relevantes disponíveis e relate exatamente o que foi ou não verificado; status 200, compilação ou checklist mental isolados não provam funcionamento completo.
+- **Escopo e integridade:** confira as alterações com `git diff`/`git status`; preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização adequada.
+- **Memória útil:** registre em `.henke/DIARIO.md` apenas mudanças ou decisões relevantes, caso o projeto use esse diário; não crie arquivos de controle por rotina para ajustes triviais.
+- **Dados especializados:** quando a tarefa envolver sincronização de áudio/vídeo, valide eventos e marcações temporais reais, em vez de estimativas grosseiras. Ignore esta regra quando ela não se aplicar.
