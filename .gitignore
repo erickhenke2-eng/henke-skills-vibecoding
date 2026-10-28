@@ -1,0 +1,14 @@
+# Caches e temporários
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+*.bak
+*.swp
+
+# Ambientes e dependências
+node_modules/
+__pycache__/
+.venv/
+dist/
+build/
