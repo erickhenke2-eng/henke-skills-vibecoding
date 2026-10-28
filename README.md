@@ -1,8 +1,8 @@
 # Suíte Henke — 47 Macro-Skills para Vibecoding Autônomo
 
-> **O arsenal completo para quem quer criar aplicações de ponta a ponta usando IA, sem jargões corporativos, com execução profunda e blindagem contra código frágil.**
+> **O arsenal completo para desenvolvimento autônomo e vibecoding de ponta a ponta, sem jargões corporativos, com execução profunda e blindagem contra código frágil.**
 
-Compatível nativamente com **Antigravity (Google DeepMind)**, **Claude Code (Anthropic)**, **Codex / OpenAI**, **Cursor** e qualquer agente que suporte o padrão aberto **Agent Skills (`SKILL.md`)**.
+Compatível nativamente com **Antigravity**, **Claude Code**, **Codex**, **Cursor** e qualquer ambiente que suporte o padrão aberto **Agent Skills (`SKILL.md`)**.
 
 ---
 
