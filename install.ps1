@@ -20,6 +20,16 @@ foreach ($target in $targets) {
     }
 }
 
+# 1. Copia PROTOCOLO.md canônico para cada diretório de agentes
+$protoSource = Join-Path $repoRoot "PROTOCOLO.md"
+if (Test-Path $protoSource) {
+    foreach ($target in $targets) {
+        Copy-Item -LiteralPath $protoSource -Destination (Join-Path $target "PROTOCOLO.md") -Force
+    }
+    Write-Host "Copiado PROTOCOLO.md canônico para todas as bases de skills." -ForegroundColor Cyan
+}
+
+# 2. Copia as 47 skills
 foreach ($dir in $skills) {
     foreach ($target in $targets) {
         $destination = Join-Path $target $dir.Name
@@ -31,4 +41,4 @@ foreach ($dir in $skills) {
     Write-Host "Instalada: $($dir.Name)" -ForegroundColor Green
 }
 
-Write-Host "`nSucesso: $($skills.Count) skills copiadas para agents, Antigravity/Gemini e Claude." -ForegroundColor Yellow
+Write-Host "`nSucesso: $($skills.Count) skills + PROTOCOLO.md copiados para agents, Antigravity/Gemini e Claude." -ForegroundColor Yellow

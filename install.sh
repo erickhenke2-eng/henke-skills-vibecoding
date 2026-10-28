@@ -25,6 +25,14 @@ for target in "${targets[@]}"; do
   mkdir -p "$target"
 done
 
+# Copia PROTOCOLO.md canônico para cada diretório de agentes
+if [[ -f "$repo_root/PROTOCOLO.md" ]]; then
+  for target in "${targets[@]}"; do
+    cp "$repo_root/PROTOCOLO.md" "$target/PROTOCOLO.md"
+  done
+  printf 'Copiado PROTOCOLO.md canônico para todas as bases de skills.\n'
+fi
+
 for skill_dir in "${skills[@]}"; do
   slug="$(basename "$skill_dir")"
   for target in "${targets[@]}"; do
@@ -34,4 +42,4 @@ for skill_dir in "${skills[@]}"; do
   printf 'Instalada: %s\n' "$slug"
 done
 
-printf '\nSucesso: %s skills copiadas para agents, Antigravity/Gemini e Claude.\n' "${#skills[@]}"
+printf '\nSucesso: %s skills + PROTOCOLO.md copiados para agents, Antigravity/Gemini e Claude.\n' "${#skills[@]}"

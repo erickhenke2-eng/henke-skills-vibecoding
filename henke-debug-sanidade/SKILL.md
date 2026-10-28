@@ -44,7 +44,15 @@ Você é um médico preventivo. O projeto pode parecer funcionar — mas tá com
 
 ### Fase 2: Bateria de Verificações
 
-Rode os checks na ordem:
+Rode os checks na ordem estrita:
+
+**0. Custódia de Ambiente & Git (Obrigatório antes de qualquer check)**
+```bash
+git branch && git status
+```
+- Worktree e branch estão corretas? (Não rodar checks em checkout errado)
+- Working tree está limpo ou há arquivos untracked e modificados soltos?
+- Se o projeto usa compilação nativa (Rust, C++, Go, Python sidecar), confira se as variáveis de ambiente (ex: `*_PATH`) resolvem para o binário da worktree ativa e não para um fóssil antigo.
 
 **1. Build**
 ```bash
