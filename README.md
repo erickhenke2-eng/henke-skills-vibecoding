@@ -100,7 +100,7 @@ git clone https://github.com/erickhenke2-eng/henke-skills-vibecoding.git
 cd henke-skills-vibecoding
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
-> O script copia as skills para `~/.agents/skills`, `~/.gemini/skills` e `~/.claude/skills`. O Gemini CLI também reconhece o diretório compartilhado `~/.agents/skills`.
+> O script copia as skills para os diretórios oficiais: `~/.agents/skills` (Codex/padrão aberto), `~/.gemini/config/skills` (Antigravity/Gemini) e `~/.claude/skills` (Claude Code).
 
 ### Opção 2: Linux / macOS (Bash)
 ```bash

@@ -7,8 +7,10 @@ import sys
 root = Path(__file__).resolve().parents[1]
 skills = sorted(p for p in root.glob("henke-*/SKILL.md") if p.is_file())
 errors = []
+
 if len(skills) != 47:
     errors.append(f"Esperadas 47 skills, encontradas {len(skills)}")
+
 names = set()
 for path in skills:
     content = path.read_text(encoding="utf-8")
@@ -21,12 +23,15 @@ for path in skills:
         errors.append(f"{path.parent.name}: nome não corresponde ao diretório")
     if name and name.group(1) in names:
         errors.append(f"{path.parent.name}: nome duplicado")
-    if name: names.add(name.group(1))
+    if name:
+        names.add(name.group(1))
     if not re.search(r"(?m)^description:", match.group(1)):
         errors.append(f"{path.parent.name}: description ausente")
-    if "Checklist Meta-Cognitivo Anti-Migué" in content:
-        errors.append(f"{path.parent.name}: checklist antigo ainda presente")
+    if "## 6. " not in content:
+        errors.append(f"{path.parent.name}: seção 6 de verificação ausente")
+
 if errors:
     print("\n".join("ERRO: " + item for item in errors))
     sys.exit(1)
-print(f"OK: {len(skills)} skills com nome, descrição e verificação atualizada.")
+
+print(f"OK: {len(skills)} skills válidas com frontmatter e protocolo de verificação.")

@@ -115,10 +115,11 @@ Ao registrar, verifique:
 
 **Papel no ecossistema:** é a memória de "porquês" — o que impede o projeto de girar em círculos refazendo o que já foi decidido.
 
-## 6. Verificação de entrega (proporcional ao escopo)
+## 6. Protocolo de Verificação Anti-Migué (Checklist Obrigatório)
 
-- **Entrega real:** não substitua funcionalidade pedida por stub, placeholder ou promessa; se houver limitação, explique-a sem fingir conclusão.
-- **Evidência concreta:** execute os testes relevantes disponíveis e relate exatamente o que foi ou não verificado; status 200, compilação ou checklist mental isolados não provam funcionamento completo.
-- **Escopo e integridade:** confira as alterações com `git diff`/`git status`; preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização adequada.
-- **Memória útil:** registre em `.henke/DIARIO.md` apenas mudanças ou decisões relevantes, caso o projeto use esse diário; não crie arquivos de controle por rotina para ajustes triviais.
-- **Dados especializados:** quando a tarefa envolver sincronização de áudio/vídeo, valide eventos e marcações temporais reais, em vez de estimativas grosseiras. Ignore esta regra quando ela não se aplicar.
+Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
+- [ ] **Entrega Real (Zero Stubs)**: Não substitua funcionalidade pedida por stub, placeholder, casca vazia ou promessa ("o motor externo que se vire depois"). Se houver limitação técnica, explique-a claramente sem fingir conclusão.
+- [ ] **Evidência Concreta (Zero Teatralidade)**: Execute testes relevantes e valide o payload e a integridade real dos dados gerados. Status 200, compilação passando ou checagem superficial isolada não provam funcionamento.
+- [ ] **Escopo & Custódia Git**: Confira as alterações com `git status` e `git diff`. Não deixe arquivos untracked ou modificados soltos, preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização explícita.
+- [ ] **Memória Útil**: Registre no `.henke/DIARIO.md` apenas mudanças ou decisões arquiteturais relevantes (caso o projeto use diário). Não crie arquivos de controle por rotina para ajustes triviais de 1-3 linhas.
+- [ ] **Dados & Precisão Especializada**: Quando a tarefa envolver sincronização de áudio/vídeo ou dados temporais, valide eventos e marcações reais no tempo em vez de subtrações de tempo total ("conta de padaria"). *(Ignore se a tarefa não envolver mídia).*

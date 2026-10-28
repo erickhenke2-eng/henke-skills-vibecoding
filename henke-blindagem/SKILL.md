@@ -87,28 +87,11 @@ Se a automação envolver containers Docker:
 
 ---
 
-## 6. TESTES DE INTEGRAÇÃO DE PIPELINE (Regra de Ouro da IA)
-Para evitar que uma refatoração quebre silenciosamente o fluxo de mídia:
+## 6. Protocolo de Verificação Anti-Migué (Checklist Obrigatório)
 
-1. **Fixtures Mínimas ("Smoke Tests" de Mídia):**
-   - Mantenha uma pasta `tests/fixtures/` com arquivos minúsculos (ex: `sample_1s.wav`, `sample_1s.mp4`, `roteiro_curto.json`).
-   - Crie testes de integração que passem pelo Orquestrador (Gaveta 2) e Executores (Gaveta 3) gerando o produto final e verificando: (a) código de saída 0, (b) arquivo existe e > 0 bytes, (c) segunda execução consecutiva aciona o cache de idempotência instantaneamente.
-2. **LEI INVIOLÁVEL SOBRE TESTES:**
-   - Você (IA) está **TERMINANTEMENTE PROIBIDO** de apagar testes, comentar asserções, usar `.skip` ou relaxar validações para fazer um teste quebrado ficar verde. Se o teste quebrou após sua alteração, o seu código está errado. Corrija a implementação, nunca adultere o teste.
-
----
-
-## PROTOCOLO DE TRABALHO DO AGENTE (Meta-Cognição Obrigatória)
-Antes de escrever qualquer código para criar ou alterar uma automação neste projeto, faça internamente estas 4 perguntas e valide sua resposta:
-1. *"Estou colocando código de sistema/subprocesso dentro de um arquivo de interface (Svelte/Vue/Renderer)?"* -> Se sim, pare e mova para o Core/Worker.
-2. *"Se essa automação travar aos 90% e o usuário rodar de novo, ela vai gastar tempo/dinheiro refazendo os primeiros 89% ou vai ler um arquivo corrompido?"* -> Se sim, adicione checagem de hash e escrita atômica (`.tmp`).
-3. *"Se o usuário clicar 5 vezes seguidas no botão de gerar, vou abrir 5 FFmpegs/modelos na GPU ao mesmo tempo?"* -> Se sim, coloque uma fila/semáforo no Orquestrador.
-4. *"Se o usuário fechar o app no meio do render, o processo filho vai ficar vivo travando o PC dele?"* -> Se sim, implemente o hook de cleanup/abort do processo.
-
-## 6. Verificação de entrega (proporcional ao escopo)
-
-- **Entrega real:** não substitua funcionalidade pedida por stub, placeholder ou promessa; se houver limitação, explique-a sem fingir conclusão.
-- **Evidência concreta:** execute os testes relevantes disponíveis e relate exatamente o que foi ou não verificado; status 200, compilação ou checklist mental isolados não provam funcionamento completo.
-- **Escopo e integridade:** confira as alterações com `git diff`/`git status`; preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização adequada.
-- **Memória útil:** registre em `.henke/DIARIO.md` apenas mudanças ou decisões relevantes, caso o projeto use esse diário; não crie arquivos de controle por rotina para ajustes triviais.
-- **Dados especializados:** quando a tarefa envolver sincronização de áudio/vídeo, valide eventos e marcações temporais reais, em vez de estimativas grosseiras. Ignore esta regra quando ela não se aplicar.
+Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
+- [ ] **Entrega Real (Zero Stubs)**: Não substitua funcionalidade pedida por stub, placeholder, casca vazia ou promessa ("o motor externo que se vire depois"). Se houver limitação técnica, explique-a claramente sem fingir conclusão.
+- [ ] **Evidência Concreta (Zero Teatralidade)**: Execute testes relevantes e valide o payload e a integridade real dos dados gerados. Status 200, compilação passando ou checagem superficial isolada não provam funcionamento.
+- [ ] **Escopo & Custódia Git**: Confira as alterações com `git status` e `git diff`. Não deixe arquivos untracked ou modificados soltos, preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização explícita.
+- [ ] **Memória Útil**: Registre no `.henke/DIARIO.md` apenas mudanças ou decisões arquiteturais relevantes (caso o projeto use diário). Não crie arquivos de controle por rotina para ajustes triviais de 1-3 linhas.
+- [ ] **Dados & Precisão Especializada**: Quando a tarefa envolver sincronização de áudio/vídeo ou dados temporais, valide eventos e marcações reais no tempo em vez de subtrações de tempo total ("conta de padaria"). *(Ignore se a tarefa não envolver mídia).*
