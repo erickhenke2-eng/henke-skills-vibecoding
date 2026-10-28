@@ -99,6 +99,8 @@ Antes de fechar a entrada:
 
 ## 4. Regras Negativas & Linhas Vermelhas (O que é PROIBIDO)
 
+- **PROIBIDO** declarar tarefa concluída com git status sujo — rode obrigatoriamente git status e registre no diário se há arquivos pendentes ou commits à frente do remoto se o usuário solicitou commit/push.
+
 - **PROIBIDO** registrar "funcionando" sem verificação — diário mentiroso é pior que diário vazio.
 - **PROIBIDO** apagar entradas antigas — arquive em DIARIO-ARQUIVO.md, nunca delete histórico.
 - **PROIBIDO** entrada sem data ou sem "próximo passo" — quem lê precisa saber quando foi e pra onde vai.
@@ -121,3 +123,13 @@ Antes de fechar a entrada:
 | `henke-debug-*` | Bugs encontrados e consertados são registrados com causa e solução |
 
 **Papel no ecossistema:** é a skill mais chamada de todas — toda operação Henke termina silenciosamente nela.
+
+## 6. Checklist Meta-Cognitivo Anti-Migué (Validação Obrigatória)
+
+Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
+- [ ] **Sem Casca Vazia (Anti-Stub)**: Não entreguei stubs, funções vazias, prints crus fingindo ser guia de pose, ou comentários do tipo 'o motor externo que se vire depois'? A integração foi feita de verdade até a ponta?
+- [ ] **Sem Conta de Padaria**: Não reduzi cálculos de precisão (fonemas, beats, transientes, timestamps) a meras subtrações de tempo total? Processei o array real de eventos no tempo?
+- [ ] **Propagação Completa**: O dado ou configuração foi propagado até o componente filho que realmente o consome (ex: injetado nos prompts dos shots e não apenas no estilo global da obra)?
+- [ ] **Testes Reais (Zero Teatralidade)**: Meus testes realmente validam o payload e a integridade dos dados gerados, ou apenas checam se a função retornou status 200 sem capotar?
+- [ ] **Custódia Git Limpa**: Rodei `git status`? Não deixei arquivos untracked, modificados soltos ou commits pendentes sem push se o usuário pediu commit/push?
+- [ ] **Registro no Diário**: Atualizei o `.henke/DIARIO.md` com os arquivos tocados, o que foi resolvido e os testes executados?

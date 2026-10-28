@@ -86,6 +86,8 @@ Se a mudança for realmente mínima (1-3 linhas), o plano é mental — faça di
 
 ## 4. Regras Negativas & Linhas Vermelhas (O que é PROIBIDO)
 
+- **PROIBIDO** confundir 'cirúrgico' com 'migué' — 'menor diff' NUNCA é desculpa para entregar casca vazia (stub), print cru fingindo ser mapa de pose, ou comentário do tipo 'o outro motor que se vire depois'. O problema real deve ser resolvido com a menor quantidade de código bem escrito.
+
 - **PROIBIDO** reescrever mais do que o pedido — o escopo é contrato.
 - **PROIBIDO** "aproveitar pra melhorar" código adjacente — melhoria é tarefa separada.
 - **PROIBIDO** mudar formatação, convenções ou estilo não pedido — preserva o que existe.
@@ -108,3 +110,13 @@ Se a mudança for realmente mínima (1-3 linhas), o plano é mental — faça di
 | `henke-mem-diario` | Mudanças significativas registradas |
 
 **Papel no ecossistema:** é o bisturi — quando só uma linha precisa mudar, só uma linha muda.
+
+## 6. Checklist Meta-Cognitivo Anti-Migué (Validação Obrigatória)
+
+Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
+- [ ] **Sem Casca Vazia (Anti-Stub)**: Não entreguei stubs, funções vazias, prints crus fingindo ser guia de pose, ou comentários do tipo 'o motor externo que se vire depois'? A integração foi feita de verdade até a ponta?
+- [ ] **Sem Conta de Padaria**: Não reduzi cálculos de precisão (fonemas, beats, transientes, timestamps) a meras subtrações de tempo total? Processei o array real de eventos no tempo?
+- [ ] **Propagação Completa**: O dado ou configuração foi propagado até o componente filho que realmente o consome (ex: injetado nos prompts dos shots e não apenas no estilo global da obra)?
+- [ ] **Testes Reais (Zero Teatralidade)**: Meus testes realmente validam o payload e a integridade dos dados gerados, ou apenas checam se a função retornou status 200 sem capotar?
+- [ ] **Custódia Git Limpa**: Rodei `git status`? Não deixei arquivos untracked, modificados soltos ou commits pendentes sem push se o usuário pediu commit/push?
+- [ ] **Registro no Diário**: Atualizei o `.henke/DIARIO.md` com os arquivos tocados, o que foi resolvido e os testes executados?

@@ -145,6 +145,8 @@ do projeto]. Decisões-chave a levar: 1) ..., 2) ..., 3) ...
 
 ## 4. Regras Negativas & Linhas Vermelhas (O que é PROIBIDO)
 
+- **PROIBIDO** simulação de análise — salvar prints ou frames genéricos sem extrair cadência, iluminação, paleta ou dados estruturados reais que o usuário pediu.
+
 - **PROIBIDO** listar referências inventadas ou genéricas — toda referência precisa de nome real, link verificável e análise.
 - **PROIBIDO** parar na página de resultados sem abrir o conteúdo — título de busca não é análise.
 - **PROIBIDO** apagar pesquisas anteriores do REFERENCIAS.md — sempre append; histórico não se apaga.
@@ -168,3 +170,13 @@ do projeto]. Decisões-chave a levar: 1) ..., 2) ..., 3) ...
 | `henke-code-3d-scene` | Referências de jogos/cenas 3D pra calibrar direção de arte |
 
 **Handoff natural:** quando o dossiê estiver pronto, recomende a próxima skill — normalmente `/henke-plan-fluxo` (se o produto precisa de mapa de telas) ou a skill de UI específica (se é pra executar visual direto).
+
+## 6. Checklist Meta-Cognitivo Anti-Migué (Validação Obrigatória)
+
+Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
+- [ ] **Sem Casca Vazia (Anti-Stub)**: Não entreguei stubs, funções vazias, prints crus fingindo ser guia de pose, ou comentários do tipo 'o motor externo que se vire depois'? A integração foi feita de verdade até a ponta?
+- [ ] **Sem Conta de Padaria**: Não reduzi cálculos de precisão (fonemas, beats, transientes, timestamps) a meras subtrações de tempo total? Processei o array real de eventos no tempo?
+- [ ] **Propagação Completa**: O dado ou configuração foi propagado até o componente filho que realmente o consome (ex: injetado nos prompts dos shots e não apenas no estilo global da obra)?
+- [ ] **Testes Reais (Zero Teatralidade)**: Meus testes realmente validam o payload e a integridade dos dados gerados, ou apenas checam se a função retornou status 200 sem capotar?
+- [ ] **Custódia Git Limpa**: Rodei `git status`? Não deixei arquivos untracked, modificados soltos ou commits pendentes sem push se o usuário pediu commit/push?
+- [ ] **Registro no Diário**: Atualizei o `.henke/DIARIO.md` com os arquivos tocados, o que foi resolvido e os testes executados?
