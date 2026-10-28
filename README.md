@@ -1,22 +1,26 @@
-# Suíte Henke — 47 Macro-Skills para Vibecoding Autônomo
+# ⚡ Suíte Henke — 47 Macro-Skills para Vibecoding de Respeito
 
-> **O arsenal completo para desenvolvimento autônomo e vibecoding de ponta a ponta, sem jargões corporativos, com execução profunda e blindagem contra código frágil.**
+> **"De um vibecoder para vibecoders: o kit definitivo para a sua IA parar de fazer cagada, não apagar metade do seu projeto e finalmente codar como gente grande."**  
+> *(E vamos ser bem sinceros: a galera de TI 'raiz' adora torcer o nariz e zoar quem vibecoda... mas na primeira sexta-feira às 18h com o servidor caindo, até eles vão clonar esse repositório no sigilo pra salvar o dia).*
 
 Compatível nativamente com **Antigravity**, **Claude Code**, **Codex**, **Cursor** e qualquer ambiente que suporte o padrão aberto **Agent Skills (`SKILL.md`)**.
 
 ---
 
-## 🎯 Por que a Suíte Henke existe?
+## 🎯 Por que essa suíte existe? (O desabafo de quem coda no flow)
 
-O ecossistema de desenvolvimento assistido por IA frequentemente falha em dois extremos:
-1. **Micro-skills atômicas:** Forçam você a memorizar 30 comandos técnicos pequenos e amarrá-los na mão.
-2. **Prompts genéricos:** Fazem a IA adivinhar soluções, reescrever arquivos inteiros, inventar gambiarras frágeis e esquecer o que fez na sessão anterior.
+Todo mundo que cria projetos no puro fluxo de vibecoding já passou pelo mesmo pesadelo clássico:
+1. Você pede pra IA ajustar um detalhe simples e ela **apaga 400 linhas de código que estavam funcionando**, deixando aquele vergonhoso `// ... resto do seu código aqui`.
+2. Ela mete aquele **degradê roxo neon com ciano** e sombras cafonas que gritam de longe: *"fui feito por IA em 2 segundos"*.
+3. Você passa 4 dias sem abrir o projeto, volta e **nem você nem a IA lembram** onde pararam ou por que diabos aquele arquivo `temp_v2_teste.ts` existe.
+4. Dá um erro no servidor e a IA tenta 5 chutes aleatórios, quebrando a rota, o banco e a sua paciência.
 
-A **Suíte Henke** adota o conceito de **Macro-Skills de Longo Alcance**:
-* **Comandos curtos e diretos:** Você só precisa dizer coisas simples como `"debuga o chat do meu aplicativo"`, `"organiza as pastas desse app"` ou `"tira essa cara feia de IA da tela"`.
-* **Execução autônoma em 5 fases:** A skill assume uma postura sênior nos bastidores — lê a memória local, investiga a causa raiz sem chutar, aplica a menor alteração cirúrgica necessária (Minimal Diff), roda os testes reais do sistema e atualiza silenciosamente o diário de bordo do projeto.
-* **Linguagem humana vale mais que ouro:** Respostas sempre em português claro, direto e focado no resultado prático.
-* **Autossuficiência total:** 47 skills cobrindo da concepção no guardanapo até a publicação na nuvem, sem depender de nenhuma skill externa.
+A **Suíte Henke** nasceu pra acabar de vez com essa palhaçada. São **47 Macro-Skills** desenhadas sob a filosofia de que **o usuário não precisa ser programador de carreira para construir software de nível profissional**:
+
+* **Você fala como ser humano:** Manda um comando direto no chat tipo `"debuga o chat do meu aplicativo"`, `"organiza essa bagunça de pastas"` ou `"tira essa cara feia de template de IA da tela"`.
+* **A IA opera como Engenheiro Sênior:** A skill assume o volante em 5 fases nos bastidores — lê o diário local, caça a causa raiz sem chutar, aplica a menor alteração cirúrgica possível (Minimal Diff), roda os testes do terminal e anota silenciosamente o que fez no diário de bordo (`.henke/DIARIO.md`).
+* **Linguagem simples vale mais que ouro:** Zero pedantismo acadêmico. A IA te explica o que fez em português cristalino e sem enrolação, do jeito que uma pessoa normal conversa.
+* **Autossuficiência total (Do guardanapo ao deploy):** Brainstorm, radar de referências, arquitetura de 3 Gavetas, desmembramento de código gigante, anti-slop visual, banco local blindado, caça-bugs forense e scripts de deploy. Tudo pronto sem depender de nenhuma skill externa.
 
 ---
 
