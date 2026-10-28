@@ -154,11 +154,12 @@ Confira se as trilhas apontam pra arquivos que **realmente existem** — mapa co
 
 **Papel no ecossistema:** é a bússola — todas as outras skills usam pra navegar sem se perder.
 
-## 6. Protocolo de Verificação Anti-Migué (Checklist Obrigatório)
+## 6. Verificação de Entrega & Custódia (Protocolo Henke)
 
-Antes de declarar qualquer tarefa como pronta, confirme mentalmente cada item:
-- [ ] **Entrega Real (Zero Stubs)**: Não substitua funcionalidade pedida por stub, placeholder, casca vazia ou promessa ("o motor externo que se vire depois"). Se houver limitação técnica, explique-a claramente sem fingir conclusão.
-- [ ] **Evidência Concreta (Zero Teatralidade)**: Execute testes relevantes e valide o payload e a integridade real dos dados gerados. Status 200, compilação passando ou checagem superficial isolada não provam funcionamento.
-- [ ] **Escopo & Custódia Git**: Confira as alterações com `git status` e `git diff`. Não deixe arquivos untracked ou modificados soltos, preserve mudanças preexistentes e nunca faça commit, push, limpeza destrutiva ou deploy sem autorização explícita.
-- [ ] **Memória Útil**: Registre no `.henke/DIARIO.md` apenas mudanças ou decisões arquiteturais relevantes (caso o projeto use diário). Não crie arquivos de controle por rotina para ajustes triviais de 1-3 linhas.
-- [ ] **Dados & Precisão Especializada**: Quando a tarefa envolver sincronização de áudio/vídeo ou dados temporais, valide eventos e marcações reais no tempo em vez de subtrações de tempo total ("conta de padaria"). *(Ignore se a tarefa não envolver mídia).*
+Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. Antes de declarar qualquer tarefa como concluída, confirme mentalmente cada item:
+
+- [ ] **Entrega Real (Zero Stubs)**: Funcionalidade entregue de verdade até a ponta, sem cascas vazias, mocks permanentes ou comentários delegando a solução para depois.
+- [ ] **Regra Portão vs Produto**: Se o teste conflitou com a nova exigência, o teste foi corrigido — sem hacks como `.sr-only`, textos invisíveis ou dados falsos.
+- [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
+- [ ] **Custódia de Ambiente**: Branch e worktree corretas, `git status` limpo e variáveis de ambiente apontando para os binários compilados na worktree ativa.
+- [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).

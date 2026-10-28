@@ -8,6 +8,12 @@ root = Path(__file__).resolve().parents[1]
 skills = sorted(p for p in root.glob("henke-*/SKILL.md") if p.is_file())
 errors = []
 
+# 1. Valida presença do PROTOCOLO.md canônico
+protocolo = root / "PROTOCOLO.md"
+if not protocolo.is_file() or len(protocolo.read_text(encoding="utf-8").strip()) < 100:
+    errors.append("PROTOCOLO.md canônico ausente ou vazio na raiz do repositório")
+
+# 2. Valida contagem de skills
 if len(skills) != 47:
     errors.append(f"Esperadas 47 skills, encontradas {len(skills)}")
 
@@ -27,11 +33,11 @@ for path in skills:
         names.add(name.group(1))
     if not re.search(r"(?m)^description:", match.group(1)):
         errors.append(f"{path.parent.name}: description ausente")
-    if "## 6. " not in content:
-        errors.append(f"{path.parent.name}: seção 6 de verificação ausente")
+    if "PROTOCOLO.md" not in content and "## 6." not in content:
+        errors.append(f"{path.parent.name}: referência ao PROTOCOLO.md ou seção de verificação ausente")
 
 if errors:
     print("\n".join("ERRO: " + item for item in errors))
     sys.exit(1)
 
-print(f"OK: {len(skills)} skills válidas com frontmatter e protocolo de verificação.")
+print(f"OK: {len(skills)} skills válidas com frontmatter e alinhadas ao PROTOCOLO.md canônico.")

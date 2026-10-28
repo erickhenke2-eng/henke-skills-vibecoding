@@ -111,6 +111,19 @@ chmod +x install.sh && ./install.sh
 
 ---
 
+---
+
+## 🛡️ Protocolo Canônico & A Regra do Auditor Independente
+
+Regra em prosa não segura agente sob pressão — o que protege código de verdade é **portão mecânico, custódia limpa e auditor independente**.
+
+A Suíte Henke é governada pelo [**`PROTOCOLO.md`**](./PROTOCOLO.md), que define:
+1. **Regra Portão vs Produto**: Quando o teste antigo e o novo requisito conflitam, você conserta o teste — nunca engana os dois com truques de estilo (como `<span class="sr-only">` para forçar teste a passar).
+2. **O Auditor Não Cita, Ele REPRODUZ**: Todo relatório de entrega deve conter um *ledger* de comandos executáveis, e o auditor deve re-executá-los verbatim no terminal.
+3. **Custódia Rígida de Ambiente**: Confirmação obrigatória de branch/worktree, `git status` limpo e variáveis de ambiente apontando para os binários nativos da worktree atual.
+4. **Ressalvas Transparentes**: Proibição de afirmar "100% testado" sem ter rodado a ponta física real; obrigatoriedade da seção *"O que NÃO foi verificado"*.
+5. **O Fluxo dos Dois Agentes**: Nunca use o mesmo agente para codar e se auto-aprovar no mesmo prompt. Use um agente construtor (`henke-code-cirurgico`, `henke-blindagem`) e outro agente perito em conversa separada (`henke-audit-vibecode`) para caçar atalhos e reproduzir as provas.
+
 ## 🔎 Ativação, segurança e verificação
 
 - As skills de análise e implementação podem ser ativadas conforme a tarefa pelo agente, quando a ferramenta suporta descoberta automática. Para ações sensíveis, invoque explicitamente `henke-mem-faxina`, `henke-debug-reversao` ou `henke-ops-deploy`; a execução de remoções, reversões ou publicação ainda requer autorização adequada.
