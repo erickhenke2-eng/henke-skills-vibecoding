@@ -9,7 +9,7 @@ for skill_dir in "$repo_root"/henke-*/; do
   [[ -f "${skill_dir}SKILL.md" ]] && skills+=("$skill_dir")
 done
 if [[ ${#skills[@]} -ne 47 ]]; then
-  printf 'Erro: inventário inesperado (%s skills; esperadas: 47). Instalação cancelada.\\n' "${#skills[@]}" >&2
+  printf 'Erro: inventário inesperado (%s skills; esperadas: 47). Instalação cancelada.\n' "${#skills[@]}" >&2
   exit 1
 fi
 for target in "${targets[@]}"; do mkdir -p "$target"; done
@@ -19,6 +19,6 @@ for skill_dir in "${skills[@]}"; do
     mkdir -p "$target/$slug"
     cp "$skill_dir/SKILL.md" "$target/$slug/SKILL.md"
   done
-  printf 'Instalada: %s\\n' "$slug"
+  printf 'Instalada: %s\n' "$slug"
 done
-printf 'Sucesso: %s skills copiadas para agents, Gemini e Claude.\\n' "${#skills[@]}"
+printf 'Sucesso: %s skills copiadas para agents, Gemini e Claude.\n' "${#skills[@]}"
