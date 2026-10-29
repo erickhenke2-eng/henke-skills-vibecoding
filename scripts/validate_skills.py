@@ -13,9 +13,9 @@ protocolo = root / "PROTOCOLO.md"
 if not protocolo.is_file() or len(protocolo.read_text(encoding="utf-8").strip()) < 100:
     errors.append("PROTOCOLO.md canônico ausente ou vazio na raiz do repositório")
 
-# 2. Valida contagem de skills
-if len(skills) != 47:
-    errors.append(f"Esperadas 47 skills, encontradas {len(skills)}")
+# 2. Valida contagem de skills (49 skills: 47 existentes + henke-skills + henke-prepara)
+if len(skills) != 49:
+    errors.append(f"Esperadas 49 skills, encontradas {len(skills)}")
 
 names = set()
 for path in skills:

@@ -1,4 +1,4 @@
-# ⚡ Suíte Henke — 47 Macro-Skills para Vibecoding de Respeito
+# ⚡ Suíte Henke — 49 Macro-Skills para Vibecoding de Respeito
 
 > **"De um vibecoder para vibecoders: o kit definitivo para a sua IA parar de fazer cagada, não apagar metade do seu projeto e finalmente codar como gente grande."**  
 > *(E vamos ser bem sinceros: a galera de TI 'raiz' adora torcer o nariz e zoar quem vibecoda... mas na primeira sexta-feira às 18h com o servidor caindo, até eles vão clonar esse repositório no sigilo pra salvar o dia).*
@@ -15,7 +15,7 @@ Todo mundo que cria projetos no puro fluxo de vibecoding já passou pelo mesmo p
 3. Você passa 4 dias sem abrir o projeto, volta e **nem você nem a IA lembram** onde pararam ou por que diabos aquele arquivo `temp_v2_teste.ts` existe.
 4. Dá um erro no servidor e a IA tenta 5 chutes aleatórios, quebrando a rota, o banco e a sua paciência.
 
-A **Suíte Henke** nasceu pra acabar de vez com essa palhaçada. São **47 Macro-Skills** desenhadas sob a filosofia de que **o usuário não precisa ser programador de carreira para construir software de nível profissional**:
+A **Suíte Henke** nasceu pra acabar de vez com essa palhaçada. São **49 Macro-Skills** desenhadas sob a filosofia de que **o usuário não precisa ser programador de carreira para construir software de nível profissional**:
 
 * **Você fala como ser humano:** Manda um comando direto no chat tipo `"debuga o chat do meu aplicativo"`, `"organiza essa bagunça de pastas"` ou `"tira essa cara feia de template de IA da tela"`.
 * **A IA opera como Engenheiro Sênior:** A skill assume o volante em 5 fases nos bastidores — lê o diário local, caça a causa raiz sem chutar, aplica a menor alteração cirúrgica possível (Minimal Diff), roda os testes do terminal e anota silenciosamente o que fez no diário de bordo (`.henke/DIARIO.md`).
@@ -24,7 +24,22 @@ A **Suíte Henke** nasceu pra acabar de vez com essa palhaçada. São **47 Macro
 
 ---
 
-## 🧭 As 47 Macro-Skills por Categoria
+## 👑 O Comando Mestre: `/henke-skills` (Um Comando para Governar Todas)
+
+Você **não precisa memorizar** 49 skills nem adivinhar qual chamar primeiro. Basta rodar:
+
+```bash
+/henke-skills "o que você quer fazer"
+```
+
+O **Maestro (`henke-skills`)** assume a postura de Engenheiro Chefe:
+1. **Verificação de Memória Automática:** Se o projeto for novo ou estiver sem memória, ele roda silenciosamente a nova skill [`henke-prepara`](./henke-prepara/SKILL.md) para gerar `.henke/` e a pasta de designs `docs/designs/`.
+2. **Economia Brutal de Tokens:** Verifica se você possui `caveman` ou `ponytail` instalados no ambiente para comprimir saídas e forçar Minimal Diff.
+3. **Despacho da Trilha Exata:** Classifica sua intenção e dispara as skills certas na ordem cronológica perfeita (Concepção ➜ Design EGM ➜ Código Cirúrgico ➜ Auditoria Adversarial ➜ Deploy).
+
+---
+
+## 🧭 As 49 Macro-Skills por Categoria
 
 ### 1. Concepção & Ideias (`henke-plan-*`)
 * [`henke-plan-radar`](./henke-plan-radar/SKILL.md): Radar de referências e scraping na web para alimentar o app com soluções reais.

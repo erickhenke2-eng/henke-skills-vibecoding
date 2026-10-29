@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Instalador da Suíte Henke (Linux / macOS)
-# Espelha as 47 skills em ~/.agents/skills, ~/.gemini/config/skills, ~/.gemini/skills e ~/.claude/skills
+# Espelha as 49 skills em ~/.agents/skills, ~/.gemini/config/skills, ~/.gemini/skills e ~/.claude/skills
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 targets=(
@@ -16,8 +16,8 @@ for skill_dir in "$repo_root"/henke-*/; do
   [[ -f "${skill_dir}SKILL.md" ]] && skills+=("$skill_dir")
 done
 
-if [[ ${#skills[@]} -ne 47 ]]; then
-  printf 'Erro: inventário inesperado (%s skills; esperadas: 47). Instalação cancelada.\n' "${#skills[@]}" >&2
+if [[ ${#skills[@]} -ne 49 ]]; then
+  printf 'Erro: inventário inesperado (%s skills; esperadas: 49). Instalação cancelada.\n' "${#skills[@]}" >&2
   exit 1
 fi
 

@@ -1,5 +1,5 @@
 # Instalador da Suíte Henke (Windows PowerShell)
-# Espelha as 47 skills em ~/.agents/skills, ~/.gemini/config/skills, ~/.gemini/skills e ~/.claude/skills
+# Espelha as 49 skills em ~/.agents/skills, ~/.gemini/config/skills, ~/.gemini/skills e ~/.claude/skills
 $ErrorActionPreference = "Stop"
 $repoRoot = $PSScriptRoot
 $homeDir = [System.Environment]::GetFolderPath('UserProfile')
@@ -12,7 +12,7 @@ $targets = @(
 )
 
 $skills = @(Get-ChildItem -Path $repoRoot -Directory | Where-Object { $_.Name -like "henke-*" -and (Test-Path (Join-Path $_.FullName "SKILL.md")) })
-if ($skills.Count -ne 47) { throw "Inventario inesperado: $($skills.Count) skills. Esperadas: 47. Instalação cancelada." }
+if ($skills.Count -ne 49) { throw "Inventario inesperado: $($skills.Count) skills. Esperadas: 49. Instalação cancelada." }
 
 foreach ($target in $targets) {
     if (-not (Test-Path $target)) {
@@ -29,7 +29,7 @@ if (Test-Path $protoSource) {
     Write-Host "Copiado PROTOCOLO.md canônico para todas as bases de skills." -ForegroundColor Cyan
 }
 
-# 2. Copia as 47 skills
+# 2. Copia as 49 skills
 foreach ($dir in $skills) {
     foreach ($target in $targets) {
         $destination = Join-Path $target $dir.Name
