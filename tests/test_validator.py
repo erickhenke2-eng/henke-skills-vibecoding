@@ -41,7 +41,8 @@ def test_legitimate_repo():
     print("Teste 1: Repositório canônico legítimo deve passar...")
     res = run_validator(repo_root)
     assert res.returncode == 0, f"Falha inesperada no repo legítimo: {res.stdout}\n{res.stderr}"
-    assert "OK: 49 skills válidas" in res.stdout
+    assert "OK: 49 skills com estrutura válida" in res.stdout
+    assert "Semântica e execução não verificadas" in res.stdout
     print("  [PASSOU] Repositório legítimo aprovado com exit code 0.")
 
 def test_astra_repro_1_gutted_protocol():
@@ -106,22 +107,99 @@ def test_astra_repro_4_broken_relative_link():
     finally:
         tmp.cleanup()
 
+def test_f1_fake_link_inside_code_fence_passes():
+    print("Teste 6: F1 — link fictício dentro de code fence/inline code NÃO deve falhar...")
+    tmp = copy_repo_to_temp()
+    try:
+        tmp_path = Path(tmp.name)
+        target_skill = tmp_path / "henke-blindagem" / "SKILL.md"
+        content = target_skill.read_text(encoding="utf-8")
+        content += (
+            "\n\nExemplo documental de sintaxe de link:\n\n"
+            "```markdown\n"
+            "Veja [documento](../nao-existe.md) e [outro](./fantasma/x.md).\n"
+            "```\n\n"
+            "Também inline: `[fake](../fantasma.md)` não é link real.\n"
+        )
+        target_skill.write_text(content, encoding="utf-8")
+        res = run_validator(tmp_path)
+        assert res.returncode == 0, f"F1 falhou: link em fence/inline foi tratado como real: {res.stdout}"
+        print("  [PASSOU] Links dentro de código ignorados (exit code 0).")
+    finally:
+        tmp.cleanup()
+
+def test_f1_same_link_outside_fence_fails():
+    print("Teste 7: F1 (controle) — o MESMO link fora do fence deve falhar...")
+    tmp = copy_repo_to_temp()
+    try:
+        tmp_path = Path(tmp.name)
+        target_skill = tmp_path / "henke-blindagem" / "SKILL.md"
+        content = target_skill.read_text(encoding="utf-8")
+        content += "\n\nVeja [documento](../nao-existe.md) fora de qualquer código.\n"
+        target_skill.write_text(content, encoding="utf-8")
+        res = run_validator(tmp_path)
+        assert res.returncode != 0, "Link quebrado fora de fence passou!"
+        assert "link relativo quebrado" in res.stdout
+        print("  [PASSOU] Rejeitado com sucesso (exit code != 0).")
+    finally:
+        tmp.cleanup()
+
+def test_f2_section6_without_protocol_link_fails():
+    print("Teste 8: F2 — seção '## 6.' sem vínculo canônico ao PROTOCOLO deve falhar...")
+    tmp = copy_repo_to_temp()
+    try:
+        tmp_path = Path(tmp.name)
+        target_skill = tmp_path / "henke-blindagem" / "SKILL.md"
+        content = target_skill.read_text(encoding="utf-8")
+        idx = content.index("## 6.")
+        # Troca o vínculo canônico por link válido para outro arquivo existente.
+        tail = content[idx:].replace(
+            "[PROTOCOLO.md](../PROTOCOLO.md)",
+            "[outra skill](../henke-arch-banco/SKILL.md)"
+        )
+        assert tail != content[idx:], "Vínculo canônico não encontrado na seção 6 para o teste"
+        target_skill.write_text(content[:idx] + tail, encoding="utf-8")
+        res = run_validator(tmp_path)
+        assert res.returncode != 0, "Seção 6 sem link ao PROTOCOLO passou!"
+        assert "sem link markdown resolvível para '../PROTOCOLO.md'" in res.stdout
+        print("  [PASSOU] Rejeitado com sucesso (exit code != 0).")
+    finally:
+        tmp.cleanup()
+
+def test_f5_missing_canonical_section_fails():
+    print("Teste 9: F5 — skill sem a seção operacional '## 3.' deve falhar...")
+    tmp = copy_repo_to_temp()
+    try:
+        tmp_path = Path(tmp.name)
+        target_skill = tmp_path / "henke-blindagem" / "SKILL.md"
+        content = target_skill.read_text(encoding="utf-8")
+        content, count = re.subn(r"^## 3\.", "### 3.", content, count=1, flags=re.M)
+        assert count == 1, "Seção '## 3.' não encontrada para adulterar"
+        target_skill.write_text(content, encoding="utf-8")
+        res = run_validator(tmp_path)
+        assert res.returncode != 0, "Skill sem '## 3.' passou!"
+        assert "seção operacional canônica '## 3.' ausente" in res.stdout
+        print("  [PASSOU] Rejeitado com sucesso (exit code != 0).")
+    finally:
+        tmp.cleanup()
+
 def test_installer_aborts_on_invalid_package():
-    print("Teste 6: Instalador aborta antes de escrever se o pacote for inválido...")
+    print("Teste 10: Instalador aborta antes de escrever se o pacote for inválido...")
     tmp = copy_repo_to_temp()
     try:
         tmp_path = Path(tmp.name)
         # Remove PROTOCOLO.md
         (tmp_path / "PROTOCOLO.md").unlink()
+        # Usa o instalador da plataforma e um destino temporário explícito.
         shutil.copy2(repo_root / "install.ps1", tmp_path / "install.ps1")
-        # Roda install.ps1 com dry-run no repo corrompido
-        ps_res = subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "install.ps1"), "-DryRun"],
-            cwd=str(tmp_path),
-            capture_output=True,
-            text=True,
-            errors="replace"
-        )
+        shutil.copy2(repo_root / "install.sh", tmp_path / "install.sh")
+        destination = tmp_path / "destination"
+        if sys.platform == "win32":
+            command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "install.ps1"), "-UserRoot", str(destination)]
+        else:
+            command = ["bash", str(tmp_path / "install.sh"), "--user-root", str(destination)]
+        ps_res = subprocess.run(command, cwd=str(tmp_path), capture_output=True, text=True, errors="replace")
+        assert not destination.exists(), "Pacote inválido criou destinos!"
         assert ps_res.returncode != 0, "O instalador deveria ter abortado com exit code != 0!"
         print("  [PASSOU] Instalador abortou com sucesso antes de modificar destinos.")
     finally:
@@ -133,5 +211,9 @@ if __name__ == "__main__":
     test_astra_repro_2_invalid_yaml_bracket()
     test_astra_repro_3_duplicate_name_key()
     test_astra_repro_4_broken_relative_link()
+    test_f1_fake_link_inside_code_fence_passes()
+    test_f1_same_link_outside_fence_fails()
+    test_f2_section6_without_protocol_link_fails()
+    test_f5_missing_canonical_section_fails()
     test_installer_aborts_on_invalid_package()
-    print("\nTodos os 6 testes de validação e instalação passaram com perfeição!")
+    print("\nOs 10 testes de estrutura e rejeição de pacote inválido passaram.")

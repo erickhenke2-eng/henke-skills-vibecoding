@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """
-Validação estrutural e semântica da Suíte Henke (PROTOCOLO v3.1.1).
+Validação estrutural da Suíte Henke (PROTOCOLO v3.1.1).
 Endurecido para rejeitar adulterações: YAML inválido, chaves duplicadas,
-links quebrados, protocolo vazio ou simulado, e suíte esvaziada.
+links quebrados e ausência de marcadores mínimos. Não avalia semântica.
 """
 from pathlib import Path
 import re
 import sys
-import yaml
-from yaml.constructor import ConstructorError
+
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
+
+try:
+    import yaml
+    from yaml.constructor import ConstructorError
+except ImportError:
+    sys.exit("Dependência ausente. Execute: python -m pip install -r requirements.txt")
 
 class UniqueKeyLoader(yaml.SafeLoader):
     """YAML Loader que rejeita chaves duplicadas no mesmo mapeamento."""
@@ -25,6 +30,32 @@ class UniqueKeyLoader(yaml.SafeLoader):
                 raise ConstructorError(f"Chave duplicada detectada no YAML: '{key}'")
             mapping[key] = self.construct_object(value_node, deep=deep)
         return mapping
+
+def strip_code(text: str) -> str:
+    """Remove fenced code blocks e inline code antes da análise de links/seções.
+
+    Conteúdo dentro de ```...``` / ~~~...~~~ ou `...` é documentação exemplificada,
+    não markdown operacional: links ali não devem ser resolvidos fisicamente (F1).
+    """
+    out = []
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    for line in text.splitlines(keepends=True):
+        match = re.match(r"\s*(`{3,}|~{3,})", line)
+        if match:
+            marker = match.group(1)
+            if not in_fence:
+                in_fence = True
+                fence_char, fence_len = marker[0], len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_len:
+                in_fence = False
+            continue
+        if not in_fence:
+            out.append(line)
+    # Inline code spans: `...`, ``...`` etc. (fechamento com o mesmo nº de crases)
+    return re.sub(r"(`+)[^`\n]*?\1", "", "".join(out))
+
 
 root = Path(__file__).resolve().parents[1]
 skills = sorted(p for p in root.glob("henke-*/SKILL.md") if p.is_file())
@@ -99,12 +130,32 @@ for path in skills:
     if len(body.strip()) < 200:
         errors.append(f"{slug}: corpo operacional esvaziado ou insuficiente (< 200 caracteres)")
 
-    # 6. Validação de seção de verificação calibrada
-    if "## 6." not in body or "- [ ]" not in body:
-        errors.append(f"{slug}: seção '## 6.' ou checklist de verificação (- [ ]) ausente")
+    # Corpo sem código: exemplos em fences não contam como estrutura nem geram links.
+    body_nocode = strip_code(body)
 
-    # 7. Resolução de links relativos em Markdown (rejeita links quebrados)
-    markdown_links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", body)
+    # 6. Estrutura mínima anti-esvaziamento: seções canônicas ## 1. a ## 6. (F5)
+    for n in range(1, 7):
+        if not re.search(rf"^## {n}\.", body_nocode, flags=re.M):
+            errors.append(f"{slug}: seção operacional canônica '## {n}.' ausente")
+            break
+    if "- [ ]" not in body_nocode:
+        errors.append(f"{slug}: checklist de verificação (- [ ]) ausente")
+
+    # 7. Vínculo canônico: seção ## 6. deve conter link markdown para o PROTOCOLO (F2)
+    section6 = re.search(r"^## 6\..*$", body_nocode, flags=re.M)
+    if section6:
+        section6_text = body_nocode[section6.start():]
+        proto_resolved = protocolo.resolve()
+        has_proto_link = any(
+            (path.parent / t.strip().split("#")[0]).resolve() == proto_resolved
+            for _, t in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", section6_text)
+            if t.strip().split("#")[0] and not t.strip().startswith(("http://", "https://"))
+        )
+        if not has_proto_link:
+            errors.append(f"{slug}: seção '## 6.' sem link markdown resolvível para '../PROTOCOLO.md'")
+
+    # 8. Resolução de links relativos em Markdown (rejeita links quebrados; F1: ignora código)
+    markdown_links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", body_nocode)
     for link_text, link_target in markdown_links:
         link_clean = link_target.strip().split("#")[0]
         if not link_clean or link_clean.startswith(("http://", "https://", "mailto:")):
@@ -132,4 +183,4 @@ if errors:
         print(f"  [ERRO] {err}")
     sys.exit(1)
 
-print(f"OK: {len(skills)} skills válidas (YAML estrito, links resolvidos, seções calibradas e PROTOCOLO.md íntegro).")
+print(f"OK: {len(skills)} skills com estrutura válida (YAML, links locais e marcadores). Semântica e execução não verificadas.")

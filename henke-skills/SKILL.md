@@ -49,7 +49,7 @@ Sua missão é **avaliar a tarefa com visão sistêmica de 10.000 pés**, determ
 
 1. **Defina o Modo:** A intenção é interrogativa ("como faço?", "explica") ou de auditoria? Resolva para **`ANALISAR`**. É desenho de arquitetura? Resolva para **`PLANEJAR`**. É implementação ou correção de código? Resolva para **`EXECUTAR`**.
 2. **Checagem de Memória:** Se estiver em `PLANEJAR`/`EXECUTAR` e a pasta `.henke/` não existir, declare e execute `henke-prepara`.
-3. **Economia de Tokens:** Leia `.henke/CONFIG.json`. Respeite a preferência `"off"` caso configurada (nunca force ativação se o usuário desativou). Se `"auto"` e `caveman`/`ponytail` existirem, adote Minimal Diff estrito e respostas concisas.
+3. **Economia de Tokens:** Leia `economia_tokens.caveman` e `economia_tokens.ponytail` (`auto|on|off`). Aplique a precedência e migração de `henke-prepara` (§Fase 2): instrução atual, CONFIG.local.json, CONFIG.json, `auto`. Respeite `off`; `on` e `auto` só ativam skills invocáveis nesta sessão. Não crie arquivos durante auditoria para migrar preferências.
 
 ### Fase 2: Seleção de Fase & Despacho por Domínio
 
@@ -71,7 +71,7 @@ flowchart TD
 - **Domínio UI & Visual Anti-Slop:** Problemas visuais, clichês de IA, cores, fontes, estados ou responsividade ➜ despacha `henke-ui-antislop`, `henke-ui-paleta`, `henke-ui-tipografia`, `henke-ui-estados`, `henke-ui-feedback`, `henke-ui-responsivo` ou `henke-ui-auditoria`.
 - **Domínio Planejamento & Produto:** Desejos soltos, mercado, MVP, fluxos ➜ despacha `henke-plan-radar`, `henke-plan-ideias`, `henke-plan-mvp`, `henke-plan-fluxo`, `henke-plan-destrava` ou `henke-plan-historias`.
 - **Domínio Arquitetura & Estrutura:** Escolha de libs, organização de pastas, banco de dados, monorepo, desmembramento ➜ despacha `henke-arch-stack`, `henke-arch-pastas`, `henke-arch-banco`, `henke-arch-monorepo`, `henke-arch-seguranca` ou `henke-arch-desmembrar`.
-- **Domínio Construção & Vibecoding:** Implementação cirúrgica, contratos front-back, mocks, forms, auth, integrações, 3D ➜ despacha `henke-code-ponte`, `henke-code-mock`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-formulario`, `henke-code-autentica`, `henke-code-integracao` ou `henke-code-3d-scene`.
+- **Domínio Construção & Vibecoding:** Implementação cirúrgica, contratos front-back, mocks, forms, auth, integrações, 3D, documentação de código ➜ despacha `henke-code-ponte`, `henke-code-mock`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-formulario`, `henke-code-autentica`, `henke-code-integracao`, `henke-code-comentarios` ou `henke-code-3d-scene`.
 - **Domínio Investigação & Debug:** Erros em execução, falhas misteriosas, problemas de rede, logs ➜ despacha `henke-debug-raiz`, `henke-debug-frontend`, `henke-debug-backend`, `henke-debug-rede`, `henke-debug-console` ou `henke-debug-reversao`.
 - **Domínio Auditoria & Sanidade:** Avaliação de qualidade, anti-glazing, checagem de build/testes, caça a hacks ➜ despacha `henke-audit-vibecode`, `henke-audit-seguranca` ou `henke-debug-sanidade` (modo inspeção, sem mutação).
 - **Domínio Refatoração:** Código duplicado ou nomes confusos ➜ despacha `henke-refactor-duplicado` ou `henke-refactor-nomes`.
@@ -86,7 +86,7 @@ flowchart TD
 
 ### Fase 4: Registro da Execução (Handoff por Run)
 
-Grave o registro em `.henke/runs/<run_id>.json` contendo:
+Para tarefas não triviais, grave o registro em `.henke/runs/<run_id>.json` contendo (em auditoria, use diretório externo ao objeto auditado):
 - `modo`, `skills_acionadas`, `escopo_tocado`.
 - `checks`: lista dos comandos físicos executados com códigos de retorno.
 - `outcome`: estado derivado (`verified`, `failed`, `blocked`, `unverified`).

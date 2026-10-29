@@ -139,7 +139,7 @@ Todo planejamento gera um arquivo de especificação estruturado em `docs/design
 ### Fase 5: Registro de Memória, Hash da Spec & Resposta Humana
 
 1. **Vínculo da Spec (PROTOCOLO v3.1 §3.3):**
-   Calcule o SHA256 do arquivo gerado em `docs/designs/<feature>.md` e registre em `.henke/ESTADO.json`.
+   Calcule o SHA256 do arquivo gerado em `docs/designs/<feature>.md` e registre no registro externo da auditoria ou em `.henke/runs/<run_id>.json` fora de auditoria.
 2. Atualize `.henke/DIARIO.md`:
    ```markdown
    ## AAAA-MM-DD — Spec & Tarefas EGM
@@ -181,5 +181,5 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Entrega Real (Zero Stubs)**: Funcionalidade entregue de verdade até a ponta, sem cascas vazias, mocks permanentes ou comentários delegando a solução para depois.
 - [ ] **Regra Portão vs Produto**: Se o teste conflitou com a nova exigência, o teste foi corrigido — sem hacks como `.sr-only`, textos invisíveis ou dados falsos.
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
-- [ ] **Custódia de Ambiente**: Branch e worktree corretas, `git status` limpo e variáveis de ambiente apontando para os binários compilados na worktree ativa.
+- [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).

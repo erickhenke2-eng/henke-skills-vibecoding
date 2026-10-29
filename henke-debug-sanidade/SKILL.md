@@ -123,7 +123,7 @@ npm audit  # ou equivalente
 - **Regra de Ouro (PROTOCOLO v3.1 §1):** Quando executada em modo `ANALISAR` ou dentro de uma trilha de Auditoria, esta skill é **estritamente de inspeção**. É **PROIBIDO** alterar código, desativar asserções ou "corrigir agora" para passar no portão. O auditor relata; quem conserta é uma etapa posterior.
 - **🔴 Vermelho**: documenta com evidência física (comando exato, saída e linha de falha). Agenda correção cirúrgica para a etapa de `EXECUTAR`.
 - **🟡 Amarelo**: documenta o warning e impacto potencial.
-- **Registre** em `.henke/ESTADO.json` os checks executados e seus códigos de retorno. Se chamada em modo `EXECUTAR` com pedido explícito de correção, despache a correção cirúrgica como uma etapa separada que **invalida a inspeção anterior e exige novo check-up**.
+- **Registre** no registro externo da auditoria ou em `.henke/runs/<run_id>.json` fora de auditoria os checks executados e seus códigos de retorno. Se chamada em modo `EXECUTAR` com pedido explícito de correção, despache a correção cirúrgica como uma etapa separada que **invalida a inspeção anterior e exige novo check-up**.
 
 ### Fase 5: Relatório Final & Resposta Humana
 
@@ -169,5 +169,5 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Entrega Real (Zero Stubs)**: Funcionalidade entregue de verdade até a ponta, sem cascas vazias, mocks permanentes ou comentários delegando a solução para depois.
 - [ ] **Regra Portão vs Produto**: Se o teste conflitou com a nova exigência, o teste foi corrigido — sem hacks como `.sr-only`, textos invisíveis ou dados falsos.
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
-- [ ] **Custódia de Ambiente**: Branch e worktree corretas, `git status` limpo e variáveis de ambiente apontando para os binários compilados na worktree ativa.
+- [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).

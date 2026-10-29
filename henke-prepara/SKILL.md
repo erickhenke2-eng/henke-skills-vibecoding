@@ -62,11 +62,11 @@ Crie a pasta `.henke/` na raiz do projeto (se não existir) com os 4 artefatos f
 4. **`.henke/CONFIG.json`** (Configurações do Runtime Henke):
    ```json
    {
-     "versao_protocolo": "3.0",
+     "versao_protocolo": "3.1.1",
      "stack": "detectada automaticamente",
      "economia_tokens": {
-       "caveman_ativo": false,
-       "ponytail_ativo": false,
+       "caveman": "auto",
+       "ponytail": "auto",
        "perguntar_novamente": true
      },
      "auditoria_adversarial": {
@@ -75,6 +75,11 @@ Crie a pasta `.henke/` na raiz do projeto (se não existir) com os 4 artefatos f
      }
    }
    ```
+
+Preferências pessoais ficam em `.henke/CONFIG.local.json`, com a mesma estrutura de `economia_tokens`; inclua esse arquivo no `.gitignore`. Precedência por campo: instrução atual do usuário, CONFIG.local.json, CONFIG.json, `auto`.
+- Migre `caveman_ativo`/`ponytail_ativo` legados para `caveman`/`ponytail`: `false` vira `off`, `true` vira `on`, somente se o campo novo estiver ausente. Preserve os demais dados.
+- Valores válidos: `auto|on|off`. Valor desconhecido exige correção explícita; nunca trate como ativado.
+- Disponibilidade (`detectado`) é observação da sessão, não preferência persistida. Tanto `auto` quanto `on` dependem de a skill ser invocável. Se `on` estiver indisponível, reporte a limitação.
 
 ### Fase 3: Estrutura de Especificações (Padrão Google EGM)
 
@@ -85,19 +90,19 @@ Crie a pasta `docs/designs/` na raiz do projeto:
 ### Fase 4: Varredura de Economia de Tokens (`caveman` / `ponytail`)
 
 Verifique se o harness do usuário possui as skills de compressão de tokens disponíveis:
-- Cheque a invocabilidade de `caveman` e `ponytail` no harness atual (`~/.agents/skills/`, `~/.gemini/config/skills/`, `~/.claude/skills/`).
+- Consulte o catálogo de skills invocáveis do harness atual. A presença de uma pasta não prova disponibilidade.
 - **Respeito Estrito à Preferência (PROTOCOLO v3.1 §7):**
   - Se a preferência do usuário for `"off"`, ela é soberana e **nunca** é sobrescrita pela autodetecção.
   - Se for `"auto"`, `detectado: true` ativa a compressão; `detectado: false` mantém inativo.
   - Se ambos estiverem ativos, `ponytail` tem precedência sobre `caveman`.
 - **Se NÃO encontradas e `"perguntar_novamente": true`:**
   Apresente ao usuário de forma amigável e sem números fabricados:
-  > *"💡 **Economia de Tokens:** Notei que você não possui as skills `caveman` (respostas concisas) ou `ponytail` (minimal diff estrito) instaladas no seu ambiente. Elas ajudam a reduzir o contexto e acelerar a resposta do agente. Deseja ativá-las quando disponíveis, ou prefere manter desativado ('off')? (Vou registrar sua escolha em `.henke/CONFIG.json` para não perguntar novamente)."*
+  > *"💡 **Economia de Tokens:** Notei que você não possui as skills `caveman` (respostas concisas) ou `ponytail` (minimal diff estrito) instaladas no seu ambiente. Elas ajudam a reduzir o contexto e acelerar a resposta do agente. Deseja ativá-las quando disponíveis, ou prefere manter desativado ('off')? (Vou registrar sua escolha em `.henke/CONFIG.local.json` para não perguntar novamente)."*
 
 ### Fase 5: Check-in de Custódia Inicial & Resposta Humana
 
-1. Rode `git status` para verificar se o repositório está limpo.
-2. Adicione `.henke/` e `docs/designs/` ao Git (ou verifique se `.gitignore` precisa de ajustes).
+1. Rode `git status` e compare com o baseline inicial; preserve as mudanças pré-existentes.
+2. Verifique o `.gitignore` para excluir CONFIG.local.json; stage ou commit somente quando solicitado.
 3. Responda em português simples e direto:
    > *"Repositório preparado com sucesso! 🚀\n- Stack detectada: [Stack]\n- Memória criada em `.henke/` (`MAPA.md`, `DECISOES.md`, `DIARIO.md`, `CONFIG.json`)\n- Diretório de designs criado em `docs/designs/`\nO projeto está blindado e pronto para receber qualquer comando via `/henke-skills`!"*
 
@@ -106,7 +111,7 @@ Verifique se o harness do usuário possui as skills de compressão de tokens dis
 ## 4. Regras Negativas (Linhas Vermelhas)
 
 - **PROIBIDO** sobrescrever ou apagar dados de um `.henke/` preexistente. Faça merge limpo.
-- **PROIBIDO** criar arquivos desnecessários fora de `.henke/` e `docs/designs/`.
+- **PROIBIDO** criar arquivos desnecessários fora de `.henke/` e `docs/designs/`, exceto a exclusão de CONFIG.local.json no `.gitignore`.
 - **PROIBIDO** assumir ferramentas de teste ou scripts sem verificar a existência física deles nos manifests do projeto.
 
 ## 5. Integração com a Suíte Henke

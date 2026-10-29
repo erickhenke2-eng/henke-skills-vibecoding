@@ -113,6 +113,7 @@ Clone o repositório e rode o instalador de 1 comando:
 ```powershell
 git clone https://github.com/erickhenke2-eng/henke-skills-vibecoding.git
 cd henke-skills-vibecoding
+python -m pip install -r requirements.txt
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 > O script copia as skills para os diretórios oficiais: `~/.agents/skills` (Codex/padrão aberto), `~/.gemini/config/skills` (Antigravity/Gemini) e `~/.claude/skills` (Claude Code).
@@ -121,6 +122,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```bash
 git clone https://github.com/erickhenke2-eng/henke-skills-vibecoding.git
 cd henke-skills-vibecoding
+python3 -m pip install -r requirements.txt
 chmod +x install.sh && ./install.sh
 ```
 
@@ -135,7 +137,7 @@ Regra em prosa não segura agente sob pressão — o que protege código de verd
 A Suíte Henke é governada pelo [**`PROTOCOLO.md`**](./PROTOCOLO.md), que define:
 1. **Regra Portão vs Produto**: Quando o teste antigo e o novo requisito conflitam, você conserta o teste — nunca engana os dois com truques de estilo (como `<span class="sr-only">` para forçar teste a passar).
 2. **O Auditor Não Cita, Ele REPRODUZ**: Todo relatório de entrega deve conter um *ledger* de comandos executáveis, e o auditor deve re-executá-los verbatim no terminal.
-3. **Custódia Rígida de Ambiente**: Confirmação obrigatória de branch/worktree, `git status` limpo e variáveis de ambiente apontando para os binários nativos da worktree atual.
+3. **Custódia Rígida de Ambiente**: Confirmação obrigatória de branch/worktree, baseline do usuário preservado e variáveis de ambiente apontando para os binários nativos da worktree atual.
 4. **Ressalvas Transparentes**: Proibição de afirmar "100% testado" sem ter rodado a ponta física real; obrigatoriedade da seção *"O que NÃO foi verificado"*.
 5. **O Fluxo dos Dois Agentes**: Nunca use o mesmo agente para codar e se auto-aprovar no mesmo prompt. Use um agente construtor (`henke-code-cirurgico`, `henke-blindagem`) e outro agente perito em conversa separada (`henke-audit-vibecode`) para caçar atalhos e reproduzir as provas.
 
@@ -144,7 +146,7 @@ A Suíte Henke é governada pelo [**`PROTOCOLO.md`**](./PROTOCOLO.md), que defin
 - As skills de análise e implementação podem ser ativadas conforme a tarefa pelo agente, quando a ferramenta suporta descoberta automática. Para ações sensíveis, invoque explicitamente `henke-mem-faxina`, `henke-debug-reversao` ou `henke-ops-deploy`; a execução de remoções, reversões ou publicação ainda requer autorização adequada.
 - Skills são instruções para o agente, **não garantia de ausência de bugs**. Revise o diff e execute testes relevantes antes de aceitar mudanças.
 - O diário `.henke/DIARIO.md` é opcional e deve registrar trabalho relevante, não cada ajuste trivial.
-- Confira o inventário com `python3 scripts/validate_skills.py` (no Windows, use `py scripts/validate_skills.py`). O script usa apenas a biblioteca padrão de Python.
+- Confira o inventário com `python3 scripts/validate_skills.py` (no Windows, use `py scripts/validate_skills.py`). Requer Python 3.11+ e PyYAML (`python -m pip install -r requirements.txt`). A aprovação é estrutural; não certifica o comportamento das skills.
 - Para atualizar uma instalação por cópia, faça `git pull` e execute o instalador novamente.
 
 ---
@@ -152,3 +154,9 @@ A Suíte Henke é governada pelo [**`PROTOCOLO.md`**](./PROTOCOLO.md), que defin
 ## 📄 Licença
 
 Distribuído sob a licença **MIT**. Veja [`LICENSE`](./LICENSE) para mais detalhes.
+
+### Recuperação da instalação
+
+Os dois instaladores usam `scripts/install_skills.py`: validam, preparam cópias e backups e restauram arquivos em caso de erro recuperável. Arquivos de outras skills são preservados. Para testar sem alterar sua instalação, use `--user-root <diretório>` no Bash ou `-UserRoot <diretório>` no PowerShell.
+
+A troca é atômica por arquivo; os quatro destinos não formam uma transação resistente a queda de energia ou encerramento forçado. Não execute instaladores concorrentes no mesmo destino. Backups são preservados e seus caminhos informados se o rollback falhar.

@@ -30,7 +30,7 @@ Regras:
 - **[PROSA]** Auditoria produz achados, nunca correções. Uma correção é **nova etapa** e **invalida a revisão anterior** — exige re-auditoria.
 - **[PROSA]** `henke-prepara` só roda em PLANEJAR/EXECUTAR, e nunca "silenciosamente": declara o que vai criar antes de criar.
 - **[PROSA]** A trilha de auditoria só pode conter skills em modo inspeção. `henke-debug-sanidade` dentro de auditoria opera **sem a Fase 4** ("corrige agora") — relata, não toca.
-- **Exceção de escrita para auditoria (reprodução de evidência):** o auditor PODE executar testes e gerar artefatos — desde que em **cópia isolada** do objeto auditado (worktree/cópia descartável) e com evidências gravadas **fora** dele (`/tmp` ou `.henke/runs/`). É proibido qualquer escrita no objeto auditado: nem cache de teste, nem manifesto, nem correção.
+- **Exceção de escrita para auditoria (reprodução de evidência):** o auditor PODE executar testes e gerar artefatos — desde que em **cópia isolada** do objeto auditado (worktree/cópia descartável) e com evidências gravadas **fora** dele (diretório temporário externo ou `<evidencias-externas>/<run_id>/`). É proibido qualquer escrita no objeto auditado: nem cache de teste, nem manifesto, nem correção.
 
 ---
 
@@ -50,7 +50,7 @@ Regras:
   "checks": [{"cmd": "...", "exit": 0}],
   "achados_pendentes": 0,
   "capacidades": {"subagentes": true},
-  "independent_review": "available|unavailable"
+  "review_status": "goldfish_certified|goldfish_unavailable|not_required"
 }
 ```
 
@@ -78,7 +78,7 @@ Regras:
 
 ### 3.2 O Peixinho (Goldfish) — só existe com isolamento comprovável
 - **Com subagentes nativos** (Devin `run_subagent`, Claude `Task`, equivalentes): spawnar com envelope fixo = spec + `git diff` + checklist. **Proibido** incluir transcript, conclusões ou autoavaliação do implementador.
-- **Sem subagentes**: **HARD STOP** (padrão upstream EGM). Registrar `independent_review=unavailable` no ESTADO.json, imprimir o comando para o usuário abrir sessão zerada, encerrar a trilha como `blocked`. Permitida revisão same-context apenas como **preliminar**, rotulada: *"revisão same-context — NÃO é certificação Goldfish"*.
+- **Sem subagentes**: **HARD STOP** (padrão upstream EGM). Registrar `review_status=goldfish_unavailable` no registro `.henke/runs/<run_id>.json`, imprimir o comando para o usuário abrir sessão zerada, encerrar apenas a etapa que exige certificação como indisponível; não bloquear tarefas com `review_status=not_required`. Permitida revisão same-context apenas como **preliminar**, rotulada: *"revisão same-context — NÃO é certificação Goldfish"*.
 - "Nova sessão de terminal" **não comprova** isolamento: o harness pode injetar memórias, AGENTS.md e instruções locais. Vale apenas se o operador confirmar explicitamente contexto limpo.
 - **[MECÂNICO → A CONSTRUIR]** O manifesto registra `capacidades.subagentes` detectado por sessão, não presumido.
 
@@ -101,7 +101,7 @@ Regras:
 
 ## 5. Custódia: baseline preservado, não "git limpo"
 
-- **[MECÂNICO → A CONSTRUIR]** `henke_gate.py` registra baseline no início: `git rev-parse --show-toplevel`, branch, HEAD, índice e untracked. O critério de saída é **"zero alterações inexplicadas"**: sujeira pré-existente do usuário permanece intacta; sujeira da task é contabilizada no relatório.
+- **[MECÂNICO]** `scripts/henke_gate.py` registra baseline no início: `git rev-parse --show-toplevel`, branch, HEAD, índice e untracked (hash de conteúdo por arquivo). O critério de saída é **"zero alterações inexplicadas"**: sujeira pré-existente do usuário permanece intacta; sujeira da task é contabilizada no relatório e deve pertencer ao escopo declarado (`--scope`).
 - **[PROSA]** `git status` limpo **não autoriza** commit, stash, reset ou delete. Um patch solicitado pode legitimamente terminar sem commit.
 - Binários nativos: path não prova origem — um fóssil pode estar dentro da worktree certa.
 - **[A CONSTRUIR]** Vincular binário a `sha256` + inputs + build verificado (recompilar ou comparar hash com artefato do último build registrado).
@@ -122,7 +122,7 @@ Regras:
 ## 7. Economia de Tokens (sem métrica fabricada)
 
 - **[PROSA]** Minimal Diff é default; **desmembramento por contagem de linhas não é drive-by**: fatiar arquivo >500 linhas é uma *tarefa planejada separada* (Trilha própria), nunca embutida numa correção cirúrgica — resolve o conflito interno com §Minimal Diff.
-- Orçamento de input: cada skill lê `ESTADO.json` + **apenas** os docs de memória relevantes à trilha. Proibido ler `.henke/` inteiro por default.
+- Orçamento de input: cada skill lê o registro da execução `.henke/runs/<run_id>.json` + **apenas** os docs de memória relevantes à trilha. Proibido ler `.henke/` inteiro por default.
 - `DIARIO.md` tem rotação: consolidado periodicamente por `henke-mem-diario` (despachada pelo Maestro), nunca append infinito.
 - `CONFIG.json`: preferência `auto|on|off` separada de `detectado: bool`. `off` vence autodetecção; detecção = **invocabilidade no harness atual**, não existência de pasta; revalidar por sessão; preferências locais vivem em `.henke/CONFIG.local.json` (não commitado); precedência `ponytail > caveman` quando ambos ativos.
 - **[PROSA]** Proibido citar percentuais de economia sem benchmark versionado no repo.
@@ -132,7 +132,7 @@ Regras:
 ## 8. Loops, Rework & Amplificação
 
 - Ciclo auditoria→correção: `MAX_REWORK = 2`. Após, escalar ao humano com a lista de achados restantes.
-- Convergência: zero 🔴/🟠 ou débito aceito por escrito no `ESTADO.json`.
+- Convergência: zero 🔴/🟠 ou débito aceito por escrito no registro da execução `.henke/runs/<run_id>.json`.
 - **[PROSA]** Seleção por necessidade: correção de CSS não dispara `code-ponte` + `blindagem`; trilhas são fases, e dentro da fase escolhem-se skills **do domínio tocado**. Pipelines fixos que executam todas as skills da lista independente de contexto estão proibidos. É este mecanismo — não sequências mais longas — que deve alcançar as famílias de domínio (`ui-*`, `mem-*`, `arch-*`, `refactor-*) que a taxonomia por fase não despacha.
 - **Proporcionalidade:** alteração trivial (< ~15 linhas, sem superfície arquitetural, sem spec requerida pelo usuário) dispensa manifesto e spec — mantém apenas ledger + baseline. Impor burocracia a ajuste pequeno incentiva bypass do sistema inteiro.
 - Evidência reutilizável apenas enquanto os inputs permanecerem iguais (mesmo conteúdo-hash, mesma spec-hash).
@@ -154,8 +154,8 @@ Todo relatório de entrega contém, sem exceção:
 | Portão | Bloqueia quando | Status |
 |---|---|---|
 | `validate_skills.py` (endurecido) | YAML inválido, chave duplicada, descrição vazia, link quebrado, inventário divergente, `requires` sem produtor, template sem ressalvas, mensagem de sucesso descrevendo só o que foi validado | **[EXISTENTE, a endurecer — um validador, não dois]** |
-| Instaladores | Skill inválida, protocolo ausente, hash divergente, escrita parcial (validar → pacote temporário → publicar com rollback; remover só arquivos do manifesto) | **[A CONSTRUIR]** |
-| `henke_gate.py` | Baseline violado, branch/worktree errada, binário sem proveniência | **[A CONSTRUIR]** |
+| Instaladores | Skill inválida, protocolo ausente, hash divergente, escrita parcial (validar → pacote temporário → publicar com rollback; remover só arquivos do manifesto) | **[EXISTENTE: staging e rollback; sem garantia contra encerramento forçado]** |
+| `henke_gate.py` | Baseline violado, branch/worktree errada, commit não autorizado, mutação fora do escopo | **[EXISTENTE]** |
 | `spec_drift.py` | Diff tocou arquivo fora do escopo da spec; spec-hash alterado pós-aprovação | **[A CONSTRUIR]** |
 | `audit_ledger.py` | Comando em denylist, snapshot divergente, 0 testes descobertos | **[A CONSTRUIR]** |
 | `evals/` canários | Regressão de recall do auditor (fixtures: cheat `.sr-only`, repo sujo, binário fóssil, spec-drift, ledger malicioso) | **[A CONSTRUIR]** |
@@ -176,7 +176,7 @@ Nenhum portão prova que a LLM nunca alucinará. Eles tornam violações especí
 - [ ] Modo declarado e nunca ampliado por transição.
 - [ ] Run registrado em `.henke/runs/<run_id>.json`; `outcome` e `review_status` derivados (não declarados).
 - [ ] Spec em `docs/designs/` com hash vinculado à aprovação.
-- [ ] Goldfish isolado comprovado **ou** `independent_review=unavailable` registrado.
+- [ ] Goldfish isolado comprovado **ou** `review_status=goldfish_unavailable` registrado.
 - [ ] Baseline preservado; nenhuma alteração inexplicada.
 - [ ] LEDGER.json com comandos inspecionados antes de re-executar.
 - [ ] Seção "O que NÃO foi verificado" preenchida.

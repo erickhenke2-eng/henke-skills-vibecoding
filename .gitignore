@@ -12,3 +12,6 @@ __pycache__/
 .venv/
 dist/
 build/
+
+# Preferências pessoais do harness
+.henke/CONFIG.local.json

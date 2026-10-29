@@ -28,13 +28,16 @@ jobs:
       - name: Instalar Dependências
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml
+          python -m pip install -r requirements.txt
 
       - name: Executar Validador Estrito da Suíte
         run: python scripts/validate_skills.py
 
       - name: Executar Bateria de Testes Adversariais
-        run: python tests/test_validator.py
+        run: |
+          python tests/test_validator.py
+          python tests/test_install.py
+          python tests/test_gate.py
 
       - name: Testar Dry-Run do Instalador (Linux/macOS)
         if: runner.os == 'Linux'
