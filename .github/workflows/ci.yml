@@ -1,0 +1,45 @@
+name: CI Suíte Henke
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    name: Validação de Integridade & Canários
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Instalar Dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Executar Validador Estrito da Suíte
+        run: python scripts/validate_skills.py
+
+      - name: Executar Bateria de Testes Adversariais
+        run: python tests/test_validator.py
+
+      - name: Testar Dry-Run do Instalador (Linux/macOS)
+        if: runner.os == 'Linux'
+        run: bash install.sh --dry-run
+
+      - name: Testar Dry-Run do Instalador (Windows)
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -DryRun

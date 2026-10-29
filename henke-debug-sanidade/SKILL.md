@@ -118,16 +118,22 @@ npm audit  # ou equivalente
 - Lint error em [arquivo]: [o que]
 ```
 
-### Fase 4: Correção dos Problemas
+### Fase 4: Diagnóstico e Isolamento de Problemas (Sem Mutações)
 
-- **🔴 Vermelho**: corrige agora — build quebrado, teste falhando, erro crítico.
-- **🟡 Amarelo**: documenta e agenda — warning que não impede, dependência a atualizar.
-- **Registre** em `DIARIO.md` o estado de sanidade.
+- **Regra de Ouro (PROTOCOLO v3.1 §1):** Quando executada em modo `ANALISAR` ou dentro de uma trilha de Auditoria, esta skill é **estritamente de inspeção**. É **PROIBIDO** alterar código, desativar asserções ou "corrigir agora" para passar no portão. O auditor relata; quem conserta é uma etapa posterior.
+- **🔴 Vermelho**: documenta com evidência física (comando exato, saída e linha de falha). Agenda correção cirúrgica para a etapa de `EXECUTAR`.
+- **🟡 Amarelo**: documenta o warning e impacto potencial.
+- **Registre** em `.henke/ESTADO.json` os checks executados e seus códigos de retorno. Se chamada em modo `EXECUTAR` com pedido explícito de correção, despache a correção cirúrgica como uma etapa separada que **invalida a inspeção anterior e exige novo check-up**.
 
 ### Fase 5: Relatório Final & Resposta Humana
 
-Responda em português:
-> "Check-up completo: [resumo em 1 linha]. **Verde**: [o que funciona]. **Amarelo**: [avisos que valem nota]. **Vermelho**: [o que precisa corrigir]. [O que fiz sobre os vermelhos]. Tá pronto pra [commitar/mostrar/deploy]? [Sim/Não — o que falta]"
+Responda em português direto:
+> "Check-up de sanidade: **[Estado Derivado: verified|failed|blocked|unverified]**.
+- 🟢 **Verde**: [o que passou com comandos comprovados].
+- 🟡 **Atenção**: [warnings observados].
+- 🔴 **Problemas**: [falhas físicas encontradas com arquivo:linha].
+- **O que NÃO foi verificado**: [limitações de hardware/ambiente/redes].
+[Próximo passo recomendado sem mutações automáticas]."
 
 ## 4. Regras Negativas & Linhas Vermelhas (O que é PROIBIDO)
 

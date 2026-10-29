@@ -72,7 +72,7 @@ O **Maestro (`henke-skills`)** assume a postura de Engenheiro Chefe:
 * [`henke-ui-estados`](./henke-ui-estados/SKILL.md): Construtor dos 4 estados vitais (Vazio, Carregando, Erro Amigável, Sucesso).
 * [`henke-ui-feedback`](./henke-ui-feedback/SKILL.md): Resposta imediata a cliques, spinners táteis e trava contra clique duplo.
 * [`henke-ui-responsivo`](./henke-ui-responsivo/SKILL.md): Ajuste fluido para celular, tablet, TV e monitores ultrawide sem barras duplas.
-* [`henke-ui-auditoria`](./henke-ui-auditoria/SKILL.md): Nota de design de 0 a 100 com plano de melhoria visual cirúrgico.
+* [`henke-ui-auditoria`](./henke-ui-auditoria/SKILL.md): Nota de design de 0 a 10 com plano de melhoria visual cirúrgico.
 
 ### 5. Vibecoding Puro & Pontes (`henke-code-*`)
 * [`henke-code-ponte`](./henke-code-ponte/SKILL.md): Conexão infalível de botões da interface com rotas e IPC do servidor.

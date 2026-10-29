@@ -84,42 +84,70 @@ Marque explicitamente:
 - **Cartões opcionais/adiáveis** — os que podem esperar sem quebrar a jornada.
 - **Cartões paralelos** — os que podem ser feitos em qualquer ordem entre si.
 
-### Fase 4: Validação da Fila
+### Fase 4: Geração do Artefato EGM (Artifact-First) & Fila
 
-Cheque cada cartão contra 3 testes:
+Cheque cada cartão contra os 3 testes:
+1. **Teste da IA**: uma IA lendo SÓ o cartão conseguiria implementar sem chutar?
+2. **Teste do usuário**: o critério de pronto é algo visível e testável?
+3. **Teste de cobertura**: os cartões cobrem toda a intenção sem buracos?
 
-1. **Teste da IA**: uma IA lendo SÓ o cartão (sem o resto do contexto) conseguiria implementar sem chutar? Se faltar informação (nome de campo, formato, regra), complete no cartão.
-2. **Teste do usuário**: o critério de pronto é algo que ele confere clicando? Se for técnico ("o reducer despacha X"), reescreva em efeito visível ("o item some da lista").
-3. **Teste de cobertura**: os cartões juntos entregam o desejo inteiro? Se faltar pedaço (tem "salvar favorito" mas não "ver lista de favoritos"), crie o cartão que falta.
+**1. Escreva o Artefato Canônico em `docs/designs/<feature>.md` (Obrigatório - Padrão Google EGM):**
+Todo planejamento gera um arquivo de especificação estruturado em `docs/designs/<feature>.md` contendo:
+```markdown
+# Design Spec: [Nome da Feature]
 
-Escreva/atualize `.henke/TAREFAS.md`:
+## 1. Contexto & Motivação
+[Por que essa feature existe e qual problema resolve]
 
+## 2. Decisões Técnicas & Arquitetura
+[Escolhas de libs, padrões e armazenamento]
+
+## 3. Contratos de Tipos & Assinaturas
+[Modelos de dados, endpoints ou contratos TypeScript/Rust/Python]
+
+## 4. Escopo Declarado (Arquivos e Símbolos a Tocar)
+<!-- O spec_drift.py valida se o git diff tocou APENAS estes caminhos -->
+- `src/features/exemplo.ts`: funções `salvarExemplo`, `listarExemplos`
+- `src/components/Exemplo.tsx`: componente `ExemploCard`
+- `tests/features/exemplo.test.ts`
+
+## 5. Casos de Borda & Falhas Previstas
+- Falha de rede durante o envio
+- Resposta com lista vazia
+- Caracteres especiais ou tamanho excedente
+
+## 6. Histórias de Usuário & Critérios de Pronto
+[Os cartões T001..T00N mastigados com critérios clicáveis]
+
+## 7. Ledger Esperado de Comandos
+- `npm test -- tests/features/exemplo.test.ts`
+- `npm run lint`
+```
+
+**2. Escreva/Atualize o resumo em `.henke/TAREFAS.md`:**
 ```markdown
 # Tarefas — [projeto]
 ## Fila atual
-### [T001] Fundação: [título] [x] ← feita
-### [T002] [título] [~] ← fazendo
+### [T001] Fundação: [título] [x] (Spec: docs/designs/<feature>.md)
+### [T002] [título] [~]
 ### [T003] [título] [ ] ← próxima recomendada
-### [T004] [título] [ ]
 ...
-## Próxima leva (futura)
-- [cartões adiados pra próxima rodada]
 ## Arquivo de concluídas
-(histórico das concluídas, pra referência)
+(histórico das concluídas)
 ```
 
-**Nunca apague cartões concluídos** — marque-os [x]; o histórico do projeto depende deles.
+### Fase 5: Registro de Memória, Hash da Spec & Resposta Humana
 
-### Fase 5: Atualização da Memória & Resposta Humana
-
-1. Atualize `.henke/DIARIO.md`:
+1. **Vínculo da Spec (PROTOCOLO v3.1 §3.3):**
+   Calcule o SHA256 do arquivo gerado em `docs/designs/<feature>.md` e registre em `.henke/ESTADO.json`.
+2. Atualize `.henke/DIARIO.md`:
    ```markdown
-   ## AAAA-MM-DD — Tarefas quebradas
-   - **Cartões criados**: N | **Primeira recomendada**: [T00X]
-   - **Ordem lógica**: fundação → fluxo → polish
+   ## AAAA-MM-DD — Spec & Tarefas EGM
+   - **Spec criada**: docs/designs/<feature>.md (SHA256: [hash])
+   - **Cartões**: N | **Primeira recomendada**: [T001]
    ```
-2. Responda em português:
-   > "Quebrei em **N** cartões. A ordem: primeiro a fundação [X], depois o fluxo [Y], por último o polish [Z]. **Começa pelo cartão T001: [título]** — é o que desbloqueia mais. Quer que eu já pegue ele com a skill que couber (`/henke-code-*`)?"
+3. Responda em português direto:
+   > "Spec criada em **`docs/designs/<feature>.md`** e decomposta em **N cartões**! A ordem recomendada: fundação [X], depois fluxo [Y], depois polish [Z]. O escopo declarado para o portão cobre **[arquivos]**. Comece pelo cartão **T001: [título]**. Pronto para submeter ao stress-test adversarial do Goldfish (`henke-audit-vibecode`) ou iniciar a construção cirúrgica?"
 
 ## 4. Regras Negativas & Linhas Vermelhas (O que é PROIBIDO)
 

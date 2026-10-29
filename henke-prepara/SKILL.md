@@ -85,11 +85,14 @@ Crie a pasta `docs/designs/` na raiz do projeto:
 ### Fase 4: Varredura de Economia de Tokens (`caveman` / `ponytail`)
 
 Verifique se o harness do usuário possui as skills de compressão de tokens disponíveis:
-- Cheque a presença de `caveman` e `ponytail` nos diretórios de skills (`~/.agents/skills/`, `~/.gemini/config/skills/`, `~/.claude/skills/`).
-- **Se encontradas:** Ative automaticamente `"caveman_ativo": true` ou `"ponytail_ativo": true` no `.henke/CONFIG.json`.
+- Cheque a invocabilidade de `caveman` e `ponytail` no harness atual (`~/.agents/skills/`, `~/.gemini/config/skills/`, `~/.claude/skills/`).
+- **Respeito Estrito à Preferência (PROTOCOLO v3.1 §7):**
+  - Se a preferência do usuário for `"off"`, ela é soberana e **nunca** é sobrescrita pela autodetecção.
+  - Se for `"auto"`, `detectado: true` ativa a compressão; `detectado: false` mantém inativo.
+  - Se ambos estiverem ativos, `ponytail` tem precedência sobre `caveman`.
 - **Se NÃO encontradas e `"perguntar_novamente": true`:**
-  Apresente ao usuário de forma amigável:
-  > *"💡 **Dica de Economia de Tokens:** Notei que você não possui as skills `caveman` (respostas concisas) ou `ponytail` (minimal diff estrito) instaladas no seu ambiente. Elas cortam até 60% do gasto de tokens em agentes autônomos. Deseja que eu as ative/instale no futuro, ou prefere continuar apenas com a Suíte Henke nativa? (Vou registrar sua resposta em `.henke/CONFIG.json` para não perguntar de novo)."*
+  Apresente ao usuário de forma amigável e sem números fabricados:
+  > *"💡 **Economia de Tokens:** Notei que você não possui as skills `caveman` (respostas concisas) ou `ponytail` (minimal diff estrito) instaladas no seu ambiente. Elas ajudam a reduzir o contexto e acelerar a resposta do agente. Deseja ativá-las quando disponíveis, ou prefere manter desativado ('off')? (Vou registrar sua escolha em `.henke/CONFIG.json` para não perguntar novamente)."*
 
 ### Fase 5: Check-in de Custódia Inicial & Resposta Humana
 
