@@ -45,6 +45,7 @@ def read_manifest(path):
         entries = data.get("files", [])
         hashes = data.get("hashes", {})
         assert isinstance(entries, list) and all(isinstance(e, str) for e in entries)
+        assert isinstance(hashes, dict)
         return set(entries), hashes
     except (OSError, ValueError, KeyError, AssertionError):
         if path.exists():
@@ -104,21 +105,15 @@ def install(repo, user_root, dry_run=False):
                 if victim.is_symlink():
                     print(f"Aviso: zumbi ignorado por ser link simbólico: {victim}", file=sys.stderr)
                 elif victim.is_file():
-                    # Preserva arquivos stale modificados pelo usuário
+                    # Só remove com prova de identidade via hash do manifesto v2.
                     rel_norm = str(rel).replace("\\", "/")
-                    try:
-                        v_text = victim.read_text(encoding="utf-8", errors="ignore")
-                    except Exception:
-                        v_text = ""
-                    
-                    if old_hashes and rel_norm in old_hashes:
-                        expected_hash = old_hashes[rel_norm]
-                        current_hash = hashlib.sha256(victim.read_bytes()).hexdigest()
-                        if current_hash != expected_hash:
-                            print(f"Aviso: arquivo stale preservado por modificação do usuário: {victim}", file=sys.stderr)
-                            continue
-                    elif "USER MODIFIED" in v_text or "personal" in victim.name.lower() or "custom" in victim.name.lower():
-                        print(f"Aviso: arquivo stale preservado por conter edições pessoais: {victim}", file=sys.stderr)
+                    expected_hash = old_hashes.get(rel_norm)
+                    if not expected_hash:
+                        print(f"Aviso: arquivo legado preservado sem hash de origem confiável: {victim}", file=sys.stderr)
+                        continue
+                    current_hash = hashlib.sha256(victim.read_bytes()).hexdigest()
+                    if current_hash != expected_hash:
+                        print(f"Aviso: arquivo stale preservado por modificação do usuário: {victim}", file=sys.stderr)
                         continue
                     victims.append((rel, victim))
                 elif victim.exists():

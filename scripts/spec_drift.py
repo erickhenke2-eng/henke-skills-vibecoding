@@ -58,7 +58,7 @@ def parse_declared_scope(spec_path: Path) -> list[str]:
         else:
             candidate = line_item.split(":")[0].strip()
         if candidate and not candidate.startswith("<!--"):
-            paths.append(candidate.replace("\\", "/").rstrip("/"))
+            paths.append(candidate.replace("\\", "/"))
     return paths
 
 
@@ -138,15 +138,16 @@ def is_path_in_scope(touched_file: str, declared_paths: list[str]) -> bool:
     """Verifica se um arquivo tocado corresponde ou está dentro de algum caminho declarado."""
     norm_touched = touched_file.replace("\\", "/").strip("/")
     for decl in declared_paths:
-        norm_decl = decl.replace("\\", "/").strip("/")
-        # Correspondência exata de arquivo
-        if norm_touched == norm_decl:
-            return True
-        # Apenas aceita prefixo de diretório se foi explicitamente declarado como tal (terminando em / ou /*)
-        if norm_decl.endswith("/") or norm_decl.endswith("/*"):
-            dir_prefix = norm_decl.rstrip("/*").rstrip("/") + "/"
-            if norm_touched.startswith(dir_prefix):
+        norm_decl = decl.replace("\\", "/").strip()
+        # Diretório declarado (termina em / ou /*): qualquer arquivo sob ele entra no escopo.
+        if norm_decl.endswith("/*"):
+            base = norm_decl[:-2].rstrip("/")
+            if norm_touched == base or norm_touched.startswith(base + "/"):
                 return True
+            continue
+        norm_decl = norm_decl.strip("/")
+        if norm_touched == norm_decl or norm_touched.startswith(norm_decl + "/"):
+            return True
     return False
 
 
@@ -180,12 +181,16 @@ def check_spec_drift(
     # 3. Auto-detecção de commits anteriores (S2)
     if against is None:
         baseline_file = git_root / ".henke/gate-baseline.json"
-        if baseline_file.is_file():
-            try:
-                b_data = json.loads(baseline_file.read_text(encoding="utf-8"))
-                against = b_data.get("head")
-            except Exception:
-                pass
+        try:
+            b_data = json.loads(baseline_file.read_text(encoding="utf-8"))
+            against = b_data.get("head") or b_data.get("head_commit")
+        except Exception:
+            against = None
+        if not against:
+            return False, [
+                "Referência base para comparação não encontrada: forneça '--against <commit>' "
+                "ou inicialize o baseline com 'henke_gate.py baseline'."
+            ]
 
     touched = get_touched_files(git_root, against=against, active_spec=spec_path)
     unauthorized = []

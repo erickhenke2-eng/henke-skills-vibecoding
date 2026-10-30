@@ -6,6 +6,7 @@ de scripts efetivos e barra vitória por tautologia (0 testes descobertos).
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -47,15 +48,23 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
             errors.append(f"Entrada #{i} sem comando ('cmd') especificado.")
             continue
 
-        # Monta a linha de comando completa combinando cmd e args
+        # Monta a linha de comando completa combinando cmd e args (lista ou string)
         args_list = entry.get("args", [])
-        if isinstance(args_list, list) and args_list:
+        if isinstance(args_list, str):
+            full_cmd = f"{cmd} {args_list}".strip()
+        elif isinstance(args_list, list) and args_list:
             full_cmd = f"{cmd} {' '.join(str(a) for a in args_list)}".strip()
         else:
             full_cmd = str(cmd).strip()
 
-        # Strings a inspecionar contra denylist (inclui script resolvido)
+        # Strings a inspecionar contra denylist (inclui script resolvido e a forma
+        # normalizada do executável sem extensão Windows: git.exe -> git)
+        head_exe, _, tail_args = full_cmd.partition(" ")
+        exe_base = os.path.basename(head_exe).lower().replace(".exe", "").replace(".bat", "")
+        normalized_cmd = f"{exe_base} {tail_args}".strip()
         strings_to_check = [full_cmd]
+        if normalized_cmd != full_cmd:
+            strings_to_check.append(normalized_cmd)
         if "executável_resolvido" in entry:
             strings_to_check.append(str(entry["executável_resolvido"]).strip())
 
@@ -105,6 +114,12 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
                 errors.append(f"Entrada #{i}: 'testes_passados' deve ser um inteiro válido.")
             elif has_tests_decl and isinstance(entry.get("testes_descobertos"), int) and passed < entry["testes_descobertos"]:
                 errors.append(f"Entrada #{i}: 'testes_passados' ({passed}) menor que 'testes_descobertos' ({entry['testes_descobertos']}).")
+
+    if total_tests_discovered == 0 and not allow_zero_tests:
+        errors.append(
+            "Vitória por tautologia: 0 testes descobertos em todo o ledger "
+            "(nenhuma evidência de execução real de testes)."
+        )
 
     return len(errors) == 0, errors, total_tests_discovered
 

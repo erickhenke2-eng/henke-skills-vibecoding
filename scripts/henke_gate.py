@@ -56,11 +56,12 @@ def get_staged_blobs(cwd):
     blobs = {}
     ls_out = git(cwd, "ls-files", "-s").stdout
     for line in ls_out.splitlines():
-        parts = line.split()
-        if len(parts) >= 4:
-            blob_hash = parts[1]
-            path = " ".join(parts[3:]).strip('"')
-            blobs[path] = blob_hash
+        meta, sep, path = line.partition("\t")
+        if not sep:
+            continue
+        parts = meta.split()
+        if len(parts) >= 3:
+            blobs[path.strip('"')] = parts[1]
     return blobs
 
 
@@ -138,6 +139,12 @@ def check_baseline(baseline, cwd, scope, allow_commit):
             continue
         new_blob = current_staged.get(path)
         if new_blob != old_blob:
+            was_user_staged = (
+                path in baseline_dirty
+                and baseline_dirty[path]["status"][:1] not in (" ", "?")
+            )
+            if allow_commit and in_scope(path, scope) and not was_user_staged:
+                continue
             violations.append(f"Índice Git (staged) do usuário foi alterado ou absorvido: {path}")
 
     for rel, now in current_dirty.items():

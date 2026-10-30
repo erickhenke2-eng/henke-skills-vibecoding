@@ -1,4 +1,5 @@
 """Integration checks against temporary destinations; no real user installation."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -111,6 +112,8 @@ class InstallTests(unittest.TestCase):
             (zombie_dir / "references").mkdir()
             (zombie_dir / "references" / "velho.md").write_text("zumbi")
             manifest["files"] += ["henke-zumbi/SKILL.md", "henke-zumbi/references/velho.md"]
+            for rel in ("henke-zumbi/SKILL.md", "henke-zumbi/references/velho.md"):
+                manifest.setdefault("hashes", {})[rel] = hashlib.sha256((target / rel).read_bytes()).hexdigest()
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         installer.install(ROOT, self.user)
         expected = {rel.as_posix() for rel in installer.inventory(ROOT)}

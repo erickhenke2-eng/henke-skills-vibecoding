@@ -180,11 +180,13 @@ if maestro_path.is_file():
         errors.append("henke-skills: template de entrega sem a seção obrigatória 'O que NÃO foi verificado'")
 
     # V2: Validação de cobertura do catálogo - nenhuma skill do repo pode ser órfã
+    # Comentários HTML não contam como roteamento: só vale texto operacional.
+    maestro_operational = re.sub(r"<!--.*?-->", "", maestro_text, flags=re.DOTALL)
     all_skill_dirs = [p.name for p in sorted(root.glob("henke-*")) if p.is_dir() and (p / "SKILL.md").is_file()]
     for sk in all_skill_dirs:
         if sk == "henke-skills":
             continue
-        if not re.search(r"\b" + re.escape(sk) + r"\b", maestro_text):
+        if not re.search(r"\b" + re.escape(sk) + r"\b", maestro_operational):
             errors.append(f"henke-skills: skill órfã no repositório não roteada no catálogo do Maestro: '{sk}'")
 
 if errors:

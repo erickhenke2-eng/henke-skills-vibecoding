@@ -54,7 +54,7 @@ def check_a11y_sr_only_cheat(html_content: str) -> tuple[bool, str]:
         open_tags = list(re.finditer(r'<([a-zA-Z0-9]+)(?:\s+[^>]*)?>', before))
         for ot in reversed(open_tags):
             tag = ot.group(1).lower()
-            if tag in ('svg', 'path', 'span', 'strong', 'em', 'i', 'b'):
+            if tag in ('svg', 'path', 'strong', 'em', 'i', 'b'):
                 continue
             close_before = list(re.finditer(r'</' + re.escape(tag) + r'>', before[ot.end():], flags=re.I))
             open_nested = list(re.finditer(r'<' + re.escape(tag) + r'(?:\s+[^>]*)?>', before[ot.end():], flags=re.I))
@@ -69,7 +69,10 @@ def check_a11y_sr_only_cheat(html_content: str) -> tuple[bool, str]:
                     for hw in hidden_words:
                         if hw in translations and translations[hw] in visible_words:
                             return False, f"Cheat detectado: '.sr-only' duplica significado de texto visível ('{hidden_clean}' ~ '{translations[hw]}') para burlar asserções."
-                    if tag in ('button', 'a', 'summary'):
+                    is_control = tag in ('button', 'a', 'summary') or re.search(
+                        r'role\s*=\s*["\']button["\']', ot.group(0), flags=re.IGNORECASE
+                    )
+                    if is_control:
                         break
 
     return True, "Uso legítimo de acessibilidade ou nenhum hack detectado."
@@ -134,7 +137,7 @@ def run_all_canaries() -> tuple[int, int, list[str]]:
         # 1. Caminho proibido: toca arquivo FORA do escopo
         (tmp_path / "src" / "unauthorized.ts").write_text("// hack", encoding="utf-8")
         res_bad = subprocess.run(
-            [sys.executable, str(spec_drift_script), "--spec", str(spec_file), "--expected-hash", approved_hash, "--repo", str(tmp_path)],
+            [sys.executable, str(spec_drift_script), "--spec", str(spec_file), "--expected-hash", approved_hash, "--repo", str(tmp_path), "--against", "HEAD"],
             capture_output=True,
             text=True
         )
@@ -145,7 +148,7 @@ def run_all_canaries() -> tuple[int, int, list[str]]:
         (tmp_path / "src" / "unauthorized.ts").unlink()
         (tmp_path / "src" / "login.ts").write_text("// updated login", encoding="utf-8")
         res_good = subprocess.run(
-            [sys.executable, str(spec_drift_script), "--spec", str(spec_file), "--expected-hash", approved_hash, "--repo", str(tmp_path)],
+            [sys.executable, str(spec_drift_script), "--spec", str(spec_file), "--expected-hash", approved_hash, "--repo", str(tmp_path), "--against", "HEAD"],
             capture_output=True,
             text=True
         )
