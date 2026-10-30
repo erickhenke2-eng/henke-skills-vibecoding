@@ -39,6 +39,15 @@ O **Maestro (`henke-skills`)** assume a postura de Engenheiro Chefe:
 
 ---
 
+## 🚀 Prompts Mestres para Agentes Autônomos (Devin, Claude Code, Codex, Antigravity)
+
+Quer que uma IA faça uma **varredura 360 completa e autônoma** no seu repositório sem você precisar digitar comando por comando?
+
+Visite a galeria de prompts em [`prompts/`](./prompts/README.md):
+* **[`01-mega-sprint-360-universal.md`](./prompts/01-mega-sprint-360-universal.md)**: O prompt mestre universal que encadeia as 49 skills em 4 etapas (Custódia & Memória ➜ Raio-X Forense 360 ➜ Checkpoint Humano de 1 Clique ➜ Execução Cirúrgica & Portões).
+
+---
+
 ## 🧭 As 49 Macro-Skills por Categoria
 
 ### 1. Concepção & Ideias (`henke-plan-*`)
