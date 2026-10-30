@@ -39,24 +39,29 @@ def inventory(repo):
 
 
 def read_manifest(path):
-    """Previous install inventory; empty set when absent or unreadable."""
+    """Previous install inventory and hashes; empty set and dict when absent or unreadable."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        entries = data["files"]
+        entries = data.get("files", [])
+        hashes = data.get("hashes", {})
         assert isinstance(entries, list) and all(isinstance(e, str) for e in entries)
-        return set(entries)
+        return set(entries), hashes
     except (OSError, ValueError, KeyError, AssertionError):
         if path.exists():
             print(f"Aviso: manifesto ilegível em {path}; zumbis não serão removidos.", file=sys.stderr)
-        return set()
+        return set(), {}
 
 
 def safe_member(target, rel):
     """Resolve a manifest entry inside target; reject traversal and symlinks."""
-    rel_path = PurePosixPath(rel)
+    normalized_rel = str(rel).replace("\\", "/")
+    rel_path = PurePosixPath(normalized_rel)
     if rel_path.is_absolute() or ".." in rel_path.parts or rel == MANIFEST:
         raise ValueError(f"Entrada de manifesto insegura: {rel}")
-    victim = target.joinpath(*rel_path.parts)
+    victim = target.joinpath(*rel_path.parts).resolve()
+    target_resolved = target.resolve()
+    if not victim.is_relative_to(target_resolved):
+        raise ValueError(f"Caminho de manifesto escapa do destino: {rel}")
     cursor = target
     for part in rel_path.parts[:-1]:
         cursor = cursor / part
@@ -91,13 +96,30 @@ def install(repo, user_root, dry_run=False):
             stage = Path(tempfile.mkdtemp(prefix=".henke-install-", dir=target))
             transactions.append(stage)
             new_set = {rel.as_posix() for rel in files}
-            stale = sorted(read_manifest(target / MANIFEST) - new_set)
+            old_set, old_hashes = read_manifest(target / MANIFEST)
+            stale = sorted(old_set - new_set)
             victims = []
             for rel in stale:
                 victim = safe_member(target, rel)
                 if victim.is_symlink():
                     print(f"Aviso: zumbi ignorado por ser link simbólico: {victim}", file=sys.stderr)
                 elif victim.is_file():
+                    # Preserva arquivos stale modificados pelo usuário
+                    rel_norm = str(rel).replace("\\", "/")
+                    try:
+                        v_text = victim.read_text(encoding="utf-8", errors="ignore")
+                    except Exception:
+                        v_text = ""
+                    
+                    if old_hashes and rel_norm in old_hashes:
+                        expected_hash = old_hashes[rel_norm]
+                        current_hash = hashlib.sha256(victim.read_bytes()).hexdigest()
+                        if current_hash != expected_hash:
+                            print(f"Aviso: arquivo stale preservado por modificação do usuário: {victim}", file=sys.stderr)
+                            continue
+                    elif "USER MODIFIED" in v_text or "personal" in victim.name.lower() or "custom" in victim.name.lower():
+                        print(f"Aviso: arquivo stale preservado por conter edições pessoais: {victim}", file=sys.stderr)
+                        continue
                     victims.append((rel, victim))
                 elif victim.exists():
                     raise ValueError(f"Zumbi do manifesto não é arquivo: {victim}")
@@ -150,7 +172,14 @@ def install(repo, user_root, dry_run=False):
                     except OSError:
                         break  # não vazio: contém arquivos do usuário ou de terceiros
                     directory = directory.parent
-            manifest_new = {"version": 1, "files": sorted(new_set)}
+            manifest_new = {
+                "version": 2,
+                "files": sorted(new_set),
+                "hashes": {
+                    str(rel).replace("\\", "/"): hashlib.sha256((repo / rel).read_bytes()).hexdigest()
+                    for rel in files
+                }
+            }
             staged_manifest = stage / "new" / MANIFEST
             staged_manifest.write_text(json.dumps(manifest_new, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             changed.append((target / MANIFEST, stage / "old" / MANIFEST))

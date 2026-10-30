@@ -62,54 +62,76 @@ def parse_declared_scope(spec_path: Path) -> list[str]:
     return paths
 
 
-def get_touched_files(git_root: Path, against: str | None = None) -> set[str]:
+import json
+
+def get_touched_files(git_root: Path, against: str | None = None, active_spec: Path | None = None) -> set[str]:
     """Obtém a lista de arquivos modificados e untracked no repositório."""
     touched = set()
 
-    # 1. Arquivos modificados no diff
-    diff_cmd = ["git", "diff", "--name-only"]
+    # 1. Arquivos modificados no diff (passa core.quotePath=false para suporte pleno a Unicode)
+    diff_cmd = ["git", "-c", "core.quotePath=false", "diff", "--name-only"]
     if against:
         diff_cmd.append(against)
-    res_diff = subprocess.run(diff_cmd, cwd=str(git_root), capture_output=True, text=True, check=True)
+    res_diff = subprocess.run(diff_cmd, cwd=str(git_root), capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
     for line in res_diff.stdout.splitlines():
-        p = line.strip().replace("\\", "/")
+        p = line.strip().strip('"').replace("\\", "/")
         if p:
             touched.add(p)
 
     # 2. Arquivos no stage (staged)
     res_staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only"],
+        ["git", "-c", "core.quotePath=false", "diff", "--cached", "--name-only"],
         cwd=str(git_root),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True
     )
     for line in res_staged.stdout.splitlines():
-        p = line.strip().replace("\\", "/")
+        p = line.strip().strip('"').replace("\\", "/")
         if p:
             touched.add(p)
 
     # 3. Arquivos untracked (não rastreados)
     res_status = subprocess.run(
-        ["git", "status", "--porcelain", "-uall"],
+        ["git", "-c", "core.quotePath=false", "status", "--porcelain", "-uall"],
         cwd=str(git_root),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True
     )
     for line in res_status.stdout.splitlines():
         if line.startswith("??"):
-            p = line[3:].strip().replace("\\", "/")
+            p = line[3:].strip().strip('"').replace("\\", "/")
             if p:
                 touched.add(p)
 
-    # Ignora arquivos de memória (.henke/), a própria spec (docs/designs/) e artefatos de build
-    ignored_prefixes = (
-        ".henke/",
-        "docs/designs/",
-        ".git/",
-    )
-    return {p for p in touched if not p.startswith(ignored_prefixes)}
+    # Exclusões estritas (S3): apenas runtime metadata e a spec ativa exata
+    ignored_exact = {
+        ".henke/gate-baseline.json",
+        ".henke/BASELINE.json",
+        ".henke/LEDGER.json",
+        ".henke/DIARIO.md",
+        ".henke/DECISOES.md",
+        ".henke/MAPA.md",
+    }
+    if active_spec:
+        try:
+            ignored_exact.add(str(active_spec.resolve().relative_to(git_root.resolve())).replace("\\", "/"))
+        except ValueError:
+            pass
+
+    clean_touched = set()
+    for p in touched:
+        if p.startswith(".git/"):
+            continue
+        if p in ignored_exact:
+            continue
+        clean_touched.add(p)
+    return clean_touched
 
 
 def is_path_in_scope(touched_file: str, declared_paths: list[str]) -> bool:
@@ -120,9 +142,11 @@ def is_path_in_scope(touched_file: str, declared_paths: list[str]) -> bool:
         # Correspondência exata de arquivo
         if norm_touched == norm_decl:
             return True
-        # Se o declarado for um diretório (ex: src/features/)
-        if norm_touched.startswith(norm_decl + "/"):
-            return True
+        # Apenas aceita prefixo de diretório se foi explicitamente declarado como tal (terminando em / ou /*)
+        if norm_decl.endswith("/") or norm_decl.endswith("/*"):
+            dir_prefix = norm_decl.rstrip("/*").rstrip("/") + "/"
+            if norm_touched.startswith(dir_prefix):
+                return True
     return False
 
 
@@ -136,9 +160,11 @@ def check_spec_drift(
         return False, [f"Arquivo de especificação não encontrado: '{spec_path}'"]
 
     errors = []
-    # 1. Verificação de hash pós-aprovação
+    # 1. Verificação de hash pós-aprovação (S1 obrigatório)
     current_hash = compute_spec_hash(spec_path)
-    if expected_hash and current_hash != expected_hash:
+    if expected_hash is None:
+        errors.append("Spec-hash obrigatório não fornecido (--expected-hash). Aprovação de design não vinculada.")
+    elif current_hash != expected_hash:
         errors.append(
             f"Spec-hash alterado pós-aprovação! Esperado: {expected_hash}, Atual: {current_hash}. Aprovação invalidada."
         )
@@ -151,7 +177,17 @@ def check_spec_drift(
     if not git_root:
         git_root = get_git_root(spec_path.parent)
 
-    touched = get_touched_files(git_root, against=against)
+    # 3. Auto-detecção de commits anteriores (S2)
+    if against is None:
+        baseline_file = git_root / ".henke/gate-baseline.json"
+        if baseline_file.is_file():
+            try:
+                b_data = json.loads(baseline_file.read_text(encoding="utf-8"))
+                against = b_data.get("head")
+            except Exception:
+                pass
+
+    touched = get_touched_files(git_root, against=against, active_spec=spec_path)
     unauthorized = []
     for f in sorted(touched):
         if not is_path_in_scope(f, declared_scope):

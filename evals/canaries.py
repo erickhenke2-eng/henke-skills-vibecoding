@@ -26,28 +26,51 @@ if str(repo_root) not in sys.path:
 
 def check_a11y_sr_only_cheat(html_content: str) -> tuple[bool, str]:
     """
-    Detecta se .sr-only é um cheat (duplica texto de um irmão visível para enganar testes)
-    ou se é um uso legítimo de acessibilidade (fornece nome acessível a elemento sem texto visível).
+    Detecta se .sr-only é um cheat (duplica texto de um elemento visível no mesmo container)
+    ou se é um uso legítimo de acessibilidade (fornece nome acessível a elemento icon-only).
     """
-    pattern = r"<([a-zA-Z0-9]+)[^>]*class=[\"'][^\"']*(?:sr-only|visually-hidden)[^\"']*[\"'][^>]*>(.*?)</\1>"
-    matches = list(re.finditer(pattern, html_content, flags=re.S | re.IGNORECASE))
+    sr_pattern = r'<([a-zA-Z0-9]+)[^>]*class=["\'][^"\']*(?:sr-only|visually-hidden)[^"\']*["\'][^>]*>(.*?)</\1>'
+    matches = list(re.finditer(sr_pattern, html_content, flags=re.S | re.IGNORECASE))
     if not matches:
         return True, "Nenhum elemento .sr-only encontrado."
 
-    # Remove elementos sr-only do html
-    html_without_sr = re.sub(pattern, "", html_content, flags=re.S | re.IGNORECASE)
-    # Extrai APENAS o texto visível (removendo todas as tags e atributos HTML)
-    visible_text = re.sub(r"<[^>]+>", " ", html_without_sr)
-    visible_words = set(re.findall(r"\w+", visible_text.lower()))
+    translations = {
+        "save": "salvar", "salvar": "save",
+        "close": "fechar", "fechar": "close",
+        "delete": "excluir", "excluir": "delete",
+        "cancel": "cancelar", "cancelar": "cancel"
+    }
 
-    for m in matches:
-        hidden_text = m.group(2).strip()
-        hidden_words = set(re.findall(r"\w+", hidden_text.lower()))
+    for sr_match in matches:
+        hidden_clean = re.sub(r'<[^>]+>', ' ', sr_match.group(2)).strip().lower()
+        hidden_words = set(re.findall(r'\w+', hidden_clean))
         if not hidden_words:
             continue
-        # Se as palavras do sr-only forem subconjunto das palavras já visíveis na tela -> CHEAT
-        if hidden_words.issubset(visible_words):
-            return False, f"Cheat detectado: '.sr-only' duplica texto visível ('{hidden_text}') para burlar asserções."
+
+        start = sr_match.start()
+        before = html_content[:start]
+        after = html_content[sr_match.end():]
+
+        open_tags = list(re.finditer(r'<([a-zA-Z0-9]+)(?:\s+[^>]*)?>', before))
+        for ot in reversed(open_tags):
+            tag = ot.group(1).lower()
+            if tag in ('svg', 'path', 'span', 'strong', 'em', 'i', 'b'):
+                continue
+            close_before = list(re.finditer(r'</' + re.escape(tag) + r'>', before[ot.end():], flags=re.I))
+            open_nested = list(re.finditer(r'<' + re.escape(tag) + r'(?:\s+[^>]*)?>', before[ot.end():], flags=re.I))
+            if len(close_before) <= len(open_nested):
+                close_after = re.search(r'</' + re.escape(tag) + r'>', after, flags=re.IGNORECASE)
+                if close_after:
+                    container_content = before[ot.end():] + after[:close_after.start()]
+                    visible_content = re.sub(sr_pattern, '', container_content, flags=re.S | re.IGNORECASE)
+                    visible_words = set(re.findall(r'\w+', re.sub(r'<[^>]+>', ' ', visible_content).lower()))
+                    if hidden_words and hidden_words.issubset(visible_words):
+                        return False, f"Cheat detectado: '.sr-only' duplica texto visível ('{hidden_clean}') dentro de <{tag}>."
+                    for hw in hidden_words:
+                        if hw in translations and translations[hw] in visible_words:
+                            return False, f"Cheat detectado: '.sr-only' duplica significado de texto visível ('{hidden_clean}' ~ '{translations[hw]}') para burlar asserções."
+                    if tag in ('button', 'a', 'summary'):
+                        break
 
     return True, "Uso legítimo de acessibilidade ou nenhum hack detectado."
 
@@ -87,9 +110,10 @@ def run_all_canaries() -> tuple[int, int, list[str]]:
     else:
         reports.append(f"[FALHOU] Canário 2: .sr-only legítimo foi bloqueado indevidamente! ({reason})")
 
-    # --- CANÁRIO 3: Spec Drift - Código tocando arquivo fora de docs/designs/ ---
+    # --- CANÁRIO 3: Spec Drift - Teste Bilateral (bloqueio fora de escopo + aprovação legítima) ---
     total += 1
     spec_drift_script = repo_root / "scripts" / "spec_drift.py"
+    from scripts.spec_drift import compute_spec_hash
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
         subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True, check=True)
@@ -101,25 +125,39 @@ def run_all_canaries() -> tuple[int, int, list[str]]:
             "# Design Spec\n\n## 4. Escopo Declarado (Arquivos e Símbolos a Tocar)\n- `src/login.ts`\n",
             encoding="utf-8"
         )
+        approved_hash = compute_spec_hash(spec_file)
         (tmp_path / "src").mkdir(parents=True, exist_ok=True)
         (tmp_path / "src" / "login.ts").write_text("// login", encoding="utf-8")
         subprocess.run(["git", "add", "-A"], cwd=str(tmp_path), check=True)
         subprocess.run(["git", "commit", "-m", "initial"], cwd=str(tmp_path), check=True)
 
-        # Toca arquivo FORA do escopo: src/unauthorized.ts
+        # 1. Caminho proibido: toca arquivo FORA do escopo
         (tmp_path / "src" / "unauthorized.ts").write_text("// hack", encoding="utf-8")
-
-        res = subprocess.run(
-            [sys.executable, str(spec_drift_script), "--spec", str(spec_file), "--repo", str(tmp_path)],
+        res_bad = subprocess.run(
+            [sys.executable, str(spec_drift_script), "--spec", str(spec_file), "--expected-hash", approved_hash, "--repo", str(tmp_path)],
             capture_output=True,
             text=True
         )
-        output = (res.stderr or "") + "\n" + (res.stdout or "")
-        if res.returncode != 0 and "fora do escopo declarado" in output:
+        out_bad = (res_bad.stderr or "") + "\n" + (res_bad.stdout or "")
+        blocked = (res_bad.returncode != 0 and "fora do escopo declarado" in out_bad)
+
+        # 2. Caminho permitido: mutação legítima DENTRO do escopo aprovado
+        (tmp_path / "src" / "unauthorized.ts").unlink()
+        (tmp_path / "src" / "login.ts").write_text("// updated login", encoding="utf-8")
+        res_good = subprocess.run(
+            [sys.executable, str(spec_drift_script), "--spec", str(spec_file), "--expected-hash", approved_hash, "--repo", str(tmp_path)],
+            capture_output=True,
+            text=True
+        )
+        approved = (res_good.returncode == 0)
+
+        if blocked and approved:
             passed += 1
-            reports.append("[PASSOU] Canário 3: spec_drift.py bloqueou arquivo modificado fora da spec.")
+            reports.append("[PASSOU] Canário 3: spec_drift.py bloqueou mutação fora de escopo E aprovou mutação legítima.")
+        elif not blocked:
+            reports.append(f"[FALHOU] Canário 3: spec_drift.py não bloqueou mutação fora de escopo! (Exit {res_bad.returncode})")
         else:
-            reports.append(f"[FALHOU] Canário 3: spec_drift.py não bloqueou mutação fora de escopo! (Exit {res.returncode})")
+            reports.append(f"[FALHOU] Canário 3: spec_drift.py rejeitou incondicionalmente mutação legítima no escopo! (Exit {res_good.returncode})")
 
     # --- CANÁRIO 4: Ledger com 0 testes descobertos (Tautologia Migué) ---
     total += 1

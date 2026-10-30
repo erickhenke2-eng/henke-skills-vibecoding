@@ -141,10 +141,10 @@ for path in skills:
     if "- [ ]" not in body_nocode:
         errors.append(f"{slug}: checklist de verificação (- [ ]) ausente")
 
-    # 7. Vínculo canônico: seção ## 6. deve conter link markdown para o PROTOCOLO (F2)
-    section6 = re.search(r"^## 6\..*$", body_nocode, flags=re.M)
-    if section6:
-        section6_text = body_nocode[section6.start():]
+    # 7. Vínculo canônico: seção ## 6. deve conter link markdown para o PROTOCOLO (F2 estrito)
+    section6_match = re.search(r"(?m)^## 6\..*?\n(.*?)(?=\n## |\Z)", body_nocode, flags=re.S)
+    if section6_match:
+        section6_text = section6_match.group(1)
         proto_resolved = protocolo.resolve()
         has_proto_link = any(
             (path.parent / t.strip().split("#")[0]).resolve() == proto_resolved
@@ -153,6 +153,8 @@ for path in skills:
         )
         if not has_proto_link:
             errors.append(f"{slug}: seção '## 6.' sem link markdown resolvível para '../PROTOCOLO.md'")
+    else:
+        errors.append(f"{slug}: seção '## 6.' ausente")
 
     # 8. Resolução de links relativos em Markdown (rejeita links quebrados; F1: ignora código)
     markdown_links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", body_nocode)
@@ -176,6 +178,14 @@ if maestro_path.is_file():
             errors.append("henke-skills: template de entrega na Fase 5 contém fórmula fixa ufanista ('Missão orquestrada com sucesso')")
     if "O que NÃO foi verificado" not in maestro_text:
         errors.append("henke-skills: template de entrega sem a seção obrigatória 'O que NÃO foi verificado'")
+
+    # V2: Validação de cobertura do catálogo - nenhuma skill do repo pode ser órfã
+    all_skill_dirs = [p.name for p in sorted(root.glob("henke-*")) if p.is_dir() and (p / "SKILL.md").is_file()]
+    for sk in all_skill_dirs:
+        if sk == "henke-skills":
+            continue
+        if not re.search(r"\b" + re.escape(sk) + r"\b", maestro_text):
+            errors.append(f"henke-skills: skill órfã no repositório não roteada no catálogo do Maestro: '{sk}'")
 
 if errors:
     print(f"FALHA NA VALIDAÇÃO ({len(errors)} erros encontrados):")

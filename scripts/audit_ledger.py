@@ -16,8 +16,11 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 HAZARDOUS_PATTERNS = [
-    (r"\brm\s+-(?:r|f|rf|fr)\b\s+[/~]", "Tentativa de remoção recursiva em diretório raiz ou home"),
+    (r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f\b", "Tentativa de remoção recursiva forçada (rm -rf)"),
+    (r"\brm\s+-[a-zA-Z]*f[a-zA-Z]*r\b", "Tentativa de remoção recursiva forçada (rm -fr)"),
     (r"\bgit\s+push\b.*(?:--force|-f\b)", "Comando 'git push --force' destrutivo proibido em ledger"),
+    (r"\b(?:npm|pnpm|yarn)\s+publish\b", "Comando de publicação (publish) proibido em ledger"),
+    (r"\b(?:pip|twine)\s+upload\b", "Comando de upload de pacote proibido em ledger"),
     (r"\bchmod\s+(?:-R\s+)?777\b", "Permissão insegura 777 detectada"),
     (r"(?:curl|wget)\b.*\|\s*(?:ba)?sh\b", "Execução remota cega via pipe (curl | sh) proibida"),
     (r"\bformat\b\s+[a-zA-Z]:", "Comando de formatação de disco detectado"),
@@ -44,36 +47,64 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
             errors.append(f"Entrada #{i} sem comando ('cmd') especificado.")
             continue
 
-        # 1. Checagem contra padrões destrutivos (Heurística Denylist)
-        for pattern, reason in HAZARDOUS_PATTERNS:
-            if re.search(pattern, cmd, flags=re.IGNORECASE):
-                errors.append(f"Entrada #{i} bloqueada por denylist de segurança: '{cmd}' ({reason})")
+        # Monta a linha de comando completa combinando cmd e args
+        args_list = entry.get("args", [])
+        if isinstance(args_list, list) and args_list:
+            full_cmd = f"{cmd} {' '.join(str(a) for a in args_list)}".strip()
+        else:
+            full_cmd = str(cmd).strip()
 
-        # 2. Verificação de código de retorno
+        # Strings a inspecionar contra denylist (inclui script resolvido)
+        strings_to_check = [full_cmd]
+        if "executável_resolvido" in entry:
+            strings_to_check.append(str(entry["executável_resolvido"]).strip())
+
+        # 1. Checagem contra padrões destrutivos (Heurística Denylist)
+        for s in strings_to_check:
+            for pattern, reason in HAZARDOUS_PATTERNS:
+                if re.search(pattern, s, flags=re.IGNORECASE):
+                    errors.append(f"Entrada #{i} bloqueada por denylist de segurança: '{s}' ({reason})")
+
+        # 2. Verificação de integridade do snapshot de commit (se fornecido)
+        if "snapshot" in entry:
+            snap = str(entry["snapshot"]).strip()
+            if not re.match(r"^[0-9a-fA-F]{64}$", snap):
+                errors.append(f"Entrada #{i}: snapshot de commit/conteúdo inválido: '{snap}'. Esperado hash SHA-256 de 64 caracteres hex.")
+
+        # 3. Verificação de código de retorno
         exit_code = entry.get("exit", entry.get("exit_code"))
         if exit_code is None:
             errors.append(f"Entrada #{i} sem código de retorno ('exit') registrado.")
         elif exit_code != 0:
-            errors.append(f"Entrada #{i} falhou com código de saída não-zero: {exit_code} (comando: '{cmd}').")
+            errors.append(f"Entrada #{i} falhou com código de saída não-zero: {exit_code} (comando: '{full_cmd}').")
 
-        # 3. Barramento de vitória por tautologia (0 testes descobertos em comandos de teste)
-        is_test_command = any(k in cmd.lower() for k in ("test", "pytest", "jest", "vitest", "cargo test", "npm t"))
-        tests_count = entry.get("testes_descobertos")
+        # 4. Barramento de vitória por tautologia e verificação estrita de testes
+        is_test_command = any(k in full_cmd.lower() for k in ("test", "pytest", "jest", "vitest", "cargo test", "npm t"))
+        has_tests_decl = "testes_descobertos" in entry
 
-        if is_test_command:
+        if has_tests_decl or is_test_command:
+            tests_count = entry.get("testes_descobertos")
             if tests_count is None:
                 errors.append(
-                    f"Entrada #{i} ('{cmd}') é comando de teste mas não registrou contagem de 'testes_descobertos'."
+                    f"Entrada #{i} ('{full_cmd}') é comando de teste mas não registrou contagem de 'testes_descobertos'."
                 )
-            elif not isinstance(tests_count, int):
-                errors.append(f"Entrada #{i}: 'testes_descobertos' deve ser um número inteiro.")
+            elif isinstance(tests_count, bool) or not isinstance(tests_count, int):
+                errors.append(f"Entrada #{i}: 'testes_descobertos' deve ser um inteiro válido, não booleano.")
             elif tests_count <= 0 and not allow_zero_tests:
                 errors.append(
-                    f"Entrada #{i} bloqueada: 0 testes descobertos no comando '{cmd}'. "
+                    f"Entrada #{i} bloqueada: 0 testes descobertos no comando '{full_cmd}'. "
                     "Status 200/Exit 0 sem testes reais é vitória por tautologia migué."
                 )
             else:
                 total_tests_discovered += tests_count
+
+        # 5. Validação de testes_passados contra testes_descobertos
+        if "testes_passados" in entry:
+            passed = entry["testes_passados"]
+            if isinstance(passed, bool) or not isinstance(passed, int):
+                errors.append(f"Entrada #{i}: 'testes_passados' deve ser um inteiro válido.")
+            elif has_tests_decl and isinstance(entry.get("testes_descobertos"), int) and passed < entry["testes_descobertos"]:
+                errors.append(f"Entrada #{i}: 'testes_passados' ({passed}) menor que 'testes_descobertos' ({entry['testes_descobertos']}).")
 
     return len(errors) == 0, errors, total_tests_discovered
 
@@ -98,6 +129,10 @@ def main():
         print(f"FALHA NA AUDITORIA DO LEDGER ({len(errors)} violações):", file=sys.stderr)
         for err in errors:
             print(f"  [LEDGER ERROR] {err}", file=sys.stderr)
+        sys.exit(1)
+
+    if total_tests == 0 and not args.allow_zero_tests:
+        print("FALHA NA AUDITORIA DO LEDGER: zero testes descobertos em toda a suíte (vitória por tautologia).", file=sys.stderr)
         sys.exit(1)
 
     print(
