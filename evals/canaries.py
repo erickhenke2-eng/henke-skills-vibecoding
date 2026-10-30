@@ -114,7 +114,8 @@ def run_all_canaries() -> tuple[int, int, list[str]]:
             capture_output=True,
             text=True
         )
-        if res.returncode != 0 and "fora do escopo declarado" in res.stderr:
+        output = (res.stderr or "") + "\n" + (res.stdout or "")
+        if res.returncode != 0 and "fora do escopo declarado" in output:
             passed += 1
             reports.append("[PASSOU] Canário 3: spec_drift.py bloqueou arquivo modificado fora da spec.")
         else:

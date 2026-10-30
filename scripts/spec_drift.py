@@ -91,7 +91,7 @@ def get_touched_files(git_root: Path, against: str | None = None) -> set[str]:
 
     # 3. Arquivos untracked (não rastreados)
     res_status = subprocess.run(
-        ["git", "status", "--porcelain"],
+        ["git", "status", "--porcelain", "-uall"],
         cwd=str(git_root),
         capture_output=True,
         text=True,
@@ -172,7 +172,7 @@ def main():
     parser.add_argument("--repo", type=Path, default=None, help="Raiz do repositório Git")
     args = parser.parse_args()
 
-    git_root = args.repo or get_git_root(Path.cwd())
+    git_root = (args.repo or get_git_root(Path.cwd())).resolve()
 
     spec_path = args.spec
     if not spec_path:

@@ -38,13 +38,20 @@ jobs:
       - name: Executar Validador Estrito da Suíte
         run: python scripts/validate_skills.py
 
-      - name: Executar Bateria de Testes Adversariais & Portões
-        run: |
-          python tests/test_validator.py
-          python tests/test_install.py
-          python tests/test_gate.py
-          python tests/test_evals.py
-          python evals/canaries.py
+      - name: Testar Validador contra Adulterações (Astra Canaries)
+        run: python tests/test_validator.py
+
+      - name: Testar Instalador, Transações Atômicas & Rollback
+        run: python tests/test_install.py
+
+      - name: Testar Portão de Custódia (Git Baseline & Scope)
+        run: python tests/test_gate.py
+
+      - name: Testar Spec Drift & Audit Ledger
+        run: python tests/test_evals.py
+
+      - name: Executar Bateria de Canários Adversariais (Evals)
+        run: python evals/canaries.py
 
       - name: Testar Dry-Run do Instalador (Linux/macOS)
         if: runner.os == 'Linux'

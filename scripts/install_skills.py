@@ -110,6 +110,8 @@ def install(repo, user_root, dry_run=False):
                     cursor = cursor / part
                     if cursor.is_symlink():
                         raise ValueError(f"Destino com link simbólico: {cursor}")
+                    if cursor.exists() and not cursor.is_dir():
+                        raise FileExistsError(f"Caminho colide com arquivo existente (esperado diretório): {cursor}")
                 if destination.is_symlink():
                     raise ValueError(f"Destino com link simbólico: {destination}")
                 if destination.exists() and not destination.is_file():
@@ -161,7 +163,11 @@ def install(repo, user_root, dry_run=False):
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(backup, destination)
                 else:
-                    destination.unlink(missing_ok=True)
+                    try:
+                        if destination.is_file() or destination.is_symlink():
+                            destination.unlink()
+                    except OSError:
+                        pass
             except OSError as error:
                 rollback_errors.append(str(error))
         if rollback_errors:
