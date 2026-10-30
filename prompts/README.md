@@ -6,17 +6,19 @@ Cada prompt encadeia as 49 skills da suíte com portões de custódia, disciplin
 
 ---
 
-## Catálogo de Prompts
+## Catálogo de Prompts Oficiais
 
-| Arquivo | Nome do Prompt | Objetivo | Quando Usar |
+| Arquivo | Nome do Prompt | Modo de Execução | Quando Usar |
 |---|---|---|---|
-| [`01-mega-sprint-360-universal.md`](./01-mega-sprint-360-universal.md) | **Mega-Sprint 360 Universal** | Varredura profunda do repositório (Sanidade, Vibecode, Segurança, Runtime/Memória, UI/UX), parada obrigatória para decisão humana e execução cirúrgica pós-aprovação. | Quando você quer que o agente audite um repositório inteiro, ache problemas invisíveis, apresente um menu de decisões de 1 clique e aplique as correções autorizadas com portões de segurança. |
+| [`01-mega-sprint-360-universal.md`](./01-mega-sprint-360-universal.md) | **Mega-Sprint 360 Universal (Com Checkpoint Humano)** | **Pausa na Etapa 3** | Quando você quer que o agente audite tudo, monte o diagnóstico e **PARE** para te perguntar as decisões arquiteturais e escolhas de features antes de tocar em código. |
+| [`02-mega-sprint-360-autopilot.md`](./02-mega-sprint-360-autopilot.md) | **Mega-Sprint 360 Full Autopilot (Sem Parada)** | **Direto de Ponta a Ponta** | Quando você quer colar o prompt, ir dormir ou sair, e deixar o agente auto-aprovar as decisões mais seguras, corrigir os bugs críticos e entregar tudo testado com relatório final. |
 
 ---
 
 ## Como Usar com Qualquer Agente
 
 1. Abra o agente na raiz do repositório desejado (ex: `devin`, `claude`, `codex`).
-2. Copie o conteúdo do arquivo `.md` correspondente ao seu objetivo.
-3. Cole na conversa inicial do agente.
-4. O agente executará as etapas de auditoria de forma autônoma e **parará no Checkpoint Humano** para que você aprove as decisões e features antes de qualquer alteração de código.
+2. Copie o conteúdo do arquivo `.md` correspondente ao seu objetivo:
+   - Quer validar e escolher as opções no meio do caminho? Use o **`01`**.
+   - Quer que ele faça tudo sozinho em uma tacada só? Use o **`02`**.
+3. Cole na conversa inicial do agente e acompanhe a execução.
