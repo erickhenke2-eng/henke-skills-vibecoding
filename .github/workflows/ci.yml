@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate:
-    name: Validação de Integridade & Canários
+    name: Validação de Integridade, Portões & Canários
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -19,6 +19,11 @@ jobs:
     steps:
       - name: Checkout do Repositório
         uses: actions/checkout@v4
+
+      - name: Configurar Git para Testes
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@henke.local"
 
       - name: Configurar Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -33,11 +38,13 @@ jobs:
       - name: Executar Validador Estrito da Suíte
         run: python scripts/validate_skills.py
 
-      - name: Executar Bateria de Testes Adversariais
+      - name: Executar Bateria de Testes Adversariais & Portões
         run: |
           python tests/test_validator.py
           python tests/test_install.py
           python tests/test_gate.py
+          python tests/test_evals.py
+          python evals/canaries.py
 
       - name: Testar Dry-Run do Instalador (Linux/macOS)
         if: runner.os == 'Linux'

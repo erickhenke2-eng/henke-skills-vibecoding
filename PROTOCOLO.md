@@ -153,13 +153,13 @@ Todo relatório de entrega contém, sem exceção:
 
 | Portão | Bloqueia quando | Status |
 |---|---|---|
-| `validate_skills.py` (endurecido) | YAML inválido, chave duplicada, descrição vazia, link quebrado, inventário divergente, `requires` sem produtor, template sem ressalvas, mensagem de sucesso descrevendo só o que foi validado | **[EXISTENTE, a endurecer — um validador, não dois]** |
-| Instaladores | Skill inválida, protocolo ausente, hash divergente, escrita parcial (validar → pacote temporário → publicar com rollback; remover só arquivos do manifesto) | **[EXISTENTE: staging e rollback; sem garantia contra encerramento forçado]** |
+| `validate_skills.py` (endurecido) | YAML inválido, chave duplicada, descrição vazia, link quebrado, inventário divergente, seções obrigatórias ausentes, mensagem de sucesso descrevendo só o que foi validado | **[EXISTENTE]** |
+| Instaladores | Skill inválida, protocolo ausente, hash divergente, escrita parcial (validação prévia, staging, rollback atômico e manifesto anti-zumbis) | **[EXISTENTE]** |
 | `henke_gate.py` | Baseline violado, branch/worktree errada, commit não autorizado, mutação fora do escopo | **[EXISTENTE]** |
-| `spec_drift.py` | Diff tocou arquivo fora do escopo da spec; spec-hash alterado pós-aprovação | **[A CONSTRUIR]** |
-| `audit_ledger.py` | Comando em denylist, snapshot divergente, 0 testes descobertos | **[A CONSTRUIR]** |
-| `evals/` canários | Regressão de recall do auditor (fixtures: cheat `.sr-only`, repo sujo, binário fóssil, spec-drift, ledger malicioso) | **[A CONSTRUIR]** |
-| CI | Qualquer portão acima falhando em push | **[A CONSTRUIR]** |
+| `spec_drift.py` | Diff tocou arquivo fora do escopo da spec; spec-hash alterado pós-aprovação | **[EXISTENTE]** |
+| `audit_ledger.py` | Comando em denylist, snapshot divergente, 0 testes descobertos | **[EXISTENTE]** |
+| `evals/` canários | Regressão de recall do auditor (fixtures: cheat `.sr-only`, repo sujo, binário fóssil, spec-drift, ledger malicioso) | **[EXISTENTE]** |
+| CI | Qualquer portão acima falhando em push | **[EXISTENTE: matriz Ubuntu/Windows x py3.11/py3.12]** |
 
 **Critérios de aceite da rodada** (um portão que bloqueia tudo também falhou):
 1. Rejeitar as adulterações já reproduzidas (suite esvaziada, YAML inválido, link quebrado, chave duplicada) **preservando** aprovação de pacotes válidos.
