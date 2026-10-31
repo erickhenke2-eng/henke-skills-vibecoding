@@ -1,4 +1,4 @@
-﻿# Protocolo Henke de Verificação, Arquitetura & Custódia (v3.1)
+﻿# Protocolo Henke de Verificação, Arquitetura & Custódia (v3.2)
 
 > **Síntese Canônica: Suíte Henke + Google Elephant-Goldfish Model (EGM)**
 > Upstream de referência: `github.com/google/elephant-goldfish-model` — registrar o SHA do commit consultado aqui: `f0ba151b252c9abf1318d9fe857a43265d06de89`. Sem pin, a "síntese" apodrece sem possibilidade de diff.
@@ -159,7 +159,17 @@ Todo relatório de entrega contém, sem exceção:
 | `spec_drift.py` | Diff tocou arquivo fora do escopo da spec; spec-hash alterado pós-aprovação | **[EXISTENTE]** |
 | `audit_ledger.py` | Comando em denylist, snapshot divergente, 0 testes descobertos | **[EXISTENTE]** |
 | `evals/` canários | Regressão de recall do auditor (fixtures: cheat `.sr-only`, repo sujo, binário fóssil, spec-drift, ledger malicioso) | **[EXISTENTE]** |
+| `metricas/crap_score.py` | Função acima do teto CRAP (complexidade ponderada por cobertura) | **[EXISTENTE]** |
+| `metricas/ratchet.py` | Arquivo tocado sai mensuravelmente pior que o baseline; arquivo novo acima do teto | **[EXISTENTE]** |
+| `metricas/fence_check.py` | Dependência apontando para fora da camada declarada em `fence.json` | **[EXISTENTE]** |
+| `metricas/tornado_scan.py` | Amplificação de mudança (arquivos/commit) em tendência de alta | **[EXISTENTE]** |
+| `metricas/assertless_scan.py` | Teste que executa código sem assertar (cobertura-fantasma, mock-only, except engolidor) | **[EXISTENTE]** |
+| `metricas/mutant-hunt` | Mutantes sobreviventes no diff da história | **[A CONSTRUIR: exige runtime de mutação por linguagem]** |
+| `evals/canaries_metricas.py` | Regressão bilateral dos portões métricos (reprova o ruim, aprova o permitido) | **[EXISTENTE]** |
+| `scripts/repo_signals.py` | Coletores churn/metrics/edges (medir ≠ julgar) | **[EXISTENTE]** |
 | CI | Qualquer portão acima falhando em push | **[EXISTENTE: matriz Ubuntu/Windows x py3.11/py3.12]** |
+
+**[PROSA]** O disparo automático dos portões métricos pelo Maestro/audit-vibecode depende de referência em SKILL.md — até lá, a execução é manual e o relatório deve marcá-la como *manual*.
 
 **Critérios de aceite da rodada** (um portão que bloqueia tudo também falhou):
 1. Rejeitar as adulterações já reproduzidas (suite esvaziada, YAML inválido, link quebrado, chave duplicada) **preservando** aprovação de pacotes válidos.
@@ -210,3 +220,12 @@ Correções incorporadas das perícias Devin + Astra (commit `8735048`):
 5. `verified` exige checks não-vazios declarados previamente; `review_status` separado de `outcome`.
 6. Runs por `run_id` (sem estado global); proporcionalidade dispensa manifesto em alteração trivial.
 7. Validador único endurecido (sem segundo validador concorrente); aceite inclui caminho permitido, não só proibido.
+
+## Emendas v3.1.1 → v3.2 (assimilação Uncle Bob, spec `docs/designs/portoes-metricos-ub.md`)
+
+1. Cinco portões métricos portados de `Island-Dev-Crew/uncle-bob-skills` (MIT) para `scripts/metricas/` — prosa de qualidade (§7, `code-cirurgico`, `arch-pastas`, anti-migué de cobertura) vira mecanismo executável.
+2. `repo_signals.py`: coletores locais separam "medir" (AST/git) de "julgar" (portões) — cobertura ausente é 0 declarado, nunca fabricada.
+3. `canaries_metricas.py`: todo portão prova bilateralidade — reprova known-dirty e aprova caminho permitido.
+4. `mutant-hunt` permanece `[A CONSTRUIR]` — valor alto, mas exige mutmut/Stryker/cargo-mutants por linguagem.
+5. Disciplina de exit herdada: `0`=verde, `1`=veredito-vermelho, `2`=não-veredito (fail closed, inclui stdout morto).
+6. Nenhuma skill nova criada: os portões são mecanismos invocáveis, não itens do inventário de 49.

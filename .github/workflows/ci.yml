@@ -53,6 +53,12 @@ jobs:
       - name: Executar Bateria de Canários Adversariais (Evals)
         run: python evals/canaries.py
 
+      - name: Testar Portões Métricos Assimilados
+        run: python tests/test_metric_gates.py
+
+      - name: Executar Canários Bilaterais dos Portões Métricos
+        run: python evals/canaries_metricas.py
+
       - name: Testar Dry-Run do Instalador (Linux/macOS)
         if: runner.os == 'Linux'
         run: bash install.sh --dry-run
