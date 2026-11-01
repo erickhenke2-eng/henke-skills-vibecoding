@@ -84,7 +84,7 @@ Preferências pessoais ficam em `.henke/CONFIG.local.json`, com a mesma estrutur
 ### Fase 3: Estrutura de Especificações (Padrão Google EGM)
 
 Crie a pasta `docs/designs/` na raiz do projeto:
-- Adicione um arquivo `docs/designs/.gitkeep` (ou template inicial `docs/designs/TEMPLATE.md`).
+- Adicione um arquivo `docs/designs/.gitkeep` e inicialize `docs/designs/TEMPLATE.md` (com as seções canônicas `## 4. Escopo Declarado`, `## 5. Pontes de Contrato` e `## 6. Matriz Pre-Mortem de 40 Anos` exigidas por `spec_drift.py` e `contract_closure.py`).
 - Essa pasta será o destino obrigatório de qualquer especificação técnica gerada pelo Elefante antes da escrita de código (Princípio *Artifact-First Delivery*).
 
 ### Fase 4: Varredura de Economia de Tokens (`caveman` / `ponytail`)

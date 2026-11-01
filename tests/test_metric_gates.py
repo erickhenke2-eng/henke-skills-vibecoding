@@ -18,6 +18,7 @@ SIGNALS = repo_root / "scripts" / "repo_signals.py"
 
 from evals.canaries_metricas import run_all_metric_canaries
 from scripts.repo_signals import complexity_py
+from scripts.henke_router import route_request
 import ast as _ast
 
 
@@ -91,6 +92,21 @@ class TestMetricGates(unittest.TestCase):
             code, out = run(SIGNALS, "edges", "--root", td)
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(out), [])
+
+    def test_router_selects_carpinteiro_and_respects_zero_match(self):
+        res_exec = route_request("faz uma mudança cirúrgica e alinha o contrato front e back")
+        self.assertEqual(res_exec["mode"], "EXECUTAR")
+        self.assertEqual(res_exec["archetype"], "CARPINTEIRO")
+        names = [s["name"] for s in res_exec["skills"]]
+        self.assertTrue("henke-code-cirurgico" in names or "henke-code-ponte" in names)
+        res_zero = route_request("quantos planetas existem no sistema solar?")
+        self.assertEqual(res_zero["confidence"], "none")
+        self.assertEqual(res_zero["skills"], [])
+
+    def test_wave2_spec_contract_closure_passes(self):
+        spec_w2 = repo_root / "docs" / "designs" / "wave2-cloudflare-nvidia-tob.md"
+        code, out = run(MET / "contract_closure.py", "--spec", spec_w2, "--repo", repo_root)
+        self.assertEqual(code, 0, out)
 
 
 if __name__ == "__main__":

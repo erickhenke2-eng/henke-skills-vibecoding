@@ -167,3 +167,9 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos & Doutrina Sherlock Holmes [MECÂNICO]
+
+- **Rastreio `Source → Sink` obrigatório (padrão `fp-check`)**: nunca acuse uma linha só porque "o padrão parece suspeito". Rastreie o fluxo completo da origem do dado até o ponto de quebra e registre o comando físico de reprodução.
+- **Mapa de Premissas Não-Impostas (`assumptions[]`)**: em investigações profundas, use `python scripts/metricas/coverage_ledger.py init --root <escopo> --out <ledger.json>` (ou `../scripts/metricas/coverage_ledger.py` relativo à skill instalada) para priorizar arquivos por fan-in/complexidade/hazards e registrar premissas `unenforced` (onde um módulo assume algo que nenhum chamador valida).
+- **Varredura de Falhas Silenciosas**: rode `python scripts/metricas/hazard_scan.py <escopo>` e `python scripts/metricas/assertless_scan.py <testes>` para detectar `catch` engolidor e perigos de runtime.

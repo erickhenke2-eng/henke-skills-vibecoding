@@ -50,6 +50,10 @@ class InstallTests(unittest.TestCase):
             self.assertTrue((target / "scripts/metricas/fence_check.py").is_file())
             self.assertTrue((target / "scripts/metricas/polyglot.py").is_file())
             self.assertTrue((target / "scripts/repo_signals.py").is_file())
+            self.assertTrue((target / "scripts" / "henke_router.py").is_file())
+            self.assertTrue((target / "scripts" / "metricas" / "hazard_scan.py").is_file())
+            self.assertTrue((target / "scripts" / "metricas" / "coverage_ledger.py").is_file())
+            self.assertTrue((target / "scripts" / "metricas" / "contract_closure.py").is_file())
             self.assertEqual((target / "unrelated.txt").read_text(), "preserve")
             self.assertFalse(list(target.glob(".henke-install-*")))
 

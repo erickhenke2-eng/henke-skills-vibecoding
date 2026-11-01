@@ -96,3 +96,10 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos & Blindagem [MECÂNICO]
+
+Valide mecanicamente as leis desta skill (em `scripts/metricas/` do repo ou `../scripts/metricas/` relativo à skill instalada):
+- **3 Gavetas (Inversão de Camada)**: `python scripts/repo_signals.py edges --root <dir> > edges.json && python scripts/metricas/fence_check.py fence.json edges.json` (proíbe Executores importando UI).
+- **Concorrência, Subprocessos e Electron**: `python scripts/metricas/hazard_scan.py <dir>` barra `UNBOUNDED-CONCURRENCY` (`Promise.all`/`asyncio.gather` disparando `ffmpeg`/`spawn` sem semáforo), `SHELL-INJECTION` (`shell=True`/`exec` dinâmico) e `ELECTRON-INSECURE-CONFIG` (`nodeIntegration: true`, `contextIsolation: false`).
+- **Fechamento de Ponte**: `python scripts/metricas/contract_closure.py --spec docs/designs/<feature>.md --repo .` garante que toda ponte declarada em `## 5. Pontes de Contrato` está ligada de ponta a ponta.

@@ -175,3 +175,11 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos & Segurança [MECÂNICO] — Sherlock Holmes (Cloudflare + Trail of Bits)
+
+1. **Varredura estática em 2 passes**: `python scripts/metricas/hazard_scan.py <alvo>` (ou `../scripts/metricas/hazard_scan.py` relativo à skill instalada) detecta `HARDCODED-SECRET`, `ENV-COMMITTED`, `URL-CRED`, `SHELL-INJECTION`, `SQL-CONCAT`, `WEAK-CRYPTO` (escopo de função), `PATH-TRAVERSAL`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG` e `UNJUSTIFIED-SUPPRESSION`.
+2. **Coverage Ledger & Dossier**:
+   - Inicialize fora do repo auditado: `python scripts/metricas/coverage_ledger.py init --root <dir> --out <ledger.json> [--profile quick|standard|deep]`
+   - Preencha cada unidade (`covered` exige `checks[]` com `assumptions[]: {text, status: enforced|unenforced|unknown}`; `finding_confirmed` exige `trace[]` `source → sink` com `file:line` reais no disco + `boundary_crossed` + `real_impact` + `reproduction_cmd_or_poc`; dúvidas externas viram `needs_validation` **sem severidade**).
+   - Valide e gere a seção de lacunas: `python scripts/metricas/coverage_ledger.py verify <ledger.json> --min-pct 90` e `python scripts/metricas/coverage_ledger.py render-gaps <ledger.json>`.

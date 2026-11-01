@@ -320,6 +320,69 @@ def run(suite: Suite):
         else:
             record("D12 executor importa UI (outward, .ts)", "NO-INSTRUMENT")
 
+        # --- D13..D16 + C2: defeitos de segurança, ledger de cobertura e fechamento de ponte (Wave 2) ---
+        fake_key = "sk-proj-" + ("Z9y8X7w6V5u4T3s2R1q0" * 2)
+        (proj / "src" / "exec" / "inseguro.py").write_text(
+            "import subprocess\n"
+            f"OPENAI_KEY = '{fake_key}'\n"
+            "def roda(cmd):\n"
+            "    subprocess.run(cmd, shell=True)\n",
+            encoding="utf-8")
+        (proj / "src" / "exec" / "inseguroTs.ts").write_text(
+            "import { readFileSync } from 'fs';\n"
+            "export function ler(req: any, db: any) {\n"
+            "  const token = Math.random().toString(36);\n"
+            "  db.query(`SELECT * FROM secrets WHERE token = '${token}'`);\n"
+            "  return readFileSync(req.query.path);\n"
+            "}\n",
+            encoding="utf-8")
+        (proj / "src" / "exec" / "seguro.py").write_text(
+            "import subprocess\n"
+            "AWS_DOC = 'AKIAIOSFODNN7EXAMPLE'\n"
+            "def roda_seguro(caminho: str):\n"
+            "    subprocess.run(['ffmpeg', '-i', caminho], shell=False, check=True)\n",
+            encoding="utf-8")
+
+        if suite.has("scripts", "metricas", "hazard_scan.py"):
+            code, _ = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+                                     args=(proj / "src" / "exec" / "inseguro.py",))
+            record("D13 segredo hardcoded + shell=True (.py)",
+                   {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
+            code, _ = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+                                     args=(proj / "src" / "exec" / "inseguroTs.ts",))
+            record("D14 SQLi template + path traversal + weak crypto (.ts)",
+                   {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
+            code, _ = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+                                     args=(proj / "src" / "exec" / "seguro.py",))
+            record("C2 subprocess seguro + chave AWS documental (controle)",
+                   {0: "APPROVED", 1: "FALSE-RED"}.get(code, f"ERROR:{code}"), control=True)
+        else:
+            record("D13 segredo hardcoded + shell=True (.py)", "NO-INSTRUMENT")
+            record("D14 SQLi template + path traversal + weak crypto (.ts)", "NO-INSTRUMENT")
+
+        if suite.has("scripts", "metricas", "coverage_ledger.py"):
+            led_out = t / "bench_ledger.json"
+            suite.run_gate("scripts", "metricas", "coverage_ledger.py",
+                           args=("init", "--root", proj / "src", "--out", led_out))
+            code, _ = suite.run_gate("scripts", "metricas", "coverage_ledger.py",
+                                     args=("verify", led_out))
+            record("D15 auditoria incompleta (unidades pending no coverage_ledger)",
+                   {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
+        else:
+            record("D15 auditoria incompleta (unidades pending no coverage_ledger)", "NO-INSTRUMENT")
+
+        (proj / "spec_incompleta.md").write_text(
+            "# Spec\n## 4. Escopo Declarado\n- `src/ok.py`\n- `src/nao_implementado.py`\n"
+            "## 5. Pontes de Contrato\n- ponte: `src/ok.py::funcaoFantasma -> src/ui/tela.py`\n",
+            encoding="utf-8")
+        if suite.has("scripts", "metricas", "contract_closure.py"):
+            code, _ = suite.run_gate("scripts", "metricas", "contract_closure.py",
+                                     args=("--spec", proj / "spec_incompleta.md", "--repo", proj))
+            record("D16 código de menos (arquivo declarado ausente + ponte quebrada)",
+                   {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
+        else:
+            record("D16 código de menos (arquivo declarado ausente + ponte quebrada)", "NO-INSTRUMENT")
+
     return rows
 
 

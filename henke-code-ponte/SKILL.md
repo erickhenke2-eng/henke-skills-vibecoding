@@ -148,3 +148,9 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos & Fechamento de Ponte [MECÂNICO]
+
+Declare toda ponte front↔back ou módulo↔handler↔IPC na seção `## 5. Pontes de Contrato` da spec (`docs/designs/<feature>.md`) e valide com `python scripts/metricas/contract_closure.py --spec docs/designs/<feature>.md --repo .` (ou `../scripts/metricas/contract_closure.py` relativo à skill instalada):
+- **Modo Identificador**: `- ponte: packages/shared/schemas.ts::MeuContrato -> apps/web/api.ts` (verifica definição na origem e uso no destino).
+- **Modo String / Canal IPC**: `- ponte: apps/desktop/main/ipc.ts::"clips:list" -> apps/desktop/preload/index.ts` (verifica o literal do canal nos dois lados da ponte, impedindo canal órfão).

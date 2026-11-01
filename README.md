@@ -156,7 +156,7 @@ A Suíte Henke é governada pelo [**`PROTOCOLO.md`**](./PROTOCOLO.md), que defin
 - Skills são instruções para o agente, **não garantia de ausência de bugs**. Revise o diff e execute testes relevantes antes de aceitar mudanças.
 - O diário `.henke/DIARIO.md` é opcional e deve registrar trabalho relevante, não cada ajuste trivial.
 - Confira o inventário com `python3 scripts/validate_skills.py` (no Windows, use `py scripts/validate_skills.py`). Requer Python 3.11+ e PyYAML (`python -m pip install -r requirements.txt`). A aprovação é estrutural; não certifica o comportamento das skills.
-- Portões métricos em `scripts/metricas/` (CRAP, ratchet, fence, tornado, assertless — portados de `uncle-bob-skills`, MIT) julgam TSV/JSON coletado por `scripts/repo_signals.py`, poliglotas via `polyglot.py` (`.py`, `.ts`, `.tsx`, `.js`, `.mjs`, `.rs`, `.go`); são instalados junto às skills por `install_skills.py`. Canários bilaterais em `evals/canaries_metricas.py` provam que cada portão reprova o ruim e aprova o permitido.
+- Portões métricos e de segurança em `scripts/metricas/` (`crap_score`, `ratchet`, `fence_check`, `tornado_scan`, `assertless_scan`, `hazard_scan`, `coverage_ledger`, `contract_closure`) julgam TSV/JSON/código coletados por `scripts/repo_signals.py` e roteados por `scripts/henke_router.py`, poliglotas via `polyglot.py` (`.py`, `.ts`, `.tsx`, `.js`, `.mjs`, `.rs`, `.go`); são instalados junto às skills por `install_skills.py`. Canários bilaterais em `evals/canaries_metricas.py` provam que cada portão reprova o ruim e aprova o permitido.
 - Para atualizar uma instalação por cópia, faça `git pull` e execute o instalador novamente.
 
 ---

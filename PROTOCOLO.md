@@ -1,4 +1,4 @@
-﻿# Protocolo Henke de Verificação, Arquitetura & Custódia (v3.2)
+# Protocolo Henke de Verificação, Arquitetura & Custódia (v3.3)
 
 > **Síntese Canônica: Suíte Henke + Google Elephant-Goldfish Model (EGM)**
 > Upstream de referência: `github.com/google/elephant-goldfish-model` — registrar o SHA do commit consultado aqui: `f0ba151b252c9abf1318d9fe857a43265d06de89`. Sem pin, a "síntese" apodrece sem possibilidade de diff.
@@ -167,9 +167,29 @@ Todo relatório de entrega contém, sem exceção:
 | `metricas/mutant-hunt` | Mutantes sobreviventes no diff da história | **[A CONSTRUIR: exige runtime de mutação por linguagem]** |
 | `evals/canaries_metricas.py` | Regressão bilateral dos portões métricos (reprova o ruim, aprova o permitido) | **[EXISTENTE]** |
 | `scripts/repo_signals.py` | Coletores churn/metrics/edges (medir ≠ julgar) | **[EXISTENTE]** |
+| `scripts/henke_router.py` | Roteador determinístico de catálogo (`nvidia-skill-finder`): veto de modo (`ANALISAR` default / `requires_human_auth` em `PUBLISH`), desambiguação negativa declarativa e seleção de 0..3 skills | **[EXISTENTE]** |
+| `metricas/hazard_scan.py` | Scanner poliglota em 2 passes (`masked` + `raw` sem comentários): `HARDCODED-SECRET`, `ENV-COMMITTED`, `URL-CRED`, `SHELL-INJECTION`, `SQL-CONCAT`, `WEAK-CRYPTO`, `PATH-TRAVERSAL`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG` e `UNJUSTIFIED-SUPPRESSION` | **[EXISTENTE]** |
+| `metricas/coverage_ledger.py` | Ledger de cobertura de auditoria e Dossier (`cloudflare/security-audit-skill` + Trail of Bits `fp-check`): unidades priorizadas com `sha256` (`STALE`/`UNMAPPED`), `assumptions[]` (`enforced\|unenforced`), verificação física de `file:line` em `trace[]`, proibição de severidade em `needs_validation` e geração mecânica de "O que NÃO foi verificado" | **[EXISTENTE]** |
+| `metricas/contract_closure.py` | Fechamento de contrato e escopo (`declared ⊆ existing` em `## 4.` + pontes `- ponte: origem::simbolo -> destino` em `## 5.` nos modos identificador e string/IPC) | **[EXISTENTE]** |
 | CI | Qualquer portão acima falhando em push | **[EXISTENTE: matriz Ubuntu/Windows x py3.11/py3.12]** |
 
-**[PROSA]** O disparo automático dos portões métricos pelo Maestro/audit-vibecode agora tem referência em SKILL.md (audit-vibecode, code-cirurgico, arch-pastas, ops-preflight, henke-skills) — a decisão de *quando* acionar continua do agente e é reportada no ledger.
+**[PROSA]** O disparo automático dos portões métricos pelo Maestro/audit-vibecode agora tem referência em SKILL.md (audit-vibecode, audit-seguranca, arch-seguranca, blindagem, debug-raiz, code-cirurgico, code-ponte, plan-historias, prepara, arch-pastas, ops-preflight, henke-skills) — auxiliado mecanicamente pelo `scripts/henke_router.py`.
+
+### 10.1 As 3 Composições de Arquétipo (Trindade Operacional)
+
+Cada arquétipo acionado pelo Maestro/`henke_router.py` é uma composição enumerada de modo + portões, nunca metáfora vazia:
+
+1. **🕵️‍♂️ Sherlock Holmes (`ANALISAR` — Investigação & Auditoria Forense)**:
+   - **[MECÂNICO]** Universo e cobertura auditada controlados por `coverage_ledger.py` (`init` → `verify` → `render-gaps`), com `sha256` por arquivo e rastreio de `assumptions[]` (`unenforced`).
+   - **[MECÂNICO]** Varredura estática obrigatória com `hazard_scan.py` e `assertless_scan.py`.
+   - **[MECÂNICO]** Todo `finding_confirmed` exige `trace[]` (`source → sink`) com `file:line` verificados no disco + `boundary_crossed` + `real_impact` + `reproduction_cmd_or_poc` (6 gates `fp-check`); hipóteses bloqueadas entram como `needs_validation` sem severidade.
+2. **🪚 Carpinteiro Full-Stack (`EXECUTAR` — Nem Código de Mais, Nem de Menos)**:
+   - **[MECÂNICO]** Proibido escrever código de mais: `spec_drift.py` (`touched ⊆ declared`), `ratchet.py` (arquivo tocado não piora) e `crap_score.py`.
+   - **[MECÂNICO]** Proibido escrever código de menos ou quebrar ponte: `contract_closure.py` (`declared ⊆ existing` + fechamento das pontes `origem::simbolo -> destino` por identificador ou canal string/IPC), `fence_check.py`, `assertless_scan.py` e `hazard_scan.py`.
+   - **[PROSA]** Toda alteração em parser, regex ou condição de borda exige teste bilateral (caso válido + vizinho hostil).
+3. **🏛️ Estadista de 40 Anos (`PLANEJAR` — Premeditação & Spec EGM)**:
+   - **[MECÂNICO]** Spec criada a partir de `docs/designs/TEMPLATE.md` com `## 4. Escopo Declarado` e `## 5. Pontes de Contrato` validáveis por `spec_drift.py` e `contract_closure.py`.
+   - **[PROSA + MECÂNICO]** Matriz Pre-Mortem de 5 pontos obrigatória na spec: (1) Queda de energia / escrita atômica `.tmp`, (2) Escala 100x / semáforo (`UNBOUNDED-CONCURRENCY`), (3) Direção de dependência (`fence_check.py`), (4) Evolução/migração de schema, (5) Fronteira de falsificabilidade (canário bilateral).
 
 **Critérios de aceite da rodada** (um portão que bloqueia tudo também falhou):
 1. Rejeitar as adulterações já reproduzidas (suite esvaziada, YAML inválido, link quebrado, chave duplicada) **preservando** aprovação de pacotes válidos.
@@ -229,3 +249,11 @@ Correções incorporadas das perícias Devin + Astra (commit `8735048`):
 4. `mutant-hunt` permanece `[A CONSTRUIR]` — valor alto, mas exige mutmut/Stryker/cargo-mutants por linguagem.
 5. Disciplina de exit herdada: `0`=verde, `1`=veredito-vermelho, `2`=não-veredito (fail closed, inclui stdout morto).
 6. Nenhuma skill nova criada: os portões são mecanismos invocáveis, não itens do inventário de 49.
+
+## Emendas v3.2 → v3.3 (Wave 2: Cloudflare + NVIDIA + Trail of Bits + Trindade, spec `docs/designs/wave2-cloudflare-nvidia-tob.md`)
+
+1. `scripts/henke_router.py`: roteador determinístico estilo `nvidia-skill-finder` derivado dos 49 `SKILL.md`, com tabela de desambiguação negativa, veto de modo (`ANALISAR` default / `requires_human_auth` em `PUBLISH`) e suporte a `0` skills (`confidence: none`).
+2. `scripts/metricas/hazard_scan.py`: scanner poliglota em 2 passes (`masked` + `raw` sem comentários) cobrindo segredos hardcoded, `.env` commitado, SQL/shell injection, crypto fraco em escopo de função, path traversal, concorrência sem semáforo, deserialização insegura, XSS raw HTML, Electron inseguro e supressão `hazard-ok` com razão obrigatória.
+3. `scripts/metricas/coverage_ledger.py`: ledger determinístico de auditoria (`cloudflare/security-audit-skill` + Trail of Bits `fp-check` & `audit-context-building`) com `sha256` por unidade, priorização por risco, `assumptions[]` (`enforced|unenforced`), validação física de `file:line` em `trace[]` e geração mecânica de "O que NÃO foi verificado".
+4. `scripts/metricas/contract_closure.py` + `docs/designs/TEMPLATE.md`: prova `declared ⊆ existing` e fechamento de pontes (`## 5. Pontes de Contrato`) por identificador ou string/canal IPC.
+5. Trindade Operacional formalizada em §10.1: `Sherlock Holmes` (`ANALISAR`), `Carpinteiro Full-Stack` (`EXECUTAR`) e `Estadista de 40 Anos` (`PLANEJAR`).

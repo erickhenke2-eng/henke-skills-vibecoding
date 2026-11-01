@@ -142,3 +142,9 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos & Segurança [MECÂNICO]
+
+Antes de commitar ou aprovar blindagem: `python scripts/metricas/hazard_scan.py <arquivos-ou-dir>` (ou `../scripts/metricas/hazard_scan.py` relativo à skill instalada).
+- Bloqueia (`exit 1`) segredos hardcoded (`sk-`, `ghp_`, `AKIA`, `AIza`, `PRIVATE KEY`, `VITE_*SECRET`), `.env`/`*.pem` commitados no Git (`ENV-COMMITTED`), `shell=True`/`exec` dinâmico, SQL interpolado e `Math.random()` em função de auth/token.
+- Exceções legítimas exigem supressão vinculada a regra e motivo: `# hazard-ok: SHELL-INJECTION — comando fixo validado`. Marcador `hazard-ok` sem motivo falha com `UNJUSTIFIED-SUPPRESSION`.

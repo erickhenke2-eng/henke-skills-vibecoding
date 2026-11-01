@@ -183,3 +183,10 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos & Doutrina do Estadista de 40 Anos [MECÂNICO]
+
+Ao gerar `docs/designs/<feature>.md`, siga a estrutura canônica de `docs/designs/TEMPLATE.md`:
+1. **`## 4. Escopo Declarado`**: um bullet `- \`caminho/arquivo\`` por arquivo a tocar (validado por `spec_drift.py` e `contract_closure.py`).
+2. **`## 5. Pontes de Contrato`**: um bullet `- ponte: \`origem::simbolo -> destino\`` por integração entre camadas/módulos/IPC (validado por `scripts/metricas/contract_closure.py`).
+3. **`## 6. Casos de Borda & Matriz Pre-Mortem de 40 Anos`**: responda obrigatoriamente aos 5 pontos do Estadista (Queda de energia/escrita atômica `.tmp`, Escala 100x/semáforo, Direção de dependência `fence_check.py`, Migração de schema e Canário bilateral).

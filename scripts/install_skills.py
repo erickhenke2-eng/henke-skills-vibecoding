@@ -37,7 +37,7 @@ def inventory(repo):
             files.append(rel)
     # [HENKE-PATCH] portões métricos instalados junto às skills que os invocam
     for rel in sorted(repo.glob("scripts/metricas/*.py")) + \
-            [repo / "scripts" / "repo_signals.py"]:
+            [repo / "scripts" / "repo_signals.py", repo / "scripts" / "henke_router.py"]:
         if rel.is_file():
             files.append(rel.relative_to(repo))
     return files
