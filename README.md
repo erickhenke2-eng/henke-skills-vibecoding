@@ -1,133 +1,185 @@
-# ⚡ Suíte Henke — 49 Macro-Skills para Vibecoding de Respeito
+# ⚡ Suíte Henke — 49 Macro-Skills & Portões Métricos para Vibecoding de Respeito
 
-> **"De um vibecoder para vibecoders: o kit definitivo para a sua IA parar de fazer cagada, não apagar metade do seu projeto e finalmente codar como gente grande."**  
-> *(E vamos ser bem sinceros: a galera de TI 'raiz' adora torcer o nariz e zoar quem vibecoda... mas na primeira sexta-feira às 18h com o servidor caindo, até eles vão clonar esse repositório no sigilo pra salvar o dia).*
+> **"De um vibecoder para vibecoders: o kit definitivo para a sua IA parar de fazer cagada, não apagar metade do seu projeto, não forjar testes e finalmente codar como engenheiro sênior."**  
+> *(E sejamos sinceros: a galera de TI 'raiz' adora torcer o nariz e zoar quem vibecoda... mas na primeira sexta-feira às 18h com o servidor caindo, até eles vão clonar esse repositório no sigilo pra salvar o dia).*
 
-Usa o padrão aberto **Agent Skills (`SKILL.md`)**, com instalação prevista para **Codex**, **Claude Code** e **Gemini CLI**. Outros agentes, como **Cursor** e **Antigravity**, dependem das versões, diretórios e configurações específicas de cada ferramenta; verifique a descoberta de skills no seu ambiente.
-
----
-
-## 🎯 Por que essa suíte existe? (O desabafo de quem coda no flow)
-
-Todo mundo que cria projetos no puro fluxo de vibecoding já passou pelo mesmo pesadelo clássico:
-1. Você pede pra IA ajustar um detalhe simples e ela **apaga 400 linhas de código que estavam funcionando**, deixando aquele vergonhoso `// ... resto do seu código aqui`.
-2. Ela mete aquele **degradê roxo neon com ciano** e sombras cafonas que gritam de longe: *"fui feito por IA em 2 segundos"*.
-3. Você passa 4 dias sem abrir o projeto, volta e **nem você nem a IA lembram** onde pararam ou por que diabos aquele arquivo `temp_v2_teste.ts` existe.
-4. Dá um erro no servidor e a IA tenta 5 chutes aleatórios, quebrando a rota, o banco e a sua paciência.
-
-A **Suíte Henke** nasceu pra acabar de vez com essa palhaçada. São **49 Macro-Skills** desenhadas sob a filosofia de que **o usuário não precisa ser programador de carreira para construir software de nível profissional**:
-
-* **Você fala como ser humano:** Manda um comando direto no chat tipo `"debuga o chat do meu aplicativo"`, `"organiza essa bagunça de pastas"` ou `"tira essa cara feia de template de IA da tela"`.
-* **A IA opera como Engenheiro Sênior:** A skill assume o volante em 5 fases nos bastidores — lê o diário local, caça a causa raiz sem chutar, aplica a menor alteração cirúrgica possível (Minimal Diff), roda os testes do terminal e anota silenciosamente o que fez no diário de bordo (`.henke/DIARIO.md`).
-* **Linguagem simples vale mais que ouro:** Zero pedantismo acadêmico. A IA te explica o que fez em português cristalino e sem enrolação, do jeito que uma pessoa normal conversa.
-* **Autossuficiência total (Do guardanapo ao deploy):** Brainstorm, radar de referências, arquitetura de 3 Gavetas, desmembramento de código gigante, anti-slop visual, banco local blindado, caça-bugs forense e scripts de deploy. Tudo pronto sem depender de nenhuma skill externa.
+A **Suíte Henke** usa o padrão aberto **Agent Skills (`SKILL.md`)** e é compatível nativamente com **Google Antigravity**, **Gemini CLI**, **Claude Code**, **Codex**, **Devin**, **Cursor** e qualquer harness de IA agentic moderno.
 
 ---
 
-## 👑 O Comando Mestre: `/henke-skills` (Um Comando para Governar Todas)
+## 🎯 Por que essa suíte existe? (O pesadelo clássico do vibecoding)
+
+Quem cria sistemas com IA no fluxo de vibecoding conhece bem o ciclo da loucura:
+1. **O Apagão Silencioso:** Você pede para a IA ajustar um botão e ela deleta 400 linhas do seu backend, deixando um infame `// ... resto do seu código continua aqui`.
+2. **O Visual de Template Cafona:** Ela cospe gradientes roxo-neon com ciano, botões cheios de emojis e cards aninhados que gritam: *"fui gerado por IA preguiçosa"*.
+3. **A Amnésia de Sessão:** Você fica 3 dias sem abrir o repo, volta e nem você nem a IA lembram onde pararam, por que uma função existe ou o que falta testar.
+4. **O Chute Aleatório no Debug:** O servidor dá erro 500 e a IA tenta 7 chutes no escuro, quebrando o banco, o contrato front-back e a sua paciência.
+5. **A Vitória Teatral (Falso-Verde):** A IA afirma que "todos os testes passaram com 100% de sucesso", mas quando você vai ver, ela escreveu testes sem nenhuma asserção real (`assertless`), criou mocks circulares ou usou truques de CSS (`.sr-only`) para forçar o teste a passar.
+
+A **Suíte Henke v3.3** nasceu para aniquilar esses 5 problemas combinando **49 Macro-Skills especializadas** com **8 Portões Mecânicos determinísticos (fail-closed exit code)**.
+
+---
+
+## 🏛️ A Filosofia dos 3 Arquétipos Operacionais
+
+Não existe "uma IA genérica que faz tudo ao mesmo tempo". Para blindar o projeto, a Suíte Henke opera sob 3 posturas mentais distintas e complementares:
+
+```mermaid
+flowchart LR
+    E["ESTADISTA (40 Anos)<br/>Planejamento & Fronteiras"] -->|Spec & Pontes Fechadas| C["CARPINTEIRO (Full-Stack)<br/>Código Cirúrgico & Contratos"]
+    C -->|Diff & Testes Reais| S["SHERLOCK (Forense)<br/>Auditoria & Caça-Bugs"]
+    S -.->|Causa Raiz & Transição| C
+```
+
+1. **🕵️ O SHERLOCK HOLMES (Perito Forense & Auditor Implacável):**
+   - **Postura:** Desconfiança metódica, raciocínio abdutivo e evidência física irrefutável.
+   - **Regra:** Nunca acredita em afirmação sem prova, nunca altera código durante a investigação e proíbe "severidade teatral" sem cadeia de exploração real.
+   - **Skills:** [`henke-audit-seguranca`](./henke-audit-seguranca/SKILL.md), [`henke-debug-raiz`](./henke-debug-raiz/SKILL.md), [`henke-audit-vibecode`](./henke-audit-vibecode/SKILL.md).
+   - **Portões Mecânicos:** [`repo_signals.py`](./scripts/repo_signals.py), [`hazard_scan.py`](./scripts/metricas/hazard_scan.py), [`coverage_ledger.py`](./scripts/metricas/coverage_ledger.py).
+
+2. **🔨 O CARPINTEIRO BRABO (Engenheiro Full-Stack Pragmático):**
+   - **Postura:** O bisturi cirúrgico. Constrói com a menor mudança necessária (Minimal Diff), alinha contratos rígidos entre pontas e nunca quebra pontes por falta de cuidado.
+   - **Regra:** Nem código a mais (`touched ⊆ declared` via `spec_drift`), nem código a menos (`declared ⊆ touched` via `contract_closure`).
+   - **Skills:** [`henke-code-cirurgico`](./henke-code-cirurgico/SKILL.md), [`henke-code-ponte`](./henke-code-ponte/SKILL.md), [`henke-blindagem`](./henke-blindagem/SKILL.md).
+   - **Portões Mecânicos:** [`spec_drift.py`](./scripts/spec_drift.py), [`contract_closure.py`](./scripts/metricas/contract_closure.py), [`ratchet.py`](./scripts/metricas/ratchet.py), [`assertless_scan.py`](./scripts/metricas/assertless_scan.py).
+
+3. **🏛️ O ESTADISTA DE 40 ANOS (Planejador de Longo Alcance):**
+   - **Postura:** Visão de estadista. Premedita a arquitetura, desenha fronteiras limpas (3 Gavetas: UI $\to$ Core $\to$ Executores) e cria matrizes de pré-mortem antes de encostar no código.
+   - **Regra:** Nenhum recurso é criado sem especificação clara de escopo, pontes de contrato e plano de reversão.
+   - **Skills:** [`henke-plan-historias`](./henke-plan-historias/SKILL.md), [`henke-plan-mvp`](./henke-plan-mvp/SKILL.md), [`henke-prepara`](./henke-prepara/SKILL.md).
+   - **Portões Mecânicos:** [`TEMPLATE.md`](./docs/designs/TEMPLATE.md), [`fence_check.py`](./scripts/metricas/fence_check.py).
+
+---
+
+## 🚦 Os 8 Portões Mecânicos (Zero Falso-Verde, Zero Vitória Falsa)
+
+Texto em prosa não segura agente de IA sob pressão. O que protege código de verdade são **scripts com código de saída (`exit 0` = aprovado, `exit 1` = reprovado, `exit 2` = erro/fail-closed)**:
+
+| Portão Mecânico | Script | O que ele barra fisicamente |
+|---|---|---|
+| **Fechamento de Contrato** | [`contract_closure.py`](./scripts/metricas/contract_closure.py) | **Código de menos**: barra arquivos declarados ausentes e pontes quebradas (símbolos ou canais IPC literais `"clips:bake"` não consumidos nas duas pontas). |
+| **Deriva de Especificação** | [`spec_drift.py`](./scripts/spec_drift.py) | **Código a mais / à toa**: barra qualquer arquivo alterado no `git status` que não conste na seção `## 4. Escopo Declarado` da spec. |
+| **Dossiê de Cobertura & SHA-256** | [`coverage_ledger.py`](./scripts/metricas/coverage_ledger.py) | **Pular arquivos difíceis**: indexa 100% dos arquivos com hash SHA-256. Reprova unidades `pending`, arquivos alterados pós-auditoria (`STALE-HASH`) ou cobertura abaixo de 90%. |
+| **Varredura de Perigos (Hazards)** | [`hazard_scan.py`](./scripts/metricas/hazard_scan.py) | **10 riscos críticos**: `SHELL-INJECTION`, `HARDCODED-SECRET`, `SQL-CONCAT`, `PATH-TRAVERSAL`, `WEAK-CRYPTO`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG` e `.env` commitado. Reprova supressões sem motivo (`UNJUSTIFIED-SUPPRESSION`). |
+| **Caça a Testes Fantasmas** | [`assertless_scan.py`](./scripts/metricas/assertless_scan.py) | **Testes teatrais**: reprova testes sem nenhuma asserção real, testes puramente `mock-only` (que só verificam spies sem asserir saída) e testes engolindo erros com `catch`. |
+| **Complexidade vs Cobertura (CRAP)** | [`crap_score.py`](./scripts/metricas/crap_score.py) | **Código espaguete sem teste**: mede complexidade ciclomática poliglotta (Python, TypeScript, Rust, Go) ponderada pela cobertura de testes. |
+| **Catraca Anti-Regressão** | [`ratchet.py`](./scripts/metricas/ratchet.py) | **Piora gradual**: barra qualquer commit que piore as métricas em relação ao baseline do repositório. |
+| **Fronteira Arquitetural (Fence)** | [`fence_check.py`](./scripts/metricas/fence_check.py) | **Violação de camadas**: garante que a UI nunca importe diretamente executores pesados de I/O ou backend interno (`ui -> core -> exec`). |
+
+---
+
+## 🧠 Como Funciona o Roteamento em 2 Estágios (`/henke-skills`)
 
 Você **não precisa memorizar** 49 skills nem adivinhar qual chamar primeiro. Basta rodar:
 
 ```bash
-/henke-skills "o que você quer fazer"
+/henke-skills "investiga por que o login tá dando timeout"
 ```
 
-O **Maestro (`henke-skills`)** assume a postura de Engenheiro Chefe:
-1. **Verificação de Memória Automática:** Se o projeto for novo ou estiver sem memória, ele roda silenciosamente a nova skill [`henke-prepara`](./henke-prepara/SKILL.md) para gerar `.henke/` e a pasta de designs `docs/designs/`.
-2. **Economia Brutal de Tokens:** Verifica se você possui `caveman` ou `ponytail` instalados no ambiente para comprimir saídas e forçar Minimal Diff.
-3. **Despacho da Trilha Exata:** Classifica sua intenção e dispara as skills certas na ordem cronológica perfeita (Concepção ➜ Design EGM ➜ Código Cirúrgico ➜ Auditoria Adversarial ➜ Deploy).
+### O Despacho Inteligente:
+1. **Estágio 0 (Descoberta Leve):** A IDE/CLI só injeta o nome e 1 linha de descrição no prompt. As 49 skills **não poluem o contexto de tokens**.
+2. **Estágio 1 (Roteador Determinístico):** O script [`henke_router.py`](./scripts/henke_router.py) analisa a intenção em milissegundos contra a fonte única da verdade (`SKILL.md` frontmatters + pontos de partida):
+   - Aplica a tabela de **Desambiguação Negativa** (`NEGATIVE_DISAMBIGUATION`, padrão *NVIDIA Skills Finder*).
+   - Trava o **Modo de Operação** (`ANALISAR` por padrão em perguntas/auditorias; `requires_human_auth: true` em comandos `PUBLISH` como deploy, rollback ou faxina destrutiva).
+   - Devolve **apenas as 1 a 3 skills essenciais** para a rodada atual (ou `skills: []` se a pergunta for externa), economizando até 93% de tokens de instrução.
+3. **Transição Dinâmica de Domínio:** Se a investigação do `SHERLOCK` revelar que a falha não era na tela, mas sim no contrato IPC do backend, o protocolo faz o **handoff automático** para o `CARPINTEIRO` com [`henke-code-ponte`](./henke-code-ponte/SKILL.md) e [`henke-code-cirurgico`](./henke-code-cirurgico/SKILL.md).
 
 ---
 
-## 🚀 Prompts Mestres para Agentes Autônomos (Devin, Claude Code, Codex, Antigravity)
+## 📊 Benchmark Adversarial Oficial (`evals/bench_corpus.py`)
 
-Quer que uma IA faça uma **varredura 360 completa e autônoma** no seu repositório sem você precisar digitar comando por comando?
+A eficácia da Suíte Henke é testada contra um corpus físico de **15 classes de defeitos reais (`D1..D16`)** e **2 controles legítimos (`D9, C2`)**:
 
-Visite a galeria de prompts em [`prompts/`](./prompts/README.md):
-* **[`01-mega-sprint-360-universal.md`](./prompts/01-mega-sprint-360-universal.md)**: O prompt mestre universal que encadeia as 49 skills em 4 etapas (Custódia & Memória ➜ Raio-X Forense 360 ➜ Checkpoint Humano de 1 Clique ➜ Execução Cirúrgica & Portões).
+| Métrica | Base Original (`f2f9c64`) | Wave 1 (`f847f25`) | **Wave 2 (`ece01ff` — Atual)** |
+|---|---|---|---|
+| **Cobertura Instrumental de Defeitos** | `3/15` (20,0%) | `11/15` (73,3%) | **`15/15` (100,0%)** |
+| **Defeitos Detectados (Recall)** | `3/15` (20,0%) | `11/15` (73,3%) | **`15/15` (100,0%)** |
+| **Controles Legítimos Aprovados (Zero Falso-Positivo)** | `0` | `1/1` (100%) | **`2/2` (100%)** |
+| **Canários Bilaterais (`canaries_metricas.py`)** | `5/5` | `38/38` | **`50/50` (100% PASS)** |
+| **Testes de Instalação e Portões (`tests/`)** | `29/29` | `38/38` | **`40/40` (100% PASS)** |
+
+> **Prova física em monorepo real (`virusclip`):** O scanner varreu **491 arquivos** em segundos sem estourar limites, indexou **264 unidades de código** no `coverage_ledger.py` com SHA-256 e priorizou automaticamente as 3 superfícies mais perigosas sem nenhuma intervenção humana.
 
 ---
 
-## 🧭 As 49 Macro-Skills por Categoria
+## 🧭 O Catálogo das 49 Macro-Skills
 
 ### 1. Concepção & Ideias (`henke-plan-*`)
-* [`henke-plan-radar`](./henke-plan-radar/SKILL.md): Radar de referências e scraping na web para alimentar o app com soluções reais.
-* [`henke-plan-ideias`](./henke-plan-ideias/SKILL.md): Construtor de produto — transforma rascunhos soltos em conceitos viáveis.
-* [`henke-plan-destrava`](./henke-plan-destrava/SKILL.md): Destravador criativo — sugere as 3 próximas features mais lógicas e divertidas.
-* [`henke-plan-mvp`](./henke-plan-mvp/SKILL.md): Guilhotina de escopo — corta excessos para rodar a primeira versão hoje.
-* [`henke-plan-historias`](./henke-plan-historias/SKILL.md): Tradutor de desejos em cartões de tarefas sequenciais para a IA.
-* [`henke-plan-fluxo`](./henke-plan-fluxo/SKILL.md): Mapeador de telas e jornadas completas do usuário com diagramas.
+* [`henke-plan-radar`](./henke-plan-radar/SKILL.md): Radar de referências e benchmarking de produtos concorrentes reais.
+* [`henke-plan-ideias`](./henke-plan-ideias/SKILL.md): Transforma desejos soltos em conceitos de produto sólidos.
+* [`henke-plan-destrava`](./henke-plan-destrava/SKILL.md): Destravador de bloqueio criativo — sugere as 3 próximas features mais lógicas.
+* [`henke-plan-mvp`](./henke-plan-mvp/SKILL.md): Guilhotina de escopo — corta o supérfluo para rodar a primeira versão hoje.
+* [`henke-plan-historias`](./henke-plan-historias/SKILL.md): Traduz requisitos em cartões de tarefa sequenciais com critério de pronto.
+* [`henke-plan-fluxo`](./henke-plan-fluxo/SKILL.md): Mapeia jornadas de usuário, transições de estado e telas em diagramas.
 
 ### 2. Memória Contínua & Diário (`henke-mem-*`)
-* [`henke-mem-diario`](./henke-mem-diario/SKILL.md): Diário de bordo automático em `.henke/DIARIO.md` para a IA nunca esquecer nada.
-* [`henke-mem-retomada`](./henke-mem-retomada/SKILL.md): Recuperador de contexto — "Onde parei?" explicado em 1 minuto.
-* [`henke-mem-decisoes`](./henke-mem-decisoes/SKILL.md): Cofre de decisões em `.henke/DECISOES.md` blindando o app contra regressões.
-* [`henke-mem-mapa`](./henke-mem-mapa/SKILL.md): Mapa do tesouro da codebase explicando o papel de cada pasta e arquivo.
-* [`henke-mem-faxina`](./henke-mem-faxina/SKILL.md): Caçador de arquivos zumbis, temporários e código abandonado.
+* [`henke-mem-diario`](./henke-mem-diario/SKILL.md): Mantém o diário de bordo contínuo em `.henke/DIARIO.md`.
+* [`henke-mem-retomada`](./henke-mem-retomada/SKILL.md): Responde "onde foi que eu parei?" em 1 minuto ao voltar ao projeto.
+* [`henke-mem-decisoes`](./henke-mem-decisoes/SKILL.md): Cofre de Decisões Técnicas em `.henke/DECISOES.md` (evita regressão por IA).
+* [`henke-mem-mapa`](./henke-mem-mapa/SKILL.md): Desenha o mapa do tesouro da codebase explicando o papel de cada pasta.
+* [`henke-mem-faxina`](./henke-mem-faxina/SKILL.md): Caça arquivos zumbis, temporários e código morto (exige trava PUBLISH).
 
-### 3. Arquitetura & Estrutura (`henke-arch-*`)
-* [`henke-arch-stack`](./henke-arch-stack/SKILL.md): Seleção enxuta de tecnologias leves (bloqueia frameworks pesados).
-* [`henke-arch-pastas`](./henke-arch-pastas/SKILL.md): Estrutura de 3 Gavetas (UI, Core/Orquestrador e Executores I/O).
-* [`henke-arch-desmembrar`](./henke-arch-desmembrar/SKILL.md): Desmembra arquivos monstros de 2.000 linhas em módulos profundos sem quebrar nada.
-* [`henke-arch-monorepo`](./henke-arch-monorepo/SKILL.md): Orquestrador de monorepos híbridos (Electron + Front + Python/Rust) com 1 comando.
-* [`henke-arch-banco`](./henke-arch-banco/SKILL.md): Modelagem simples de SQLite (modo WAL, busy_timeout) e Postgres.
-* [`henke-arch-seguranca`](./henke-arch-seguranca/SKILL.md): Blindagem contra comandos vulneráveis e isolamento de processos.
-* [`henke-blindagem`](./henke-blindagem/SKILL.md): Diretrizes universais de blindagem, escrita atômica e concorrência segura.
+### 3. Arquitetura & Blindagem Estrutural (`henke-arch-*`)
+* [`henke-arch-stack`](./henke-arch-stack/SKILL.md): Seleciona tecnologias enxutas e consolidada, bloqueando dependências inchadas.
+* [`henke-arch-pastas`](./henke-arch-pastas/SKILL.md): Arquitetura das 3 Gavetas (Visual $\to$ Core $\to$ Executores I/O).
+* [`henke-arch-desmembrar`](./henke-arch-desmembrar/SKILL.md): Desmembra arquivos monstros (500+ linhas) em módulos profundos e coesos.
+* [`henke-arch-monorepo`](./henke-arch-monorepo/SKILL.md): Monorepos limpos (Electron + Frontend + Backend) com execução em 1 comando.
+* [`henke-arch-banco`](./henke-arch-banco/SKILL.md): Modelagem relacional descomplicada (SQLite modo WAL, busy_timeout e migrações limpas).
+* [`henke-arch-seguranca`](./henke-arch-seguranca/SKILL.md): Blindagem estrutural contra vazamento de chaves e permissões excessivas.
+* [`henke-blindagem`](./henke-blindagem/SKILL.md): Regras de ouro de escrita atômica, idempotência e controle de processos filhos.
 
 ### 4. Visual Profissional & Anti-AI-Slop (`henke-ui-*`)
-* [`henke-ui-antislop`](./henke-ui-antislop/SKILL.md): Exterminador de clichês de IA (gradientes roxo/neon, cards aninhados, emojis em botões).
-* [`henke-ui-paleta`](./henke-ui-paleta/SKILL.md): Gerador de paletas harmônicas com tokens semânticos e contraste real.
-* [`henke-ui-tipografia`](./henke-ui-tipografia/SKILL.md): Mestre da hierarquia de fontes, entrelinhas e espaçamentos padronizados.
-* [`henke-ui-estados`](./henke-ui-estados/SKILL.md): Construtor dos 4 estados vitais (Vazio, Carregando, Erro Amigável, Sucesso).
-* [`henke-ui-feedback`](./henke-ui-feedback/SKILL.md): Resposta imediata a cliques, spinners táteis e trava contra clique duplo.
-* [`henke-ui-responsivo`](./henke-ui-responsivo/SKILL.md): Ajuste fluido para celular, tablet, TV e monitores ultrawide sem barras duplas.
-* [`henke-ui-auditoria`](./henke-ui-auditoria/SKILL.md): Nota de design de 0 a 10 com plano de melhoria visual cirúrgico.
+* [`henke-ui-antislop`](./henke-ui-antislop/SKILL.md): Extermina clichês de IA (degradês roxo/neon, cards aninhados, sombras dramáticas).
+* [`henke-ui-paleta`](./henke-ui-paleta/SKILL.md): Identidade visual com paletas harmônicas de alto contraste real.
+* [`henke-ui-tipografia`](./henke-ui-tipografia/SKILL.md): Escala tipográfica, entrelinhas e espaçamentos profissionais.
+* [`henke-ui-estados`](./henke-ui-estados/SKILL.md): Cobre os 4 estados obrigatórios de UI (Carregando, Vazio, Erro, Sucesso).
+* [`henke-ui-feedback`](./henke-ui-feedback/SKILL.md): Resposta tátil a cliques, spinners elegantes e trava contra duplo-clique.
+* [`henke-ui-responsivo`](./henke-ui-responsivo/SKILL.md): Adapta telas para celular, tablet e desktop sem quebras de layout.
+* [`henke-ui-auditoria`](./henke-ui-auditoria/SKILL.md): Dá nota de 0 a 10 para o design com lista priorizada de refinamentos.
 
-### 5. Vibecoding Puro & Pontes (`henke-code-*`)
-* [`henke-code-ponte`](./henke-code-ponte/SKILL.md): Conexão infalível de botões da interface com rotas e IPC do servidor.
-* [`henke-code-mock`](./henke-code-mock/SKILL.md): Fábrica de dados fictícios hiper-realistas para testar telas sem esperar backend.
-* [`henke-code-cirurgico`](./henke-code-cirurgico/SKILL.md): Implementação milimétrica (Minimal Diff) — mexe só nas linhas pedidas.
-* [`henke-code-formulario`](./henke-code-formulario/SKILL.md): Formulários com validação inteligente e persistência das últimas escolhas.
-* [`henke-code-autentica`](./henke-code-autentica/SKILL.md): Login, cadastro e sessão persistente sem transformar o código num labirinto.
-* [`henke-code-integracao`](./henke-code-integracao/SKILL.md): Conexão resiliente com APIs externas, webhooks e gateways de pagamento.
-* [`henke-code-comentarios`](./henke-code-comentarios/SKILL.md): Tradutor de código em comentários em português direto e claro.
-* [`henke-code-3d-scene`](./henke-code-3d-scene/SKILL.md): Criação e otimização de cenas 3D (Three.js/Canvas) com liberação correta de VRAM.
+### 5. Construção Cirúrgica & Vibecoding (`henke-code-*`)
+* [`henke-code-ponte`](./henke-code-ponte/SKILL.md): Conecta frontend e backend com contratos tipados e canais IPC alinhados.
+* [`henke-code-mock`](./henke-code-mock/SKILL.md): Cria fixtures hiper-realistas para desenvolver a tela antes do backend existir.
+* [`henke-code-cirurgico`](./henke-code-cirurgico/SKILL.md): Bisturi de código — faz alterações milimétricas sem reescrever o arquivo inteiro.
+* [`henke-code-formulario`](./henke-code-formulario/SKILL.md): Formulários acessíveis com validação amigável e UX fluida.
+* [`henke-code-autentica`](./henke-code-autentica/SKILL.md): Autenticação completa e segura (login, cadastro, cookies HttpOnly e sessões).
+* [`henke-code-integracao`](./henke-code-integracao/SKILL.md): Integração com serviços de terceiros, pagamentos e webhooks resilientes.
+* [`henke-code-comentarios`](./henke-code-comentarios/SKILL.md): Documenta o "porquê" das decisões em português claro, eliminando comentários inúteis.
+* [`henke-code-3d-scene`](./henke-code-3d-scene/SKILL.md): Cenas 3D na web (Three.js/Fiber) com descarte limpo de memória/VRAM.
 
-### 6. Debugging Profundo & Caça-Bugs (`henke-debug-*`)
-* [`henke-debug-backend`](./henke-debug-backend/SKILL.md): Detetive forense de rotas, banco, workers e processos em segundo plano.
-* [`henke-debug-frontend`](./henke-debug-frontend/SKILL.md): Raio-X de telas brancas, botões mudos e estados reativos travados.
-* [`henke-debug-raiz`](./henke-debug-raiz/SKILL.md): Investigador científico de causa raiz — proíbe chutes e exige prova do erro.
-* [`henke-debug-console`](./henke-debug-console/SKILL.md): Limpador implacável de avisos amarelos e erros vermelhos do terminal.
-* [`henke-debug-rede`](./henke-debug-rede/SKILL.md): Especialista em falhas de comunicação, portas ocupadas e bloqueios de CORS.
-* [`henke-debug-sanidade`](./henke-debug-sanidade/SKILL.md): Check-up relâmpago de 30 segundos testando se os órgãos vitais continuam de pé.
-* [`henke-debug-reversao`](./henke-debug-reversao/SKILL.md): Máquina do tempo — desfaz lambanças de IA com segurança sem apagar seus dados.
+### 6. Investigação & Debugging Forense (`henke-debug-*`)
+* [`henke-debug-raiz`](./henke-debug-raiz/SKILL.md): Investigação científica de causa raiz: isola camadas, bissecta e exige prova física.
+* [`henke-debug-frontend`](./henke-debug-frontend/SKILL.md): Diagnóstico de telas brancas, dados que somem e reatividade travada.
+* [`henke-debug-backend`](./henke-debug-backend/SKILL.md): Diagnóstico de falhas 500, deadlocks de banco e workers em looping.
+* [`henke-debug-console`](./henke-debug-console/SKILL.md): Análise forense de erros e warnings de terminal/console.
+* [`henke-debug-rede`](./henke-debug-rede/SKILL.md): Diagnóstico de requisições de rede, CORS, timeouts e payloads quebrados.
+* [`henke-debug-sanidade`](./henke-debug-sanidade/SKILL.md): Check-up preventivo de 30 segundos (build verde, testes passando, console limpo).
+* [`henke-debug-reversao`](./henke-debug-reversao/SKILL.md): Reversão atômica de mudanças desastrosas sem perder o trabalho do usuário.
 
-### 7. Auditoria de Risco & Saúde (`henke-audit-*` / `henke-refactor-*`)
-* [`henke-audit-vibecode`](./henke-audit-vibecode/SKILL.md): Pente-fino caçando gambiarras, condições de corrida e processos zumbis.
-* [`henke-audit-seguranca`](./henke-audit-seguranca/SKILL.md): Varredura rigorosa de credenciais vazadas e permissões frouxas.
-* [`henke-refactor-duplicado`](./henke-refactor-duplicado/SKILL.md): Unifica lógicas repetidas em uma única fonte da verdade limpa.
-* [`henke-refactor-nomes`](./henke-refactor-nomes/SKILL.md): Renomeia variáveis e funções esquisitas para termos claros do mundo real.
+### 7. Auditoria Adversarial & Refatoração (`henke-audit-*` / `henke-refactor-*`)
+* [`henke-audit-vibecode`](./henke-audit-vibecode/SKILL.md): Caça gambiarras, trapaças de teste (`.sr-only`), métricas falsas e atalhos.
+* [`henke-audit-seguranca`](./henke-audit-seguranca/SKILL.md): Auditoria profunda contra vulnerabilidades, injeções e segredos expostos.
+* [`henke-refactor-duplicado`](./henke-refactor-duplicado/SKILL.md): Unifica código repetido e lógicas duplicadas em uma fonte da verdade.
+* [`henke-refactor-nomes`](./henke-refactor-nomes/SKILL.md): Renomeia variáveis e funções crípticas para nomes que se explicam sozinhos.
 
-### 8. Deploy & Publicação (`henke-ops-*`)
-* [`henke-ops-env`](./henke-ops-env/SKILL.md): Gerenciador seguro de arquivos `.env` e geração de `.env.example`.
-* [`henke-ops-preflight`](./henke-ops-preflight/SKILL.md): Check-in do avião — roda compilação de produção e testes antes de subir pro ar.
-* [`henke-ops-deploy`](./henke-ops-deploy/SKILL.md): Automação para gerar instaladores desktop (.exe) ou publicar na nuvem (VPS/Docker/Vercel).
+### 8. Operações & Publicação Segura (`henke-ops-*`)
+* [`henke-ops-env`](./henke-ops-env/SKILL.md): Configuração de variáveis de ambiente com geração automática de `.env.example`.
+* [`henke-ops-preflight`](./henke-ops-preflight/SKILL.md): Checklist rigoroso de pré-voo antes de publicar ou fazer deploy.
+* [`henke-ops-deploy`](./henke-ops-deploy/SKILL.md): Automação para subir apps em servidores, containers Docker ou Vercel.
 
 ---
 
-## ⚡ Como Instalar
+## ⚡ Como Instalar (1 Comando)
 
-### Opção 1: Windows (PowerShell)
-Clone o repositório e rode o instalador de 1 comando:
+### Windows (PowerShell):
 ```powershell
 git clone https://github.com/erickhenke2-eng/henke-skills-vibecoding.git
 cd henke-skills-vibecoding
 python -m pip install -r requirements.txt
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
-> O script copia as skills para os diretórios oficiais: `~/.agents/skills` (Codex/padrão aberto), `~/.gemini/config/skills` (Antigravity/Gemini) e `~/.claude/skills` (Claude Code).
 
-### Opção 2: Linux / macOS (Bash)
+### Linux / macOS (Bash):
 ```bash
 git clone https://github.com/erickhenke2-eng/henke-skills-vibecoding.git
 cd henke-skills-vibecoding
@@ -135,38 +187,38 @@ python3 -m pip install -r requirements.txt
 chmod +x install.sh && ./install.sh
 ```
 
----
+> **O que o instalador faz:**  
+> Ele valida a estrutura de todas as 49 skills, instala os scripts e portões mecânicos em `scripts/` e publica atomicamente nos 4 diretórios canônicos de agentes:
+> - `~/.gemini/config/skills` (Google Antigravity e Gemini CLI)
+> - `~/.claude/skills` (Anthropic Claude Code)
+> - `~/.agents/skills` (OpenAI Codex / Padrão Aberto)
+> - `~/.gemini/skills` (Mirror de Compatibilidade)
 
 ---
 
-## 🛡️ Protocolo Canônico & A Regra do Auditor Independente
+## 🧪 Como Rodar os Testes e o Benchmark Localmente
 
-Regra em prosa não segura agente sob pressão — o que protege código de verdade é **portão mecânico, custódia limpa e auditor independente**.
+Para provar a robustez dos portões mecânicos na sua máquina:
 
-A Suíte Henke é governada pelo [**`PROTOCOLO.md`**](./PROTOCOLO.md), que define:
-1. **Regra Portão vs Produto**: Quando o teste antigo e o novo requisito conflitam, você conserta o teste — nunca engana os dois com truques de estilo (como `<span class="sr-only">` para forçar teste a passar).
-2. **O Auditor Não Cita, Ele REPRODUZ**: Todo relatório de entrega deve conter um *ledger* de comandos executáveis, e o auditor deve re-executá-los verbatim no terminal.
-3. **Custódia Rígida de Ambiente**: Confirmação obrigatória de branch/worktree, baseline do usuário preservado e variáveis de ambiente apontando para os binários nativos da worktree atual.
-4. **Ressalvas Transparentes**: Proibição de afirmar "100% testado" sem ter rodado a ponta física real; obrigatoriedade da seção *"O que NÃO foi verificado"*.
-5. **O Fluxo dos Dois Agentes**: Nunca use o mesmo agente para codar e se auto-aprovar no mesmo prompt. Use um agente construtor (`henke-code-cirurgico`, `henke-blindagem`) e outro agente perito em conversa separada (`henke-audit-vibecode`) para caçar atalhos e reproduzir as provas.
+```bash
+# 1. Valida estrutura das 49 skills
+python scripts/validate_skills.py
 
-## 🔎 Ativação, segurança e verificação
+# 2. Roda os 5 canários comportamentais do PROTOCOLO
+python evals/canaries.py
 
-- As skills de análise e implementação podem ser ativadas conforme a tarefa pelo agente, quando a ferramenta suporta descoberta automática. Para ações sensíveis, invoque explicitamente `henke-mem-faxina`, `henke-debug-reversao` ou `henke-ops-deploy`; a execução de remoções, reversões ou publicação ainda requer autorização adequada.
-- Skills são instruções para o agente, **não garantia de ausência de bugs**. Revise o diff e execute testes relevantes antes de aceitar mudanças.
-- O diário `.henke/DIARIO.md` é opcional e deve registrar trabalho relevante, não cada ajuste trivial.
-- Confira o inventário com `python3 scripts/validate_skills.py` (no Windows, use `py scripts/validate_skills.py`). Requer Python 3.11+ e PyYAML (`python -m pip install -r requirements.txt`). A aprovação é estrutural; não certifica o comportamento das skills.
-- Portões métricos e de segurança em `scripts/metricas/` (`crap_score`, `ratchet`, `fence_check`, `tornado_scan`, `assertless_scan`, `hazard_scan`, `coverage_ledger`, `contract_closure`) julgam TSV/JSON/código coletados por `scripts/repo_signals.py` e roteados por `scripts/henke_router.py`, poliglotas via `polyglot.py` (`.py`, `.ts`, `.tsx`, `.js`, `.mjs`, `.rs`, `.go`); são instalados junto às skills por `install_skills.py`. Canários bilaterais em `evals/canaries_metricas.py` provam que cada portão reprova o ruim e aprova o permitido.
-- Para atualizar uma instalação por cópia, faça `git pull` e execute o instalador novamente.
+# 3. Roda os 45 canários bilaterais dos portões métricos (reprova o ruim e aprova o bom)
+python evals/canaries_metricas.py
+
+# 4. Executa a suíte de 40 testes unitários de integração
+python -m unittest discover -s tests -v
+
+# 5. Roda o Benchmark Adversarial oficial (15 classes de defeito + 2 controles)
+python evals/bench_corpus.py --suite-dir .
+```
 
 ---
 
-## 📄 Licença
+## 📜 Licença
 
 Distribuído sob a licença **MIT**. Veja [`LICENSE`](./LICENSE) para mais detalhes.
-
-### Recuperação da instalação
-
-Os dois instaladores usam `scripts/install_skills.py`: validam, preparam cópias e backups e restauram arquivos em caso de erro recuperável. Arquivos de outras skills são preservados. Para testar sem alterar sua instalação, use `--user-root <diretório>` no Bash ou `-UserRoot <diretório>` no PowerShell.
-
-A troca é atômica por arquivo; os quatro destinos não formam uma transação resistente a queda de energia ou encerramento forçado. Não execute instaladores concorrentes no mesmo destino. Backups são preservados e seus caminhos informados se o rollback falhar.

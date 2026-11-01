@@ -1,0 +1,13 @@
+{
+  "versao_protocolo": "3.1.1",
+  "stack": "Python 3.12 (unittest) + Shell Scripts (PowerShell/Bash) + Agent Skills Spec (SKILL.md YAML)",
+  "economia_tokens": {
+    "caveman": "auto",
+    "ponytail": "auto",
+    "perguntar_novamente": true
+  },
+  "auditoria_adversarial": {
+    "exigir_ledger_comandos": true,
+    "proibir_sr_only_hacks": true
+  }
+}
