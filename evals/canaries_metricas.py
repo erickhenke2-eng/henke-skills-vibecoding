@@ -722,6 +722,37 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         expect("Canário M61: hazard_scan manifesto sem entradas órfãs e dogfooding limpo no repo (exit 0)",
                manifest_valid and not orphan_found and code_df == 0 and "0 finding(s)" in out_df)
 
+        # M62: funcao one-line nao deve herdar "token de seguranca" da linha anterior
+        # (regressao do off-by-one: m.start() no '\n' fazia sl apontar para a linha
+        # da funcao anterior, contrabandeando jwt.verify para dentro do fn_body)
+        one_dir = t / "m62_oneline"
+        one_dir.mkdir()
+        (one_dir / "svc.ts").write_text(
+            "function verifyAuth(t: string) { return jwt.verify(t, process.env.S); }\n"
+            "function authDecode(req: any) { const p = jwt.decode(req.query.token); return p; }\n",
+            encoding="utf-8")
+        code_j2, out_j2 = run(MET / "hazard_scan.py", one_dir)
+        expect("Canário M62: hazard_scan flag jwt.decode em função one-line mesmo com jwt.verify na linha anterior",
+               code_j2 == 1 and "JWT-NONE-OR-UNVERIFIED" in out_j2)
+
+        # M63: vocab destrutivo cobre 1a pessoa do presente e variantes
+        # ("como deleto/excluo/apago/destruo", "destruir") — perguntas continuam
+        # ANALISAR, mas a trava requires_human_auth tem que ligar em todo modo.
+        m63_ok = True
+        m63_detail = ""
+        for p63 in ("como deleto a tabela users?",
+                    "como excluo o banco?",
+                    "quero destruir tudo, como?",
+                    "como apago o banco?"):
+            c63, o63 = run(ROUTER, "--prompt", p63)
+            j63 = json.loads(o63) if c63 == 0 else {}
+            if not (j63.get("mode") == "ANALISAR" and j63.get("requires_human_auth") is True):
+                m63_ok = False
+                m63_detail = f"'{p63}' -> {j63.get('mode')} auth={j63.get('requires_human_auth')}"
+                break
+        expect("Canário M63: pergunta destrutiva em 1a pessoa -> ANALISAR com requires_human_auth",
+               m63_ok, m63_detail)
+
     return passed, total, reports
 
 

@@ -487,7 +487,7 @@ def find_functions(text: str, lang: str):
             e = _brace_end(masked, b)
             if e == -1:
                 continue
-            sl = masked.count("\n", 0, m.start()) + 1
+            sl = masked.count("\n", 0, m.start() + len(seg) - len(seg.lstrip())) + 1
             el = masked.count("\n", 0, e) + 1
             key = (sl, name)
             if key not in seen:
@@ -521,7 +521,7 @@ def find_functions(text: str, lang: str):
                         break
             if e == -1 or e < sb:
                 continue
-            sl = masked.count("\n", 0, m.start()) + 1
+            sl = masked.count("\n", 0, m.start() + len(seg) - len(seg.lstrip())) + 1
             el = masked.count("\n", 0, e) + 1
             key = (sl, name)
             if key not in seen:
@@ -541,7 +541,7 @@ def find_functions(text: str, lang: str):
         e = _brace_end(masked, b)
         if e == -1:
             continue
-        sl = masked.count("\n", 0, m.start()) + 1
+        sl = masked.count("\n", 0, m.start() + len(seg) - len(seg.lstrip())) + 1
         el = masked.count("\n", 0, e) + 1
         key = (sl, name)
         if key in seen:

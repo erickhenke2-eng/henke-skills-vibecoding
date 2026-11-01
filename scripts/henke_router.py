@@ -40,8 +40,10 @@ def _norm(text: str) -> str:
 
 # Vocabulário destrutivo e PUBLISH (PROTOCOLO §1) — exige autorização humana explícita
 DESTRUCTIVE_SIGNALS = (
-    "deleta", "deletar", "delete", "exclui", "excluir", "drop", "drop table",
-    "truncate", "wipe", "wipe database", "destroi", "destroy", "purge",
+    "deleta", "deletar", "deleto", "deletamos", "delete", "exclui", "excluir",
+    "excluo", "excluímos", "apago", "apagamos", "drop", "drop table",
+    "truncate", "wipe", "wipe database", "destroi", "destruo", "destruir",
+    "destruímos", "destroy", "purge",
     "force-push", "push --force", "force push", "push -f", "reset --hard",
     "hard reset", "rm -rf", "apaga o banco", "apagar o banco", "derruba",
 )
