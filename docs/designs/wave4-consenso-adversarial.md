@@ -61,6 +61,7 @@ Três vetores de contorno que nenhum portão atual cobre, consolidados num conse
 - `scripts/audit_ledger.py`
 - `scripts/henke_router.py`
 - `evals/canaries_metricas.py`
+- `evals/hazard_fixtures_manifest.json`
 - `PROTOCOLO.md`
 
 ## 5. Pontes de Contrato
@@ -69,7 +70,7 @@ Três vetores de contorno que nenhum portão atual cobre, consolidados num conse
 - ponte: `scripts/audit_ledger.py::resolve_npm_lifecycle -> evals/canaries_metricas.py`
 - ponte: `scripts/metricas/contract_closure.py::check_contract_closure -> evals/canaries_metricas.py`
 - ponte: `scripts/metricas/coverage_ledger.py::verify_ledger -> evals/canaries_metricas.py`
-- ponte: `scripts/metricas/assertless_scan.py::scan_path -> evals/canaries_metricas.py`
+- ponte: `scripts/metricas/assertless_scan.py::scan_polyglot -> evals/canaries_metricas.py`
 
 ## 6. Casos de Borda & Matriz Pre-Mortem de 40 Anos (Estadista)
 

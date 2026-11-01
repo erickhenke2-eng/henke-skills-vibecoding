@@ -21,6 +21,11 @@
   },
   {
     "file": "evals/canaries_metricas.py",
+    "rule": "URL-CRED",
+    "reason": "cred-embedded URL fixture string for Canary M66 dist scan"
+  },
+  {
+    "file": "evals/canaries_metricas.py",
     "rule": "IMDS-V1",
     "reason": "IMDS v1 fixture string for Canary M48"
   },

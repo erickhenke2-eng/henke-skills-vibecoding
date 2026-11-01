@@ -397,6 +397,7 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             "scripts/metricas/assertless_scan.py",
             "scripts/metricas/fence_check.py",
             "scripts/metricas/contract_closure.py",
+            "scripts/metricas/metaconfig_diff.py",
         ]
 
     scope_paths = _touched_files(repo_root)

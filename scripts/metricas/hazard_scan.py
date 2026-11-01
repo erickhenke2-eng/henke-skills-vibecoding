@@ -144,6 +144,10 @@ _JWT_INSEC_FILE_RE = re.compile(
 )
 _JWT_DECODE_CALL_RE = re.compile(r"\bjwt\.decode\s*\(")
 _AUTH_FN_CONTEXT_RE = re.compile(r"(?i)(?:auth|token|verify_?token|session|guard|middleware|login)")
+_FRAME_INTROSPECTION_RE = re.compile(
+    r"sys\._getframe|inspect\.stack\s*\(|inspect\.currentframe|Error\.prepareStackTrace|new\s+Error\s*\([^)]*\)\s*\.stack")
+_IPC_REGISTER_RE = re.compile(r"\bipcMain\b|\bipcRenderer\b|\.handle\s*\(|\.invoke\s*\(")
+_DYN_INDEX_RE = re.compile(r"\b(?:handlers?|routes|actions|cmds?|fns|registry|obj)\s*\[\s*(?![\s'\"\d])\w+\s*\]")
 
 _SSRF_SINK_RE = re.compile(
     r"""\b(?:fetch|axios\.(?:get|post|request)|got|requests\.(?:get|post|request)|httpx\.(?:get|post)|urlopen)\s*\(\s*(?![`'"])([A-Za-z_$][\w$.]*)"""
@@ -266,17 +270,23 @@ def _get_manifest_exemptions(file_path: Path) -> set[tuple[str, str]]:
     return set()
 
 
-def scan_file(path: Path) -> tuple[int, list[tuple[str, str, str, str]], bool]:
+DIST_EXTS = {".js", ".mjs", ".cjs", ".map", ".html", ".json"}
+DIST_MAX_FILE_BYTES = 8 * 1024 * 1024
+
+
+def scan_file(path: Path, extra_exts: set | None = None,
+              max_bytes: int = MAX_FILE_BYTES) -> tuple[int, list[tuple[str, str, str, str]], bool]:
     """Escaneia um arquivo de código ou manifesto IaC/Cloud. Retorna (1 se escaneado, findings, skipped_oversize)."""
     ext = path.suffix.lower()
     is_cfg = _is_config_file(path)
-    if ext not in SCAN_EXTS and not is_cfg:
+    allowed = SCAN_EXTS | (extra_exts or set())
+    if ext not in allowed and not is_cfg:
         return 0, [], False
     try:
         size = path.stat().st_size
     except OSError:
         return 0, [], True
-    if size > MAX_FILE_BYTES:
+    if size > max_bytes:
         return 0, [], True
     try:
         raw = path.read_text(encoding="utf-8")
@@ -384,6 +394,10 @@ def scan_file(path: Path) -> tuple[int, list[tuple[str, str, str, str]], bool]:
     # --- PASS 1: Código mascarado (strings e comentários vazios) ---
     masked = _pg.mask_py(raw) if ext == ".py" else _pg.mask_c_like(raw, ext)
 
+    for m in _FRAME_INTROSPECTION_RE.finditer(masked):
+        lineno = masked.count("\n", 0, m.start()) + 1
+        add("FRAME-INTROSPECTION", lineno, f"line:{lineno}", "frame/stack introspection or Error().stack parsing")
+
     if ext == ".py":
         for m in _PY_SHELL_RE.finditer(masked):
             lineno = masked.count("\n", 0, m.start()) + 1
@@ -486,6 +500,10 @@ def scan_file(path: Path) -> tuple[int, list[tuple[str, str, str, str]], bool]:
             for m_id in _IDOR_SINK_RE.finditer(fn_body):
                 line_hit = sl + fn_body.count("\n", 0, m_id.start())
                 add("IDOR-NO-OWNERSHIP", line_hit, fn_name, "direct ORM lookup/mutation by req.params/query/body without ownership/session check in function")
+        if _IPC_REGISTER_RE.search(fn_body):
+            for m_di in _DYN_INDEX_RE.finditer(fn_body):
+                line_hit = sl + fn_body.count("\n", 0, m_di.start())
+                add("DYNAMIC-DISPATCH-IPC", line_hit, fn_name, f"blind dynamic dispatch inside IPC handler ({m_di.group(0)})")
 
     return 1, findings, False
 
@@ -525,12 +543,15 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
     return out
 
 
-def scan_path(target: Path) -> tuple[int, list[tuple[str, str, str, str]], int]:
-    """Escaneia arquivo ou diretório. Retorna (files_scanned, findings, oversize_skipped)."""
+def scan_path(target: Path, dist_mode: bool = False) -> tuple[int, list[tuple[str, str, str, str]], int]:
+    """Escaneia arquivo ou diretório. Retorna (files_scanned, findings, oversize_skipped).
+    `dist_mode` amplia extensões para bundles compilados (.js/.mjs/.cjs/.map/.html/.json)
+    e eleva o teto para 8MB por arquivo."""
     if not target.exists():
         return 0, [], 0
     if target.is_file():
-        sc, fnd, ov = scan_file(target)
+        sc, fnd, ov = scan_file(target, DIST_EXTS if dist_mode else None,
+                                DIST_MAX_FILE_BYTES if dist_mode else MAX_FILE_BYTES)
         return sc, fnd, (1 if ov else 0)
 
     total_scanned = 0
@@ -542,9 +563,10 @@ def scan_path(target: Path) -> tuple[int, list[tuple[str, str, str, str]], int]:
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for fn in sorted(filenames):
             p = Path(dirpath) / fn
-            if p.suffix.lower() not in SCAN_EXTS and not _is_config_file(p):
+            if p.suffix.lower() not in SCAN_EXTS and not (dist_mode and p.suffix.lower() in DIST_EXTS) and not _is_config_file(p):
                 continue
-            sc, fnd, ov = scan_file(p)
+            sc, fnd, ov = scan_file(p, DIST_EXTS if dist_mode else None,
+                                    DIST_MAX_FILE_BYTES if dist_mode else MAX_FILE_BYTES)
             total_scanned += sc
             all_findings.extend(fnd)
             if ov:
@@ -554,19 +576,29 @@ def scan_path(target: Path) -> tuple[int, list[tuple[str, str, str, str]], int]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Scanner poliglota de hazards de segurança e runtime.")
-    ap.add_argument("paths", nargs="+", help="Arquivos ou diretórios a escanear")
+    ap.add_argument("paths", nargs="*", help="Arquivos ou diretórios a escanear")
+    ap.add_argument("--dist", type=str, default=None,
+                        help="Re-escaneia diretório de build/bundle antes de PUBLISH (extensões de artefato, teto 8MB)")
     ap.add_argument("--json", action="store_true", help="Emite saída em JSON")
     args = ap.parse_args()
+
+    targets = list(args.paths)
+    dist_mode = False
+    if args.dist:
+        targets = [args.dist]
+        dist_mode = True
+    if not targets:
+        ap.error("informe ao menos um path ou --dist <dir>")
 
     total_files = 0
     findings: list[tuple[str, str, str, str]] = []
     oversize = 0
-    for raw_p in args.paths:
+    for raw_p in targets:
         p = Path(raw_p)
         if not p.exists():
             print(f"ERRO: caminho inexistente: {raw_p}", file=sys.stderr)
             sys.exit(2)
-        sc, fnd, ov = scan_path(p)
+        sc, fnd, ov = scan_path(p, dist_mode=dist_mode)
         total_files += sc
         findings.extend(fnd)
         oversize += ov

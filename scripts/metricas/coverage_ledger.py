@@ -37,6 +37,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 for _s in (sys.stdout, sys.stderr, sys.stdin):
@@ -170,6 +171,9 @@ def verify_ledger(
     min_pct: float = 90.0,
     require_critic: bool = False,
     max_out_of_scope_pct: float = 20.0,
+    max_oos_per_dir_pct: float = 20.0,
+    min_dir_units: int = 3,
+    against: str | None = None,
 ) -> tuple[bool, list[str], dict]:
     try:
         data = json.loads(ledger_path.read_text(encoding="utf-8"))
@@ -288,6 +292,44 @@ def verify_ledger(
         if out_pct > max_out_of_scope_pct:
             errors.append(f"EXCESSIVE-OUT-OF-SCOPE: unidades fora de escopo {out_pct:.1f}% ({counts['out_of_scope']}/{total_units}) excede o teto permitido de {max_out_of_scope_pct:.1f}%")
 
+    # 3b. Anti-diluição por diretório: teto de out_of_scope avaliado por pasta-pai
+    # (impede concentrar código perigoso no core/ diluindo com DTOs auditáveis na ui/).
+    # Diretórios com menos de `min_dir_units` unidades são isentos.
+    dir_totals: dict[str, int] = {}
+    dir_oos: dict[str, int] = {}
+    for u in units:
+        if u.get("status") not in VALID_UNIT_STATUS:
+            continue
+        parent = u.get("path", "").replace("\\", "/").rsplit("/", 1)[0] or "."
+        dir_totals[parent] = dir_totals.get(parent, 0) + 1
+        if u.get("status") == "out_of_scope":
+            dir_oos[parent] = dir_oos.get(parent, 0) + 1
+    for d in sorted(dir_totals):
+        if dir_totals[d] >= min_dir_units:
+            d_pct = 100.0 * dir_oos.get(d, 0) / dir_totals[d]
+            if d_pct > max_oos_per_dir_pct:
+                errors.append(
+                    f"DILUTED-OUT-OF-SCOPE: diretório '{d}/' tem {d_pct:.1f}% de unidades fora de escopo "
+                    f"({dir_oos.get(d, 0)}/{dir_totals[d]}) excedendo o teto por-diretório de {max_oos_per_dir_pct:.1f}%")
+
+    # 3c. Arquivo criado na própria PR não pode ser out_of_scope (diluição por nascença).
+    if against:
+        res_added = subprocess.run(
+            ["git", "-c", "core.quotePath=false", "diff", "--name-status", against, "--"],
+            cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if res_added.returncode == 0:
+            added_files = {
+                ln.split("\t")[-1].strip().replace("\\", "/")
+                for ln in res_added.stdout.splitlines() if ln.startswith("A\t")
+            }
+            for u in units:
+                rel_u = u.get("path", "").replace("\\", "/")
+                if u.get("status") == "out_of_scope" and rel_u in added_files:
+                    errors.append(
+                        f"NEW-FILE-OUT-OF-SCOPE: arquivo '{rel_u}' criado nesta PR está marcado "
+                        "out_of_scope — código novo não pode nascer fora de escopo")
+
     active_total = total_units - counts["out_of_scope"]
     audited_count = counts["covered"] + counts["finding_confirmed"] + counts["needs_validation"]
     if audited_count == 0:
@@ -360,6 +402,8 @@ def main() -> None:
     p_ver.add_argument("--root", default=None, help="Override do diretório raiz")
     p_ver.add_argument("--min-pct", type=float, default=90.0)
     p_ver.add_argument("--max-out-of-scope-pct", type=float, default=20.0, help="Teto máximo permitido de unidades fora de escopo (padrão 20.0%)")
+    p_ver.add_argument("--max-out-of-scope-per-dir-pct", dest="max_oos_per_dir_pct", type=float, default=20.0, help="Teto de out_of_scope por diretório-pai (padrão 20.0%, dirs com >=3 unidades)")
+    p_ver.add_argument("--against", type=str, default=None, help="Ref git base: arquivo criado na PR marcado out_of_scope -> NEW-FILE-OUT-OF-SCOPE")
     p_ver.add_argument("--require-critic", action="store_true")
 
     p_ren = sub.add_parser("render-gaps", help="Gera a seção Markdown 'O que NÃO foi verificado'")
@@ -385,7 +429,8 @@ def main() -> None:
             r_over = Path(args.root) if args.root else None
             ok, errors, summary = verify_ledger(
                 lpath, root_override=r_over, min_pct=args.min_pct, require_critic=args.require_critic,
-                max_out_of_scope_pct=args.max_out_of_scope_pct
+                max_out_of_scope_pct=args.max_out_of_scope_pct,
+                max_oos_per_dir_pct=args.max_oos_per_dir_pct, against=args.against
             )
             if not summary and errors and errors[0].startswith(("SCHEMA-ERR", "ROOT-ERR")):
                 for e in errors:
