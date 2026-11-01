@@ -70,14 +70,14 @@ Texto em prosa não segura agente de IA sob pressão. O que protege código de v
 
 ## 🧠 Como Funciona o Roteamento em 2 Estágios (`/henke-skills`)
 
-Você **não precisa memorizar** 49 skills nem adivinhar qual chamar primeiro. Basta rodar:
+Você **não precisa memorizar** 53 skills nem adivinhar qual chamar primeiro. Basta rodar:
 
 ```bash
 /henke-skills "investiga por que o login tá dando timeout"
 ```
 
 ### O Despacho Inteligente:
-1. **Estágio 0 (Descoberta Leve):** A IDE/CLI só injeta o nome e 1 linha de descrição no prompt. As 49 skills **não poluem o contexto de tokens**.
+1. **Estágio 0 (Descoberta Leve):** A IDE/CLI só injeta o nome e 1 linha de descrição no prompt. As 53 skills **não poluem o contexto de tokens**.
 2. **Estágio 1 (Roteador Determinístico):** O script [`henke_router.py`](./scripts/henke_router.py) analisa a intenção em milissegundos contra a fonte única da verdade (`SKILL.md` frontmatters + pontos de partida):
    - Aplica a tabela de **Desambiguação Negativa** (`NEGATIVE_DISAMBIGUATION`, padrão *NVIDIA Skills Finder*).
    - Trava o **Modo de Operação** (`ANALISAR` por padrão em perguntas/auditorias; `requires_human_auth: true` em comandos `PUBLISH` como deploy, rollback ou faxina destrutiva).
@@ -192,7 +192,7 @@ chmod +x install.sh && ./install.sh
 ```
 
 > **O que o instalador faz:**  
-> Ele valida a estrutura de todas as 49 skills, instala os scripts e portões mecânicos em `scripts/` e publica atomicamente nos 4 diretórios canônicos de agentes:
+> Ele valida a estrutura de todas as 53 skills, instala os scripts e portões mecânicos em `scripts/` e publica atomicamente nos 4 diretórios canônicos de agentes:
 > - `~/.gemini/config/skills` (Google Antigravity e Gemini CLI)
 > - `~/.claude/skills` (Anthropic Claude Code)
 > - `~/.agents/skills` (OpenAI Codex / Padrão Aberto)
@@ -205,13 +205,13 @@ chmod +x install.sh && ./install.sh
 Para provar a robustez dos portões mecânicos na sua máquina:
 
 ```bash
-# 1. Valida estrutura das 49 skills
+# 1. Valida estrutura das 53 skills
 python scripts/validate_skills.py
 
 # 2. Roda os 5 canários comportamentais do PROTOCOLO
 python evals/canaries.py
 
-# 3. Roda os 45 canários bilaterais dos portões métricos (reprova o ruim e aprova o bom)
+# 3. Roda os 51 canários bilaterais dos portões métricos (reprova o ruim e aprova o bom)
 python evals/canaries_metricas.py
 
 # 4. Executa a suíte de 40 testes unitários de integração

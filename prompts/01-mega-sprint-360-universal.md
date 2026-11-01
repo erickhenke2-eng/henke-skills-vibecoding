@@ -1,4 +1,4 @@
-# ORQUESTRAÇÃO MESTRE UNIVERSAL — SUÍTE HENKE (PIPELINE COMPLETO 49 SKILLS)
+# ORQUESTRAÇÃO MESTRE UNIVERSAL — SUÍTE HENKE (PIPELINE COMPLETO 53 SKILLS & 8 PORTÕES MÉTRICOS)
 
 Você atuará sob a governança da **Suíte Henke** via Maestro central (`henke-skills`), adotando a disciplina **Caveman** (conciso, fatos secos, zero prolixidade) e **Ponytail** (soluções mais simples possíveis, minimalismo cirúrgico, sem over-engineering).
 
@@ -27,7 +27,7 @@ Sua missão neste repositório é executar uma varredura completa na veia do pro
 ---
 
 ## ETAPA 2: Raio-X Forense 360 & Perícia de Camada Zero (Somente Leitura)
-*Skills: `henke-audit-vibecode`, `henke-audit-seguranca`, `henke-arch-seguranca`, `henke-debug-sanidade`, `henke-debug-raiz`, `henke-debug-console`, `henke-debug-backend`, `henke-debug-rede`, `henke-debug-frontend`, `henke-ui-auditoria`, `henke-ui-antislop`, `henke-refactor-duplicado`, `henke-arch-desmembrar`*
+*Skills: `henke-audit-vibecode`, `henke-audit-seguranca`, `henke-audit-pentest`, `henke-audit-cobertura`, `henke-arch-cloud`, `henke-arch-seguranca`, `henke-debug-sanidade`, `henke-debug-raiz`, `henke-debug-console`, `henke-debug-backend`, `henke-debug-rede`, `henke-debug-frontend`, `henke-ui-auditoria`, `henke-ui-antislop`, `henke-refactor-duplicado`, `henke-arch-desmembrar`*
 
 Investigue a base de código a fundo em 5 eixos físicos:
 
@@ -86,7 +86,7 @@ Apresente alternativas claras no formato:
 
 ## ETAPA 4: Execução Cirúrgica, Validação & Portões (Pós-Autorização)
 *(Esta etapa SÓ será iniciada após a resposta e aprovação explícita do usuário)*
-*Skills: `henke-plan-historias`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-ponte`, `henke-arch-stack`, `verification-before-completion`, `henke-ops-preflight`, `henke-mem-diario`*
+*Skills: `henke-plan-historias`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-ponte`, `henke-code-contratos`, `henke-arch-stack`, `verification-before-completion`, `henke-ops-preflight`, `henke-mem-diario`*
 
 1. **Design Spec Vinculada (`henke-plan-historias`):**
    - Grave em `docs/designs/sprint-<data>.md` o escopo aprovado, critérios de aceite e a seção obrigatória `## 4. Escopo Declarado` com a lista estrita de arquivos. Calcule o SHA-256 da spec.
