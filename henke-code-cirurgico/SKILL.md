@@ -119,3 +119,11 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos [MECÂNICO] — antes/depois de tocar arquivo
+
+Antes de editar: `python scripts/repo_signals.py metrics --root <dir> --per-file > base.tsv`.
+Depois de editar: regenere `cur.tsv` e rode `python scripts/metricas/ratchet.py --baseline base.tsv --current cur.tsv` — exit 1 = você piorou o arquivo (complexidade/cobertura), não pode sair assim.
+
+Coletor `repo_signals.py`: `metrics` (funções py/ts/js/rs/go), `edges` (imports internos), `churn` (git numstat, conta binário).
+Demais portões: `assertless_scan.py` (teste-fantasma/mock-only), `crap_score.py` (CRAP>threshold), `fence_check.py` (outward), `tornado_scan.py` (amplificação). Exit 2 = não-veredito, nunca verde; escopo vazio ou linguagem fora do suporte = declarar, não presumir verde.

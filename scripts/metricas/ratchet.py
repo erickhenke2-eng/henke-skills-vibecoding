@@ -38,6 +38,14 @@ import sys
 import unicodedata
 from pathlib import Path
 
+# [HENKE-PATCH] streams UTF-8 no Windows (cp1252 não derruba o portão)
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 # Anchored and deliberately narrow: rejects 'nan'/'inf' (whose comparisons are
 # always False and would silently pass every check), exponent forms, and signs.
 # The same hazard reaches the gate through --ceiling/--budget, which argparse

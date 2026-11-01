@@ -1,0 +1,515 @@
+#!/usr/bin/env python3
+"""polyglot.py — lexer/scanner O(N) compartilhado para TS/TSX/JS/MJS/RS/GO.
+
+Não é parser completo: mascara comentários/strings preservando linhas e posições,
+localiza funções por chaveamento de chaves e extrai imports por padrão léxico.
+Aproximação declarada (spec v2 §7): generics TS aninhados, macros Rust e regex
+ambíguos podem deslocar fronteiras — erra no lado conservador, nunca crasha.
+
+Usado por: repo_signals.py (metrics/edges) e assertless_scan.py (testes não-Python).
+"""
+import json
+import os
+import re
+from pathlib import Path
+
+C_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx", ".rs", ".go"}
+JS_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx"}
+TEST_RE = re.compile(r"(\.test\.|\.spec\.|_test\.go$|_test\.rs$|/tests?/|__tests__)")
+PRUNE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "target",
+              "dist", "out", "release", "vendor", ".runtime", "coverage",
+              ".next", ".nuxt", "build", ".turbo", ".cache", ".henke", ".worktrees"}
+
+KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "new", "delete",
+            "typeof", "case", "do", "else", "try", "throw", "finally", "in", "of",
+            "function", "class", "extends", "import", "export", "const", "let",
+            "var", "match", "loop", "impl", "fn", "pub", "mod", "use", "struct",
+            "enum", "trait", "where", "mut", "ref", "move", "async", "await",
+            "select", "go", "defer", "chan", "range", "type", "interface",
+            "package", "func", "map", "fallthrough", "default", "break",
+            "continue", "yield", "static", "readonly", "public", "private",
+            "protected", "get", "set", "constructor", "this", "super", "void",
+            "assert", "expect", "describe", "it", "test", "specify"}
+
+
+def iter_source_files(root: Path, exts=None):
+    """os.walk com poda in-place de diretórios mortos (O(N) em arquivos vivos)."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS and not d.startswith(".")]
+        for fn in filenames:
+            if exts is None or Path(fn).suffix.lower() in exts:
+                yield Path(dirpath) / fn
+
+
+def mask_c_like(text: str) -> str:
+    """Mascara comentários/strings/template-literals preservando \n e colunas.
+    Saída tem o mesmo comprimento; código vive, conteúdo textual vira espaço."""
+    out = list(text)
+    i, n = 0, len(text)
+    prev = ""  # último char significativo (heurística p/ regex literal JS)
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if c == "/" and nxt == "/":
+            j = text.find("\n", i)
+            j = n if j == -1 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif c == "/" and nxt == "*":
+            j = text.find("*/", i + 2)
+            j = n - 2 if j == -1 else j
+            for k in range(i, j + 2):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 2
+        elif c in "'\"":
+            # Rust: 'a' é char literal; 'a sem par é lifetime → não mascara
+            if c == "'" and _looks_like_lifetime(text, i):
+                prev = c
+                i += 1
+                continue
+            j = _string_end(text, i, c)
+            for k in range(i, j):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j
+        elif c == "`":
+            i = _mask_template(text, out, i)
+        elif c == "/" and _regex_start(prev):
+            j = _regex_end(text, i)
+            for k in range(i, j):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j
+        else:
+            if not c.isspace():
+                prev = c
+            i += 1
+    return "".join(out)
+
+
+def _looks_like_lifetime(text, i):
+    """'x' com 1 char antes do próximo ' é char literal; 'nome sem ' é lifetime."""
+    j = i + 1
+    if j < len(text) and text[j] == "\\":
+        j += 2
+    while j < len(text) and text[j] not in "'\n":
+        j += 1
+    return not (j < len(text) and j - i <= 4)  # 'a' / '\n' ok; 'a, 'a> = lifetime
+
+
+def _string_end(text, i, q):
+    n = len(text)
+    j = i + 1
+    while j < n:
+        if text[j] == "\\":
+            j += 2
+            continue
+        if text[j] == q or text[j] == "\n":
+            return j + 1
+        j += 1
+    return n
+
+
+def _mask_template(text, out, i):
+    """Mascara `template` mantendo ${...} como código (interpolação conta)."""
+    n = len(text)
+    out[i] = " "
+    j = i + 1
+    depth = 0
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            out[j] = out[j + 1] = " "
+            j += 2
+            continue
+        if depth == 0 and c == "`":
+            out[j] = " "
+            return j + 1
+        if c == "{" and depth > 0:
+            depth += 1
+        elif c == "}":
+            if depth == 0:
+                pass
+            else:
+                depth -= 1
+                if depth == 0:
+                    out[j] = " "
+                    j += 1
+                    continue
+        elif c == "$" and j + 1 < n and text[j + 1] == "{":
+            depth = 1
+            out[j] = out[j + 1] = " "
+            j += 2
+            continue
+        if depth == 0 and out[j] != "\n":
+            out[j] = " "
+        j += 1
+    return n
+
+
+def mask_comments_only(text: str) -> str:
+    """Apaga apenas comentários, preservando strings (imports/specifiers vivem nelas)."""
+    out = list(text)
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if c == "/" and nxt == "/":
+            j = text.find("\n", i)
+            j = n if j == -1 else j
+            for k in range(i, j):
+                out[k] = " "
+            i = j
+        elif c == "/" and nxt == "*":
+            j = text.find("*/", i + 2)
+            j = n - 2 if j == -1 else j
+            for k in range(i, j + 2):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 2
+        elif c in "'\"`":
+            if c == "'" and _looks_like_lifetime(text, i):
+                i += 1
+                continue
+            i = _template_end(text, i) if c == "`" else _string_end(text, i, c)
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _template_end(text, i):
+    n = len(text)
+    j, depth = i + 1, 0
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            j += 2
+            continue
+        if depth == 0 and c == "`":
+            return j + 1
+        if c == "{" and depth > 0:
+            depth += 1
+        elif c == "}" and depth > 0:
+            depth -= 1
+        elif c == "$" and j + 1 < n and text[j + 1] == "{":
+            depth = 1
+            j += 2
+            continue
+        j += 1
+    return n
+
+
+_REGEX_PREV = set("=(,:[!&|?{};\n") | {"return", "=>", "typeof", "case", "do", "else"}
+
+
+def _regex_start(prev):
+    return prev in ("", "(", ",", "=", ":", "[", "!", "&", "|", "?", "{", "}", ";")
+
+
+def _regex_end(text, i):
+    n = len(text)
+    j = i + 1
+    in_class = False
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c == "[":
+            in_class = True
+        elif c == "]":
+            in_class = False
+        elif c == "/" and not in_class:
+            j += 1
+            while j < n and text[j].isalpha():
+                j += 1
+            return j
+        elif c == "\n":
+            return i + 1  # era divisão, não regex — devolve sem mascarar
+        j += 1
+    return i + 1
+
+
+_FUNC_RE = re.compile(
+    r"(?:^|[^\w$.])(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s*([A-Za-z_$][\w$]*)\s*\("
+    r"|(?:^|[^\w$.])(?:export\s+)?(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+([A-Za-z_][\w]*)\s*[<(]"
+    r"|(?:^|[^\w$.])func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\s*\("
+    r"|(?:^|[,{\n]\s*)(?:get\s+|set\s+|static\s+|async\s+|public\s+|private\s+|protected\s+|readonly\s+|override\s+)*"
+    r"([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*(?::\s*[\w<>[\]|&,. ]+)?\s*\{"
+    r"|([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^()]*\)\s*(?::\s*[\w<>[\]|&,. ]+)?\s*=>\s*([{(])?"
+    r"|([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>",
+    re.M)
+
+_TESTCALL_RE = re.compile(
+    r"\b(?:it|test|specify|xit|fit)(?:\.(?:each|skip|only|todo|concurrent|fails)\s*(?:\([^)]*\))?)*\s*\(",
+    re.M)
+_RUST_TEST_RE = re.compile(r"#\s*\[(?:tokio::|async_std::)?test(?:\s*\([^)]*\))?\]\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)")
+_GO_TEST_RE = re.compile(r"func\s+(Test[A-Z0-9_]\w*)\s*\(\s*\w+\s*\*?testing\.[A-Z]\w*")
+
+
+def _brace_end(masked: str, open_idx: int) -> int:
+    """Índice do '}' que fecha o '{' em open_idx; -1 se nunca fecha."""
+    depth = 0
+    for i in range(open_idx, len(masked)):
+        if masked[i] == "{":
+            depth += 1
+        elif masked[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _paren_end(masked: str, open_idx: int) -> int:
+    depth = 0
+    for i in range(open_idx, len(masked)):
+        if masked[i] == "(":
+            depth += 1
+        elif masked[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def find_functions(text: str, lang: str):
+    """yield (nome, start_line, end_line, corpo_mascarado). O(N), fronteiras por chaves."""
+    masked = mask_c_like(text)
+    seen = set()
+    for m in _FUNC_RE.finditer(masked):
+        name = next((g for g in m.groups() if g), None)
+        if not name or name in KEYWORDS:
+            continue
+        seg = masked[m.start():m.end()]
+        tail = masked[m.end() - 1]
+        if tail == "(" and "=>" not in seg:
+            # assinatura: pula params com casamento de parêntese
+            pend = _paren_end(masked, m.end() - 1)
+            if pend == -1:
+                continue
+            after = pend + 1
+        elif tail == "<":        # generics rust/ts: pula até '>' depois '(...)'
+            gt = masked.find(">", m.end())
+            if gt == -1:
+                continue
+            pp = masked.find("(", gt)
+            if pp == -1:
+                continue
+            pend = _paren_end(masked, pp)
+            if pend == -1:
+                continue
+            after = pend + 1
+        elif tail == "{":        # arrow/method: o próprio match já abriu o corpo
+            b = m.end() - 1
+            e = _brace_end(masked, b)
+            if e == -1:
+                continue
+            sl = masked.count("\n", 0, m.start()) + 1
+            el = masked.count("\n", 0, e) + 1
+            key = (sl, name)
+            if key not in seen:
+                seen.add(key)
+                yield name, sl, el, masked[b:e + 1]
+            continue
+        elif tail in (">", "(") or seg.rstrip().endswith("=>"):
+            # arrow com corpo-expressão: termina em ';'
+            semi = masked.find(";", m.end())
+            if semi == -1:
+                continue
+            sb = m.end() - 1 if tail == "(" else m.end()
+            e = semi
+            sl = masked.count("\n", 0, m.start()) + 1
+            el = masked.count("\n", 0, e) + 1
+            yield name, sl, el, masked[sb:e + 1]
+            continue
+        else:
+            continue
+        b = masked.find("{", after)
+        if b == -1:
+            continue
+        between = masked[after:b]
+        if "(" in between or ";" in between:
+            continue
+        e = _brace_end(masked, b)
+        if e == -1:
+            continue
+        sl = masked.count("\n", 0, m.start()) + 1
+        el = masked.count("\n", 0, e) + 1
+        key = (sl, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield name, sl, el, masked[b:e + 1]
+
+
+_DECIDE_WORD = re.compile(r"\b(if|for|while|case|catch|match|select)\b")
+_DECIDE_OP = re.compile(r"&&|\|\||\?\?|\?\.")
+_RUST_ARM = re.compile(r"=>")
+
+
+def complexity_masked(body: str, lang: str) -> int:
+    """1 + decisões léxicas. Ternário '?' conta só se não for '?:'/param opcional."""
+    score = 1
+    score += len(_DECIDE_WORD.findall(body))
+    score += len(_DECIDE_OP.findall(body))
+    if lang == "rs":
+        score += len(_RUST_ARM.findall(body))
+    else:
+        score += len(re.findall(r"\?(?![.:,)\]\w?]*:\s*[\w<>[\]|&])(?!\?)(?!\.)(?=[^:]*:)", body))
+    return score
+
+
+def find_test_blocks(text: str, lang: str):
+    """yield (nome, start_line, end_line, corpo_mascarado) de testes não-Python."""
+    masked = mask_c_like(text)
+    if lang in JS_EXTS or lang in {".ts", ".tsx", ".js", ".mjs", ".jsx"}:
+        for m in _TESTCALL_RE.finditer(masked):
+            pos = m.end() - 1  # '(' de abertura da chamada
+            pend = _paren_end(masked, pos)
+            if pend == -1:
+                continue
+            inner = masked[pos:pend]
+            fname = ""
+            fm = re.match(r"\s*\(\s*([A-Za-z_$`\"'][^,]*)", inner)
+            arrow = re.search(r"(?:=>|function)", inner)
+            if not arrow:
+                continue
+            b = masked.find("{", pos + arrow.end() - 1)
+            if b == -1 or b > pend:
+                continue
+            e = _brace_end(masked, b)
+            if e == -1:
+                continue
+            nm = re.search(r"[\"'`]([^\"'`]+)[\"'`]", text[pos:pend])
+            name = nm.group(1)[:60] if nm else "(anon)"
+            sl = masked.count("\n", 0, m.start()) + 1
+            el = masked.count("\n", 0, e) + 1
+            yield name, sl, el, masked[b:e + 1]
+    elif lang == ".rs":
+        for m in _RUST_TEST_RE.finditer(masked):
+            b = masked.find("{", m.end())
+            if b == -1:
+                continue
+            e = _brace_end(masked, b)
+            if e == -1:
+                continue
+            yield m.group(1), masked.count("\n", 0, m.start()) + 1, \
+                masked.count("\n", 0, e) + 1, masked[b:e + 1]
+    elif lang == ".go":
+        for m in _GO_TEST_RE.finditer(masked):
+            b = masked.find("{", m.end())
+            if b == -1:
+                continue
+            e = _brace_end(masked, b)
+            if e == -1:
+                continue
+            yield m.group(1), masked.count("\n", 0, m.start()) + 1, \
+                masked.count("\n", 0, e) + 1, masked[b:e + 1]
+
+
+_JS_IMPORT = re.compile(
+    r"""(?:import|export)\s+[^'"]*?from\s*['"]([^'"]+)['"]"""
+    r"""|import\s*\(\s*['"]([^'"]+)['"]"""
+    r"""|require\s*\(\s*['"]([^'"]+)['"]"""
+    r"""|import\s*['"]([^'"]+)['"]""", re.M)
+_RS_MOD = re.compile(r"(?:^|\n)\s*(?:pub\s+)?mod\s+([A-Za-z_][\w]*)\s*;", re.M)
+_RS_USE = re.compile(r"(?:^|\n)\s*use\s+((?:crate|self|super)::[\w:]+)", re.M)
+_GO_IMPORT_BLK = re.compile(r"import\s*\(([^)]*)\)", re.S)
+_GO_IMPORT_ONE = re.compile(r"import\s+(?:\w+\s+)?\"([^\"]+)\"")
+_GO_QUOTED = re.compile(r'"([^"]+)"')
+
+
+def find_imports(text: str, lang: str):
+    """Lista de specifiers de import. Mascara só comentários: o specifier
+    mora dentro da string e precisa chegar inteiro ao resolvedor."""
+    masked = mask_comments_only(text)
+    out = []
+    if lang in JS_EXTS:
+        for m in _JS_IMPORT.finditer(masked):
+            spec = next((g for g in m.groups() if g), None)
+            if spec:
+                out.append(spec)
+    elif lang == ".rs":
+        out += [f"mod::{g}" for g in _RS_MOD.findall(masked)]
+        out += _RS_USE.findall(masked)
+    elif lang == ".go":
+        for blk in _GO_IMPORT_BLK.findall(masked):
+            out += _GO_QUOTED.findall(blk)
+        out += _GO_IMPORT_ONE.findall(masked)
+    return out
+
+
+def resolve_js(spec: str, base: Path, root: Path, pkgmap: dict):
+    """Resolve import JS/TS para arquivo interno; None se externo."""
+    if spec.startswith("."):
+        cand_base = (base / spec).resolve()
+        tries = []
+        if cand_base.suffix in (".js", ".mjs", ".jsx", ".ts", ".tsx"):
+            stem = cand_base.with_suffix("")
+            tries += [stem.with_suffix(e) for e in
+                      (".ts", ".tsx", ".js", ".mjs", ".jsx")]
+        tries += [cand_base.with_suffix(e) for e in
+                  (".ts", ".tsx", ".js", ".mjs", ".jsx")]
+        tries += [(cand_base / "index").with_suffix(e) for e in
+                  (".ts", ".tsx", ".js", ".mjs", ".jsx")]
+        for c in tries:
+            if c.is_file():
+                return c
+        return None
+    first = spec.split("/")[0]
+    scope = "/".join(spec.split("/")[:2]) if spec.startswith("@") else first
+    if scope in pkgmap:
+        pkgdir = pkgmap[scope]
+        rest = spec[len(scope):].lstrip("/")
+        for c in ([pkgdir / "src" / "index.ts", pkgdir / "src" / "index.tsx",
+                   pkgdir / "index.ts", pkgdir / rest] if not rest else
+                  [pkgdir / "src" / (rest + ".ts"), pkgdir / (rest + ".ts"),
+                   pkgdir / rest]):
+            if c.is_file():
+                return c.resolve()
+    return None
+
+
+def build_pkgmap(root: Path, max_depth=4):
+    """name -> dir de packages de workspace (package.json com 'name')."""
+    pkgmap = {}
+    for pj in iter_source_files(root, {".json"}):
+        if pj.name != "package.json":
+            continue
+        try:
+            if len(pj.relative_to(root).parts) > max_depth:
+                continue
+            data = json.loads(pj.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        name = data.get("name")
+        if isinstance(name, str) and name:
+            pkgmap[name] = pj.parent
+    return pkgmap
+
+
+def go_module_path(root: Path):
+    """Lê 'module x' do go.mod mais próximo da raiz; None se ausente."""
+    gm = root / "go.mod"
+    try:
+        for line in gm.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("module "):
+                return line.split(None, 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def cargo_root(path: Path, stop: Path):
+    """Sobe de path até achar Cargo.toml (crate root); fallback stop."""
+    d = path.parent
+    while d != d.parent and stop in d.parents or d == stop:
+        if (d / "Cargo.toml").is_file():
+            return d
+        if d == stop:
+            break
+        d = d.parent
+    return stop

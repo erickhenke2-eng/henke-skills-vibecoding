@@ -82,12 +82,29 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+# [HENKE-PATCH] dispatch poliglota: testes TS/JS/Rust/Go via lexer compartilhado.
+try:
+    from . import polyglot as _pg
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import polyglot as _pg
+
+# [HENKE-PATCH] streams UTF-8 no Windows (cp1252 não derruba o portão)
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 TEST_FUNC = re.compile(r"^test[A-Za-z0-9_]*$")
 # `\w` rather than [A-Za-z0-9_]: for str patterns Python matches \w against Unicode,
 # so `test_café.py` is collected. An ASCII-only class silently skipped any test module
 # with a non-ASCII name that pytest itself collects and runs - the scan reported clean
 # over tests it never read.
-TEST_FILE = re.compile(r"^(?:test_\w*|\w+_test)\.py$", re.IGNORECASE)
+TEST_FILE = re.compile(
+    r"^(?:test_\w*|\w+_test)\.py$|.*\.(?:test|spec)\.(?:ts|tsx|js|mjs|jsx)$|.*_test\.(?:go|rs)$",
+    re.IGNORECASE)
 UNITTEST_ASSERT = re.compile(r"^(?:assert[A-Z][A-Za-z0-9]*|fail)$")
 MOCK_ASSERT = re.compile(r"^assert_[a-z0-9_]+$")
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -96,6 +113,88 @@ MOCK_OBS = frozenset({"called", "call_count", "call_args", "call_args_list",
                       "await_count", "await_args", "mock_calls"})
 BROAD_EXC = frozenset({"Exception", "BaseException"})
 SELF_NAMES = frozenset({"self", "cls"})
+
+# [HENKE-PATCH] padrões léxicos para testes não-Python (corpo já mascarado).
+_JS_EXPECT = re.compile(r"\bexpect\s*\(")
+_JS_OTHER_ASSERT = re.compile(
+    r"\bassert(?:\.\w+)?\s*\(|\b(?:assertThat|assertThrows|assertRejects|assertEquals|"
+    r"assertMatch|fail|assertNodeContains)\s*\(|\.should\s*\(|chai\b")
+_JS_REAL_MATCH = re.compile(
+    r"\.to(?:Be|Equal|StrictEqual|Match|Contain|Throw|HaveProperty|HaveLength|"
+    r"BeTruthy|BeFalsy|BeDefined|BeUndefined|BeNull|BeNaN|BeGreaterThan|"
+    r"BeLessThan|BeCloseTo|BeInstanceOf|BeTypeOf|Satisfy)|\.resolves|\.rejects")
+_JS_MOCK_MATCH = re.compile(
+    r"toHaveBeenCalled|toBeCalled|toHaveReturned|toHaveBeenCalledWith|"
+    r"toHaveBeenCalledTimes|\.mock\b|calledTimes|calledWith")
+_JS_CATCH = re.compile(r"\bcatch\s*(?:\([^)]*\))?\s*\{")
+_RS_ASSERT = re.compile(
+    r"\bassert(?:_eq|_ne|_matches)?\s*!|\bpanic!|\.unwrap\s*\(|\.expect\s*\(|"
+    r"should_panic|insta::|assert_fs")
+_GO_ASSERT = re.compile(
+    r"\bt\.(?:Error|Fatal|Fail)\w*\s*\(|\b(?:assert|require)\.[A-Z]\w+\s*\(|"
+    r"\bpanic\s*\(|\bt\.Helper\s*\(")
+
+
+class _Fn(NamedTuple):
+    lineno: int
+    name: str
+
+
+def scan_polyglot(path: Path, helpers):
+    """Scanner léxico para .ts/.tsx/.js/.mjs/.rs/.go (corpo mascarado, O(N)).
+
+    Aproximação declarada (spec v2 §7): conta it()/test()/#[test]/TestX e suas
+    asserções por padrão léxico, não por AST. MOCK-ONLY e SWALLOWED só se aplicam
+    a JS/TS (idioma de mocks/promises); Rust/Go flagam NO-ASSERTION.
+    Retorna (scanned, findings[(veredito, path, _Fn, why)]).
+    """
+    ext = path.suffix.lower()
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        print(f"error: cannot read {path}: {e} ({_RECORD})", file=sys.stderr)
+        return None, None
+    scanned, findings = 0, []
+    helper_re = (re.compile(r"\b(?:" + "|".join(re.escape(h) for h in helpers)
+                            + r")\s*\(") if helpers else None)
+    for name, sl, _el, body in _pg.find_test_blocks(text, ext):
+        scanned += 1
+        fn = _Fn(sl, name)
+        has_helper = bool(helper_re and helper_re.search(body))
+        if ext in _pg.JS_EXTS:
+            expects = list(_JS_EXPECT.finditer(body))
+            other = bool(_JS_OTHER_ASSERT.search(body)) or has_helper
+            segs = []
+            for m in expects:
+                seg = body[m.start():m.start() + 500]
+                seg = seg.split(";", 1)[0]
+                segs.append(seg)
+            real_expect = any(
+                _JS_REAL_MATCH.search(s) or not _JS_MOCK_MATCH.search(s)
+                for s in segs) if segs else False
+            if not expects and not other:
+                findings.append(("NO-ASSERTION", path, fn,
+                                 "executes code, asserts nothing"))
+            elif not other and not real_expect and expects:
+                findings.append(("MOCK-ONLY", path, fn,
+                                 f"{len(segs)} expect(s) on the double, none on the code under test"))
+            for cm in _JS_CATCH.finditer(body):
+                b = body.find("{", cm.end() - 1)
+                e = _pg._brace_end(body, b) if b != -1 else -1
+                inner = body[b:e + 1] if e != -1 else ""
+                if inner and not re.search(
+                        r"\b(throw|expect|assert|return|fail|rejects)\b", inner):
+                    findings.append(("SWALLOWED", path, fn,
+                                     "catch block that cannot propagate — the test cannot go red"))
+        elif ext == ".rs":
+            if not _RS_ASSERT.search(body) and not has_helper:
+                findings.append(("NO-ASSERTION", path, fn,
+                                 "executes code, asserts nothing"))
+        elif ext == ".go":
+            if not _GO_ASSERT.search(body) and not has_helper:
+                findings.append(("NO-ASSERTION", path, fn,
+                                 "executes code, asserts nothing"))
+    return scanned, findings
 
 _UNKNOWN = object()          # the literal evaluator could not fold this expression
 _MAX_INT, _MAX_LEN, _MAX_POW = 10 ** 18, 4096, 64
@@ -660,6 +759,8 @@ def collect(paths, allow_roots=()):
             # path; file-level duplicates still fold through file_key below.
             found, walked = [], set()
             for root, dirs, names in os.walk(p, followlinks=True, onerror=halt_on_walk_error):
+                # [HENKE-PATCH] poda de diretórios mortos (node_modules, target, dist...)
+                dirs[:] = [d for d in dirs if d not in _pg.PRUNE_DIRS]
                 try:
                     real = os.path.realpath(root)
                 except OSError:
@@ -671,7 +772,8 @@ def collect(paths, allow_roots=()):
                 for d in list(dirs):
                     require_inside(os.path.join(root, d), roots)
                 for n in names:
-                    if TEST_FILE.match(n):
+                    # [HENKE-PATCH] *.rs dentro de tests/ também é test crate
+                    if TEST_FILE.match(n) or (n.endswith(".rs") and Path(root).name == "tests"):
                         require_inside(os.path.join(root, n), roots)
                         found.append(Path(root) / n)
             found = sorted(found)
@@ -765,6 +867,14 @@ def run(argv):
 
     scanned, findings = 0, []
     for f in files:
+        # [HENKE-PATCH] .py segue o caminho AST original; demais linguagens usam o lexer.
+        if f.suffix.lower() != ".py":
+            n, poly_findings = scan_polyglot(f, helpers)
+            if n is None:
+                return 2
+            scanned += n
+            findings.extend(poly_findings)
+            continue
         try:
             tree = ast.parse(f.read_text(encoding="utf-8-sig"), filename=str(f))
         except (OSError, SyntaxError, ValueError, RecursionError) as e:

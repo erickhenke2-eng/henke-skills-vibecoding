@@ -27,6 +27,14 @@ import math
 import os
 import sys
 
+# [HENKE-PATCH] streams UTF-8 no Windows (cp1252 não derruba o portão)
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 NON_VERDICT = 2  # every path where the gate did not actually score the input
 
 

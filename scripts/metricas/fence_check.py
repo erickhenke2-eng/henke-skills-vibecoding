@@ -17,6 +17,14 @@ import json
 import os
 import sys
 
+# [HENKE-PATCH] streams UTF-8 no Windows (cp1252 não derruba o portão)
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 
 def load(path):
     try:
@@ -47,6 +55,11 @@ def main():
     modules = fence.get("modules") or {}
     if not layers or not modules or not isinstance(edges, list):
         print("SPEC ERROR: need non-empty 'layers' + 'modules' and an edge list")
+        return 2
+    # [HENKE-PATCH] edges vazio = veredito impossível, não verde (§2/§6 PROTOCOLO:
+    # checks: [] nunca é verified). Aprovar 0 arestas seria vitória por tautologia.
+    if not edges:
+        print("SPEC ERROR: edge list is empty — an empty fence cannot pass")
         return 2
     rank = {name: i for i, name in enumerate(layers)}  # higher index = more inward
     for prefix, layer in modules.items():

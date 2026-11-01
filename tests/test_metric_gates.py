@@ -17,7 +17,7 @@ MET = repo_root / "scripts" / "metricas"
 SIGNALS = repo_root / "scripts" / "repo_signals.py"
 
 from evals.canaries_metricas import run_all_metric_canaries
-from scripts.repo_signals import complexity_of
+from scripts.repo_signals import complexity_py
 import ast as _ast
 
 
@@ -74,7 +74,7 @@ class TestMetricGates(unittest.TestCase):
     def test_complexity_metric_counts_decisions(self):
         src = "def f(x):\n    if x:\n        return 1\n    return 0\n"
         fn = _ast.parse(src).body[0]
-        self.assertEqual(complexity_of(fn), 2)
+        self.assertEqual(complexity_py(fn), 2)
 
     def test_metrics_marks_missing_coverage_as_zero(self):
         with tempfile.TemporaryDirectory() as td:

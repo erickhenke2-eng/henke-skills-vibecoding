@@ -140,3 +140,13 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger Efetivo**: Comandos reproduzíveis registrados com resolução do script real.
 - [ ] **Baseline Preservado**: Arquivos do usuário intocados; apenas o escopo declarado foi alterado.
 - [ ] **Ressalvas Obrigatórias**: Seção "O que NÃO foi verificado" detalhada com honestidade técnica.
+
+## Portões Métricos [MECÂNICO] — catálogo para o Maestro
+
+Infra métrica poliglota da suíte (py/ts/tsx/js/mjs/rs/go), stdlib pura:
+
+- Coletor `scripts/repo_signals.py`: `metrics` (funções+complexidade+coverage: coverage.py json, Istanbul summary/final, lcov), `edges` (imports internos com poda de node_modules/target/dist/vendor), `churn` (git numstat, conta binários, omite commits vazios).
+- Portões em `scripts/metricas/` (0=verde · 1=vermelho · 2/3=não-veredito): `assertless_scan.py` (teste-fantasma/mock-only/engolidor em py+ts+js+rs+go), `crap_score.py` (complexidade×cobertura), `ratchet.py` (arquivo tocado não piora), `fence_check.py` (sem dependência outward; `edges=[]`→2), `tornado_scan.py` (amplificação de mudança).
+- Roteamento: auditoria de código → `henke-audit-vibecode`; cirurgia → `henke-code-cirurgico`; estrutura/camadas → `henke-arch-pastas`; verificação de ambiente → `henke-ops-preflight`.
+
+Dispatch deve repassar a regra: escopo vazio, linguagem não suportada ou coverage ausente = não-veredito declarado, nunca verde presumido.

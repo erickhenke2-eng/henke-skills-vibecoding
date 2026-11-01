@@ -143,3 +143,11 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos [MECÂNICO] — direção de dependência e amplificação
+
+- `python scripts/repo_signals.py edges --root <dir>` gera `edges.json` (imports internos: py/ts/tsx/js/mjs/rs/go, resolve `./x.js`→`.ts`, workspace `packages/*`, poda node_modules/target/dist/vendor).
+- Declare camadas em `fence.json` (`layers` do mais externo ao mais interno + `modules` dir→camada) e rode `python scripts/metricas/fence_check.py fence.json edges.json`: exit 1 = dependência outward (ex.: executores importando UI). `edges=[]` → exit 2 (não-veredito: sem arestas não há o que aprovar).
+- `churn --repo <dir> --order oldest-first | python scripts/metricas/tornado_scan.py --order oldest-first`: arquivos tocados por commit subindo = pasta apodrecendo.
+
+Escopo vazio ou formato não reconhecido = declarar no relatório, nunca presumir verde.

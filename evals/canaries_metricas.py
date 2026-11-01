@@ -140,6 +140,99 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         expect("Canário M14: churn emite 1 commit com 2 arquivos",
                code == 0 and out.strip().endswith("\t2"))
 
+        # --- 15: fence com edges=[] é não-veredito (exit 2), nunca GREEN ---
+        empty = t / "edges_empty.json"
+        empty.write_text("[]", encoding="utf-8")
+        code, out = run(MET / "fence_check.py", fence, empty)
+        expect("Canário M15: fence edges=[] sai 2 (falso-verde eliminado)",
+               code == 2 and "GREEN" not in out)
+
+        # --- 16/17 assertless poliglota: .test.ts sujo reprova, limpo aprova ---
+        tsproj = t / "tsproj"
+        (tsproj / "src").mkdir(parents=True)
+        ts_dirty = tsproj / "src" / "x.test.ts"
+        ts_dirty.write_text(
+            'import { describe, it, expect } from "vitest";\n'
+            'describe("s", () => {\n'
+            '  it("fantasma", () => { const x = 1 + 1; });\n'
+            '  it("mock only", () => { const m = vi.fn(); m(); '
+            'expect(m).toHaveBeenCalledTimes(1); });\n'
+            '  it("real", () => { expect(1 + 1).toBe(2); });\n'
+            "});\n", encoding="utf-8")
+        code, out = run(MET / "assertless_scan.py", ts_dirty)
+        expect("Canário M16: assertless .test.ts reprova fantasma+mock (exit 1)",
+               code == 1 and "NO-ASSERTION" in out and "MOCK-ONLY" in out)
+        ts_clean = tsproj / "src" / "y.test.ts"
+        ts_clean.write_text(
+            'import { it, expect } from "vitest";\n'
+            'it("real", () => { expect(40 + 2).toBe(42); });\n'
+            'it("timeout vitest", { timeout: 999 }, () => {'
+            ' expect(1).toBe(1); });\n', encoding="utf-8")
+        code, _ = run(MET / "assertless_scan.py", ts_clean)
+        expect("Canário M17: assertless .test.ts aprova teste com asserção",
+               code == 0)
+
+        # --- 18/19 metrics+edges em TypeScript ---
+        (tsproj / "src" / "helper.ts").write_text(
+            "export function pick(xs: number[]): number {\n"
+            "  if (xs.length === 0) return 0;\n"
+            "  for (const x of xs) { if (x > 0 && x < 9 || x === 99) return x; }\n"
+            "  return -1;\n}\n", encoding="utf-8")
+        (tsproj / "src" / "main.ts").write_text(
+            'import { pick } from "./helper.js";\n'
+            "export const run = () => pick([1]);\n", encoding="utf-8")
+        code, out = run(SIGNALS, "metrics", "--root", tsproj)
+        expect("Canário M18: metrics emite funções .ts (pick+run, ignora .test.ts)",
+               code == 0 and "helper.ts::pick" in out and "run" in out
+               and ".test.ts" not in out)
+        code, out = run(SIGNALS, "edges", "--root", tsproj)
+        ts_edges = json.loads(out) if code == 0 else []
+        expect("Canário M19: edges resolve ./helper.js → helper.ts",
+               any(e["to"].endswith("helper.ts") for e in ts_edges))
+
+        # --- 20: churn conta commit binário (numstat "-\t-") ---
+        (proj / "bin.dat").write_bytes(b"\x00\x01\x02\xff\xfe")
+        subprocess.run(["git", "add", "-A"], cwd=proj, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "commit", "-m", "bin"], cwd=proj, check=True,
+                       capture_output=True)
+        code, out = run(SIGNALS, "churn", "--repo", proj, "--order", "oldest-first")
+        rows = [l for l in out.splitlines() if "\t" in l]
+        expect("Canário M20: churn conta binário e nunca emite count=0",
+               code == 0 and len(rows) == 2
+               and all(int(r.split("\t")[-1]) >= 1 for r in rows))
+
+        # --- 21..24: load_coverage nos 4 formatos de mercado ---
+        cov_cases = {
+            "cov_py.json": (json.dumps({"files": {"src/a.py": {"summary":
+                            {"percent_covered": 88.5}}}}), "a.py", 88),
+            "cov_summary.json": (json.dumps({"total": {"lines": {"pct": 70}},
+                                 "src/helper.ts": {"lines": {"pct": 77.4}}}),
+                                 "helper.ts", 77),
+            "cov_final.json": (json.dumps({"src/helper.ts":
+                               {"s": {"0": 1, "1": 1, "2": 0, "3": 2}}}),
+                               "helper.ts", 75),
+            "cov.info": ("TN:\nSF:src/helper.ts\nLF:8\nLH:6\nend_of_record\n",
+                         "helper.ts", 75),
+        }
+        for i, (fname, (content, needle, pct)) in enumerate(sorted(cov_cases.items())):
+            cf = t / fname
+            cf.write_text(content, encoding="utf-8")
+            code, out = run(SIGNALS, "metrics", "--root", tsproj if "ts" in needle else proj,
+                            "--coverage", cf)
+            hit = [l for l in out.splitlines() if needle in l and f"\t{pct}" in l]
+            expect(f"Canário M{21+i}: coverage {fname} alimenta metrics ({pct}%)",
+                   code == 0 and bool(hit))
+
+        # --- 25: varredura poda node_modules ---
+        nm = tsproj / "node_modules" / "dep"
+        nm.mkdir(parents=True)
+        (nm / "junk.ts").write_text("export function junk() { return 1; }\n",
+                                    encoding="utf-8")
+        code, out = run(SIGNALS, "metrics", "--root", tsproj)
+        expect("Canário M25: metrics poda node_modules",
+               code == 0 and "node_modules" not in out)
+
     return passed, total, reports
 
 

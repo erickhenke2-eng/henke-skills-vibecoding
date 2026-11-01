@@ -171,3 +171,17 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 - [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
 - [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
 - [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+## Portões Métricos [MECÂNICO] — preflight do repositório
+
+Bateria mínima antes de aprovar ambiente/diff (py/ts/tsx/js/mjs/rs/go):
+
+```bash
+python scripts/repo_signals.py metrics --root <dir> [--coverage cov.json|coverage-summary.json|coverage-final.json|lcov.info] | python scripts/metricas/crap_score.py --threshold 6
+python scripts/metricas/assertless_scan.py <dir-de-testes>
+python scripts/repo_signals.py edges --root <dir> > edges.json && python scripts/metricas/fence_check.py fence.json edges.json
+python scripts/repo_signals.py churn --repo <dir> --order oldest-first | python scripts/metricas/tornado_scan.py --order oldest-first
+python scripts/metricas/ratchet.py --baseline base.tsv --current cur.tsv   # se houver baseline
+```
+
+Contrato de saída: 0=verde · 1=vermelho · 2/3=não-veredito. Preflight trata 2 como bloqueio com motivo declarado, nunca como passe. Escopo vazio, coverage ausente ou linguagem fora do suporte entram na seção "O que NÃO foi verificado".

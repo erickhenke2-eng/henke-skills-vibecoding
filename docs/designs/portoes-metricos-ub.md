@@ -59,7 +59,11 @@ Editados (v2):
 - `scripts/repo_signals.py` — universalização: `os.walk` com poda (`node_modules`, `target`, `dist`, `out`, `release`, `vendor`, `.runtime`, `coverage`), churn conta binários/`--no-merges`/nunca emite 0, metrics poliglota, loaders de coverage (coverage.py, Istanbul summary/final, lcov.info), edges poliglota (py/ts/js/rs/go + pacotes de workspace)
 - `scripts/metricas/assertless_scan.py` — dispatch poliglota (`.test.ts`, `.spec.ts`, `.test.js`, `_test.go`, `_test.rs`, `tests/*.rs`)
 - `scripts/metricas/*.py` + `scripts/repo_signals.py` — reconfiguração de streams para UTF-8 em Windows
-- `henke-audit-vibecode/SKILL.md`, `henke-code-cirurgico/SKILL.md`, `henke-arch-pastas/SKILL.md`, `henke-ops-preflight/SKILL.md`, `henke-skills/SKILL.md` — instrução dos portões + heurística universal por linguagem
+- `henke-audit-vibecode/SKILL.md` — portões + heurística universal
+- `henke-code-cirurgico/SKILL.md` — idem
+- `henke-arch-pastas/SKILL.md` — idem
+- `henke-ops-preflight/SKILL.md` — idem
+- `henke-skills/SKILL.md` — idem
 - `evals/bench_corpus.py` — denominador correto (defeitos ≠ controles) + defeitos TS (D10 teste-fantasma `.test.ts`, D11 função complexa `.ts`, D12 dependência outward `.ts`)
 - `evals/canaries_metricas.py` — canários: fence `[]`→2, assertless `.test.ts` bilateral, edges `./helper.js`→`.ts`, churn commit só-binário
 - `tests/test_metric_gates.py` — cobertura dos novos caminhos

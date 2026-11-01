@@ -12,9 +12,14 @@ Categorias de resultado por defeito:
   DETECTED        portão reprovou o defeito (exit 1 / retorno False)
   MISSED          portão existe mas aprovou o defeito (falso-verde)
   NO-INSTRUMENT   a suíte não tem instrumento capaz de consumir o caso
-  FALSE-RED       portão reprovou um caso legítimo (falso-positivo)
+  ERROR:c         execução quebrou (exit 2 / exceção) — não-veredito
+  APPROVED        controle legítimo aprovado (esperado)
+  FALSE-RED       controle legítimo reprovado (falso-positivo)
 
-Exit 0 sempre (benchmark mede, não julga). Falhas de execução aparecem como ERROR.
+O denominador de recall conta SÓ defeitos plantados. Controles (D9) ficam fora
+do denominador e são reportados à parte — aprovar um controle não é detecção.
+
+Exit 0 sempre (benchmark mede, não julga).
 """
 import argparse
 import importlib.util
@@ -127,14 +132,40 @@ def build_corpus(t: Path):
         "# Spec\n## 4. Escopo Declarado\n- `src/ok.py`\n", encoding="utf-8")
     (proj / "src" / "ok.py").write_text("X=1\n", encoding="utf-8")
     (proj / "src" / "fora.py").write_text("X=2\n", encoding="utf-8")
+
+    # D10: teste-fantasma TypeScript (.test.ts sem asserção real)
+    (proj / "tests" / "fake.test.ts").write_text(
+        'import { describe, it, expect, vi } from "vitest";\n'
+        'import { monstroTs } from "../src/exec/monstroTs";\n'
+        'describe("ts", () => {\n'
+        '  it("fantasma", () => { const r = monstroTs(1); console.log(r); });\n'
+        '  it("mock only", () => { const m = vi.fn(); m();'
+        ' expect(m).toHaveBeenCalledTimes(1); });\n'
+        '  it("engole", () => { try { monstroTs(9); } catch (e) { } });\n'
+        "});\n", encoding="utf-8")
+
+    # D11: função monstro TypeScript sem cobertura
+    monster_ts = ["export function monstroTs(x: number): number {"]
+    for i in range(20):
+        monster_ts.append(f"  if (x === {i} && x > {i} || x < -{i}) x += {i};")
+    monster_ts.append("  return x;\n}")
+    (proj / "src" / "exec" / "monstroTs.ts").write_text(
+        "\n".join(monster_ts) + "\n", encoding="utf-8")
+
+    # D12: dependência outward em TypeScript (exec importa ui)
+    (proj / "src" / "ui" / "telaTs.ts").write_text(
+        "export const TITLE = 'x';\n", encoding="utf-8")
+    (proj / "src" / "exec" / "invasor.ts").write_text(
+        'import { TITLE } from "../ui/telaTs.js";\nconsole.log(TITLE);\n',
+        encoding="utf-8")
     return proj
 
 
 def run(suite: Suite):
     rows = []
 
-    def record(defeito, resultado, detalhe=""):
-        rows.append((defeito, resultado, detalhe))
+    def record(defeito, resultado, detalhe="", control=False):
+        rows.append((defeito, resultado, detalhe, control))
 
     with tempfile.TemporaryDirectory() as td:
         t = Path(td)
@@ -150,7 +181,7 @@ def run(suite: Suite):
         code, _ = suite.run_gate("scripts", "metricas", "assertless_scan.py",
                                  args=(proj / "tests" / "test_real.py",))
         record("D9 teste legítimo (controle falso-positivo)",
-               {0: "APPROVED", 1: "FALSE-RED"}.get(code, code))
+               {0: "APPROVED", 1: "FALSE-RED"}.get(code, code), control=True)
 
         # --- D2 monstro: coleta métricas -> crap ---
         sig = suite.script("scripts", "repo_signals.py")
@@ -184,18 +215,24 @@ def run(suite: Suite):
         else:
             record("D3 arquivo piorou vs baseline", "NO-INSTRUMENT")
 
-        # --- D4 fence: edges -> outward ---
+        all_edges = []
+        # --- D4 fence: edges -> outward (filtrado por .py) ---
         if sig and suite.has("scripts", "metricas", "fence_check.py"):
-            _, edges = sh([sys.executable, str(sig), "edges", "--root", proj],
-                          merge_err=False)
-            ef = t / "edges.json"
-            ef.write_text(edges, encoding="utf-8")
+            _, edges_raw = sh([sys.executable, str(sig), "edges", "--root", proj],
+                              merge_err=False)
+            try:
+                all_edges = json.loads(edges_raw)
+            except json.JSONDecodeError:
+                all_edges = []
+            py_edges = [e for e in all_edges if e["from"].endswith(".py")]
+            ef = t / "edges_py.json"
+            ef.write_text(json.dumps(py_edges), encoding="utf-8")
             code, _ = suite.run_gate("scripts", "metricas", "fence_check.py",
                                      args=(proj / "fence.json", ef))
-            record("D4 executor importa UI (outward)",
+            record("D4 executor importa UI (outward, .py)",
                    {1: "DETECTED", 0: "MISSED"}.get(code, code))
         else:
-            record("D4 executor importa UI (outward)", "NO-INSTRUMENT")
+            record("D4 executor importa UI (outward, .py)", "NO-INSTRUMENT")
 
         # --- D5 tornado: churn crescente ---
         if sig and suite.has("scripts", "metricas", "tornado_scan.py"):
@@ -253,6 +290,36 @@ def run(suite: Suite):
         else:
             record("D8 cheat .sr-only duplicando texto", "NO-INSTRUMENT")
 
+        # --- D10 teste-fantasma TypeScript ---
+        code, _ = suite.run_gate("scripts", "metricas", "assertless_scan.py",
+                                 args=(proj / "tests" / "fake.test.ts",))
+        record("D10 teste-fantasma .test.ts",
+               {1: "DETECTED", 0: "MISSED"}.get(code, code))
+
+        # --- D11 monstro TypeScript sem cobertura ---
+        if sig and suite.has("scripts", "metricas", "crap_score.py"):
+            code, tsv = sh([sys.executable, str(sig), "metrics", "--root", proj],
+                           merge_err=False)
+            ts_tsv = "".join(l + "\n" for l in tsv.splitlines() if ".ts" in l)
+            code2, _ = sh([sys.executable, str(suite.script("scripts", "metricas", "crap_score.py")),
+                           "--threshold", "6"], input_text=ts_tsv)
+            record("D11 função complexa .ts sem cobertura",
+                   {1: "DETECTED", 0: "MISSED"}.get(code2, f"ERROR:{code2}"))
+        else:
+            record("D11 função complexa .ts sem cobertura", "NO-INSTRUMENT")
+
+        # --- D12 outward TypeScript ---
+        if sig and suite.has("scripts", "metricas", "fence_check.py"):
+            ts_edges = [e for e in all_edges if e["from"].endswith((".ts", ".tsx"))]
+            ef = t / "edges_ts.json"
+            ef.write_text(json.dumps(ts_edges), encoding="utf-8")
+            code, _ = suite.run_gate("scripts", "metricas", "fence_check.py",
+                                     args=(proj / "fence.json", ef))
+            record("D12 executor importa UI (outward, .ts)",
+                   {1: "DETECTED", 0: "MISSED"}.get(code, code))
+        else:
+            record("D12 executor importa UI (outward, .ts)", "NO-INSTRUMENT")
+
     return rows
 
 
@@ -267,23 +334,29 @@ def main():
 
     print(f"Benchmark adversarial — suite: {suite.root}\n")
     rows = run(suite)
-    det = sum(1 for _, r, _ in rows if r == "DETECTED")
-    miss = sum(1 for _, r, _ in rows if r == "MISSED")
-    noins = sum(1 for _, r, _ in rows if r == "NO-INSTRUMENT")
-    err = sum(1 for _, r, _ in rows if str(r).startswith("ERROR"))
-    fred = sum(1 for _, r, _ in rows if r == "FALSE-RED")
+    defects = [(d, r, i) for d, r, i, c in rows if not c]
+    controls = [(d, r, i) for d, r, i, c in rows if c]
+    det = sum(1 for _, r, _ in defects if r == "DETECTED")
+    miss = sum(1 for _, r, _ in defects if r == "MISSED")
+    noins = sum(1 for _, r, _ in defects if r == "NO-INSTRUMENT")
+    err = sum(1 for _, r, _ in defects if str(r).startswith("ERROR"))
+    appr = sum(1 for _, r, _ in controls if r == "APPROVED")
+    fred = sum(1 for _, r, _ in controls if r == "FALSE-RED")
 
-    for d, r, det_info in rows:
-        print(f"  {r:<14} {d}  {det_info}")
+    for d, r, det_info, c in rows:
+        tag = " [controle]" if c else ""
+        print(f"  {r:<14} {d}  {det_info}{tag}")
 
-    instrumented = det + miss + fred
-    print(f"\nResumo: {det} detectado(s) · {miss} perdido(s) · "
-          f"{noins} sem instrumento · {fred} falso-vermelho · {err} erro(s)")
+    instrumented = det + miss
+    print(f"\nResumo (defeitos={len(defects)}, controles={len(controls)}):")
+    print(f"  {det} detectado(s) · {miss} perdido(s) · "
+          f"{noins} sem instrumento · {err} erro(s)")
+    print(f"  controles: {appr} aprovado(s) · {fred} falso-vermelho")
     if instrumented:
-        print(f"Recall sobre defeitos com instrumento: {det}/{det+miss} "
-              f"({100*det/(det+miss):.0f}%)")
-    print(f"Cobertura instrumental: {instrumented}/{len(rows)} defeitos "
-      f"({100*instrumented/len(rows):.0f}%)")
+        print(f"Recall de defeitos (sobre instrumentados): {det}/{instrumented} "
+              f"({100*det/instrumented:.0f}%)")
+    print(f"Cobertura instrumental: {instrumented}/{len(defects)} defeitos "
+          f"({100*instrumented/len(defects):.0f}%)")
 
 
 if __name__ == "__main__":
