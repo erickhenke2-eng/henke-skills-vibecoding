@@ -1,6 +1,8 @@
-# Design Spec — Portões Métricos (assimilação Uncle Bob Skills)
+# Design Spec — Portões Métricos (assimilação Uncle Bob Skills) — v2 correção adversarial
 
 **Spec-hash binding:** este documento é a spec de referência do `spec_drift.py`. Alterá-la após aprovação invalida a aprovação.
+
+> **v2 (2026-10-31):** a perícia adversarial independente sobre `d05880c` reproduziu 5 falhas contra `virusclip` (repo real TS/Vitest): falso-verde do `fence_check` com `edges=[]`, crash do `churn` em commits com binários, miopia Python-only, crash cp1252/`rglob` atravessando `node_modules`, denominador errado do benchmark e skills sem instrução dos portões. Esta revisão universaliza coletores/scanners (py/ts/tsx/js/mjs/rs/go), corrige o falso-verde, endurece streams Windows, instrui as skills e exige prova física no `virusclip`.
 
 ## 1. Contexto
 
@@ -30,7 +32,7 @@ Coletor `scripts/repo_signals.py` (stdlib): `churn` (git numstat → TSV), `metr
 
 ## 4. Escopo Declarado (arquivos e símbolos a tocar)
 
-Novos:
+Novos (v1):
 - `docs/designs/portoes-metricos-ub.md` (este arquivo)
 - `scripts/metricas/__init__.py`
 - `scripts/metricas/assertless_scan.py`
@@ -43,12 +45,26 @@ Novos:
 - `tests/test_metric_gates.py`
 - `evals/bench_corpus.py`
 
-Editados:
+Novos (v2):
+- `scripts/metricas/polyglot.py` — lexer O(N) compartilhado (mask de comentários/strings, funções por chaveamento, blocos de teste, imports) para ts/tsx/js/mjs/rs/go.
+
+Editados (v1):
 - `PROTOCOLO.md` — §10 tabela de portões + delta de versão (v3.1.1 → v3.2)
 - `README.md` — seção de verificação (1 item)
 - `.github/workflows/ci.yml` — +2 passos (test_metric_gates, canaries_metricas)
 
-Fora de escopo (declarado): `henke-*/SKILL.md` (nenhuma skill muda), `install*`, `prompts/`, `.henke/`.
+Editados (v2):
+- `docs/designs/portoes-metricos-ub.md` — esta revisão
+- `scripts/metricas/fence_check.py` — `edges=[]` → exit 2 (mata falso-verde)
+- `scripts/repo_signals.py` — universalização: `os.walk` com poda (`node_modules`, `target`, `dist`, `out`, `release`, `vendor`, `.runtime`, `coverage`), churn conta binários/`--no-merges`/nunca emite 0, metrics poliglota, loaders de coverage (coverage.py, Istanbul summary/final, lcov.info), edges poliglota (py/ts/js/rs/go + pacotes de workspace)
+- `scripts/metricas/assertless_scan.py` — dispatch poliglota (`.test.ts`, `.spec.ts`, `.test.js`, `_test.go`, `_test.rs`, `tests/*.rs`)
+- `scripts/metricas/*.py` + `scripts/repo_signals.py` — reconfiguração de streams para UTF-8 em Windows
+- `henke-audit-vibecode/SKILL.md`, `henke-code-cirurgico/SKILL.md`, `henke-arch-pastas/SKILL.md`, `henke-ops-preflight/SKILL.md`, `henke-skills/SKILL.md` — instrução dos portões + heurística universal por linguagem
+- `evals/bench_corpus.py` — denominador correto (defeitos ≠ controles) + defeitos TS (D10 teste-fantasma `.test.ts`, D11 função complexa `.ts`, D12 dependência outward `.ts`)
+- `evals/canaries_metricas.py` — canários: fence `[]`→2, assertless `.test.ts` bilateral, edges `./helper.js`→`.ts`, churn commit só-binário
+- `tests/test_metric_gates.py` — cobertura dos novos caminhos
+
+Fora de escopo (declarado): `install*`, `prompts/`, `.henke/`, nenhum arquivo do `virusclip` (verificação física é read-only).
 
 ## 5. Casos de borda
 
@@ -69,5 +85,7 @@ Fora de escopo (declarado): `henke-*/SKILL.md` (nenhuma skill muda), `install*`,
 ## 7. O que NÃO será verificado
 
 - mutant-hunt (sem runtime de mutação nesta spec) → permanece `[A CONSTRUIR]`.
-- Integração do Maestro despachando os portões automaticamente (texto de skill é `[PROSA]` até alterar `henke-skills/SKILL.md` — fora de escopo).
+- Cobertura por função em TS: loaders aceitos agregam por arquivo; per-function em JS exige instrumentação fora do stdlib — declarado.
+- Dispatch automático de coverage: o coletor aceita `--coverage-json`/`--lcov`, mas quem produz o relatório é a toolchain do projeto (vitest/coverage.py/go test) — `[PROSA]` no SKILL.
+- Scanners léxicos (não-AST) são aproximações O(N): generics TS com `<`/`>` aninhados, macros Rust complexos e regex literals ambíguos podem deslocar fronteiras de função — erro admissível declarado, sem crash e sem falso-verde.
 - closed-stream/lane-check aplicados aos portões **antigos** (hardening retroativo — P2 futuro).
