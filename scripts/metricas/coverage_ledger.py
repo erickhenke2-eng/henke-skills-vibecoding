@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-coverage_ledger.py — Portão mecânico de Cobertura de Auditoria & Dossier (PROTOCOLO v3.3).
+coverage_ledger.py — Portão mecânico de Cobertura de Auditoria & Dossier (PROTOCOLO v3.4).
 
 Sintetiza os mecanismos de:
   - `cloudflare/security-audit-skill` (`validate-coverage-ledger.cjs` + `validate-findings.cjs`)
@@ -169,6 +169,7 @@ def verify_ledger(
     root_override: Path | None = None,
     min_pct: float = 90.0,
     require_critic: bool = False,
+    max_out_of_scope_pct: float = 20.0,
 ) -> tuple[bool, list[str], dict]:
     try:
         data = json.loads(ledger_path.read_text(encoding="utf-8"))
@@ -281,9 +282,18 @@ def verify_ledger(
             errors.append(f"INVALID-FINDING-STATUS [{fid}]: status '{fstatus}' inválido")
 
     # 3. Cálculo honesto de cobertura (exclui out_of_scope do denominador)
-    active_total = len(units) - counts["out_of_scope"]
+    total_units = len(units)
+    if total_units > 0:
+        out_pct = 100.0 * counts["out_of_scope"] / total_units
+        if out_pct > max_out_of_scope_pct:
+            errors.append(f"EXCESSIVE-OUT-OF-SCOPE: unidades fora de escopo {out_pct:.1f}% ({counts['out_of_scope']}/{total_units}) excede o teto permitido de {max_out_of_scope_pct:.1f}%")
+
+    active_total = total_units - counts["out_of_scope"]
     audited_count = counts["covered"] + counts["finding_confirmed"] + counts["needs_validation"]
-    pct = (100.0 * audited_count / active_total) if active_total > 0 else 100.0
+    if audited_count == 0:
+        errors.append("ZERO-AUDITED: nenhuma unidade foi efetivamente auditada (audited_units == 0)")
+
+    pct = (100.0 * audited_count / active_total) if active_total > 0 else 0.0
     if pct < min_pct:
         errors.append(f"LOW-COVERAGE: cobertura auditada {pct:.1f}% ({audited_count}/{active_total}) < mínimo {min_pct:.1f}%")
 
@@ -349,6 +359,7 @@ def main() -> None:
     p_ver.add_argument("ledger", help="Caminho do arquivo ledger.json")
     p_ver.add_argument("--root", default=None, help="Override do diretório raiz")
     p_ver.add_argument("--min-pct", type=float, default=90.0)
+    p_ver.add_argument("--max-out-of-scope-pct", type=float, default=20.0, help="Teto máximo permitido de unidades fora de escopo (padrão 20.0%)")
     p_ver.add_argument("--require-critic", action="store_true")
 
     p_ren = sub.add_parser("render-gaps", help="Gera a seção Markdown 'O que NÃO foi verificado'")
@@ -373,7 +384,8 @@ def main() -> None:
                 sys.exit(2)
             r_over = Path(args.root) if args.root else None
             ok, errors, summary = verify_ledger(
-                lpath, root_override=r_over, min_pct=args.min_pct, require_critic=args.require_critic
+                lpath, root_override=r_over, min_pct=args.min_pct, require_critic=args.require_critic,
+                max_out_of_scope_pct=args.max_out_of_scope_pct
             )
             if not summary and errors and errors[0].startswith(("SCHEMA-ERR", "ROOT-ERR")):
                 for e in errors:

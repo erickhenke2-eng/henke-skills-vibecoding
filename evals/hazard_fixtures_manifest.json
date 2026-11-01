@@ -1,0 +1,32 @@
+[
+  {
+    "file": "evals/canaries_metricas.py",
+    "rule": "HARDCODED-SECRET",
+    "reason": "synthetic key fixture for Canary M34"
+  },
+  {
+    "file": "evals/canaries_metricas.py",
+    "rule": "SQL-CONCAT",
+    "reason": "SQL injection fixture string for Canary M34"
+  },
+  {
+    "file": "evals/canaries_metricas.py",
+    "rule": "CORS-CRED-WILDCARD",
+    "reason": "CORS wildcard fixture string for Canary M48"
+  },
+  {
+    "file": "evals/canaries_metricas.py",
+    "rule": "PROTO-POLLUTION",
+    "reason": "Prototype pollution fixture string for Canary M48"
+  },
+  {
+    "file": "evals/canaries_metricas.py",
+    "rule": "IMDS-V1",
+    "reason": "IMDS v1 fixture string for Canary M48"
+  },
+  {
+    "file": "evals/bench_corpus.py",
+    "rule": "CORS-CRED-WILDCARD",
+    "reason": "CORS wildcard fixture string for Benchmark D18"
+  }
+]

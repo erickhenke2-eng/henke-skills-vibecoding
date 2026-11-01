@@ -114,6 +114,131 @@ class TestMetricGates(unittest.TestCase):
         self.assertEqual(res_pt["skills"][0]["name"], "henke-audit-pentest")
         self.assertEqual(res_pt["unrouted_catalog_skills"], [])
 
+    def test_wave3a_spec_contract_closure_passes(self):
+        spec_w3a = repo_root / "docs" / "designs" / "wave3a-fechamento-furos.md"
+        code3a, out3a = run(MET / "contract_closure.py", "--spec", spec_w3a, "--repo", repo_root)
+        self.assertEqual(code3a, 0, out3a)
+
+    def test_router_wave3a_destructive_and_bilingual(self):
+        # 1. CARPINTEIRO gates_required inclui scripts/spec_drift.py
+        res_carp = route_request("faz uma mudança cirúrgica no código")
+        self.assertIn("scripts/spec_drift.py", res_carp["gates_required"])
+
+        # 2. Destrutivo imperativo PT -> EXECUTAR + auth
+        res_d_pt_exec = route_request("deleta o banco de dados e limpa tudo")
+        self.assertEqual(res_d_pt_exec["mode"], "EXECUTAR")
+        self.assertTrue(res_d_pt_exec["requires_human_auth"])
+
+        # 3. Destrutivo interrogativo PT -> ANALISAR + auth
+        res_d_pt_q = route_request("como deletar uma tabela sem perder dados?")
+        self.assertEqual(res_d_pt_q["mode"], "ANALISAR")
+        self.assertTrue(res_d_pt_q["requires_human_auth"])
+
+        # 4. Destrutivo imperativo EN -> EXECUTAR + auth
+        res_d_en_exec = route_request("drop table users and wipe database")
+        self.assertEqual(res_d_en_exec["mode"], "EXECUTAR")
+        self.assertTrue(res_d_en_exec["requires_human_auth"])
+
+        # 5. Destrutivo interrogativo EN -> ANALISAR + auth
+        res_d_en_q = route_request("how to delete a table safely?")
+        self.assertEqual(res_d_en_q["mode"], "ANALISAR")
+        self.assertTrue(res_d_en_q["requires_human_auth"])
+
+        # 6. Prompt em inglês de plano -> PLANEJAR / ESTADISTA
+        res_en_plan = route_request("plan database migration for postgres")
+        self.assertEqual(res_en_plan["mode"], "PLANEJAR")
+        self.assertEqual(res_en_plan["archetype"], "ESTADISTA")
+
+        # 7. Prompt em inglês de auditoria -> ANALISAR / SHERLOCK
+        res_en_aud = route_request("audit security of our cloud iam policies")
+        self.assertEqual(res_en_aud["mode"], "ANALISAR")
+        self.assertEqual(res_en_aud["archetype"], "SHERLOCK")
+
+        # 8. Fallback gates quando confidence == "none"
+        res_none = route_request("what is the recipe for chocolate cake?")
+        self.assertEqual(res_none["confidence"], "none")
+        self.assertIn("scripts/repo_signals.py", res_none["gates_required"])
+        self.assertIn("scripts/metricas/hazard_scan.py", res_none["gates_required"])
+
+        # 9. Perguntas com verbos destrutivos e pontuação interrogativa terminada em ?
+        res_d_posso = route_request("posso deletar a tabela de usuarios?")
+        self.assertEqual(res_d_posso["mode"], "ANALISAR")
+        self.assertTrue(res_d_posso["requires_human_auth"])
+        self.assertEqual(res_d_posso["skills"][0]["name"], "henke-arch-banco")
+
+        res_d_can_we = route_request("can we delete the users table?")
+        self.assertEqual(res_d_can_we["mode"], "ANALISAR")
+        self.assertTrue(res_d_can_we["requires_human_auth"])
+        self.assertEqual(res_d_can_we["skills"][0]["name"], "henke-arch-banco")
+
+    def test_hazard_scan_function_line_precision_and_block_suppression(self):
+        import tempfile
+        from scripts.metricas.hazard_scan import scan_file
+
+        # Teste 1: Supressão por bloco multiline (/* ... */) e precisão de linha em função
+        code_ts = (
+            "export function createSessionToken() {\n"
+            "    const step1 = 'init';\n"
+            "    /*\n"
+            "     * hazard-ok: WEAK-CRYPTO — gerador pseudo-aleatorio seguro para teste\n"
+            "     */\n"
+            "    const token = Math.random().toString(36);\n"
+            "    return token;\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".ts", mode="w", delete=False, encoding="utf-8") as tf:
+            tf.write(code_ts)
+            tf_p = Path(tf.name)
+        try:
+            sc, fnds, _ = scan_file(tf_p)
+            self.assertEqual(fnds, [], f"Hazard deveria ter sido suprimido pelo bloco: {fnds}")
+        finally:
+            tf_p.unlink()
+
+        # Teste 2: Linha exata da violação dentro de função (não sl da assinatura)
+        code_unsupp = (
+            "export function authHandler(user: string) {\n"
+            "    console.log('line 2');\n"
+            "    console.log('line 3');\n"
+            "    const token = Math.random().toString(36);\n"
+            "    return token;\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".ts", mode="w", delete=False, encoding="utf-8") as tf:
+            tf.write(code_unsupp)
+            tf_p = Path(tf.name)
+        try:
+            sc, fnds, _ = scan_file(tf_p)
+            self.assertEqual(len(fnds), 1)
+            rule, loc, scope, _ = fnds[0]
+            self.assertEqual(rule, "WEAK-CRYPTO")
+            self.assertTrue(loc.endswith(":4"), f"Esperado linha 4, obteve: {loc}")
+        finally:
+            tf_p.unlink()
+
+    def test_contract_closure_multiline_html_comment_in_spec(self):
+        import tempfile
+        from scripts.metricas.contract_closure import check_contract_closure
+        spec_content = (
+            "# Spec Test\n"
+            "## 4. Escopo Declarado\n"
+            "- `scripts/henke_router.py`\n"
+            "## 5. Pontes de Contrato\n"
+            "<!--\n"
+            "Comentário explicativo multiline\n"
+            "- nota sobre ponte interna\n"
+            "-->\n"
+            "- ponte: `scripts/henke_router.py::route_request -> tests/test_metric_gates.py`\n"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False, encoding="utf-8") as tf:
+            tf.write(spec_content)
+            tf_p = Path(tf.name)
+        try:
+            ok, errs = check_contract_closure(tf_p, repo_root)
+            self.assertTrue(ok, f"Fechamento deveria passar com comentário multiline: {errs}")
+        finally:
+            tf_p.unlink()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

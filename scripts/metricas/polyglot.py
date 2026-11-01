@@ -8,10 +8,21 @@ ambíguos podem deslocar fronteiras — erra no lado conservador, nunca crasha.
 
 Usado por: repo_signals.py (metrics/edges) e assertless_scan.py (testes não-Python).
 """
+import bisect
+import io
 import json
 import os
 import re
+import tokenize
 from pathlib import Path
+from typing import NamedTuple
+
+class CommentSpan(NamedTuple):
+    start_line: int  # 1-indexed
+    start_col: int   # 0-indexed
+    end_line: int    # 1-indexed
+    end_col: int     # 0-indexed
+    text: str        # comment slice
 
 C_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx", ".rs", ".go"}
 JS_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx"}
@@ -66,6 +77,13 @@ def mask_c_like(text: str, lang: str = "") -> str:
                 if out[k] != "\n":
                     out[k] = " "
             i = j + 2
+        elif (lang not in ("rs", "go")) and text.startswith("<!--", i):
+            j = text.find("-->", i + 4)
+            j = n - 3 if j == -1 else j
+            for k in range(i, j + 3):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 3
         elif c in "'\"":
             # 'a/'static é lifetime — existe só em Rust. Fora de rs, ' é string.
             if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
@@ -206,6 +224,13 @@ def mask_comments_only(text: str, lang: str = "") -> str:
                 if out[k] != "\n":
                     out[k] = " "
             i = j + 2
+        elif (lang not in ("rs", "go")) and text.startswith("<!--", i):
+            j = text.find("-->", i + 4)
+            j = n - 3 if j == -1 else j
+            for k in range(i, j + 3):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 3
         elif c in "'\"`":
             if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
                 i += 1
@@ -214,6 +239,100 @@ def mask_comments_only(text: str, lang: str = "") -> str:
         else:
             i += 1
     return "".join(out)
+
+
+def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
+    """Extrai spans de comentários reais para C-like, Python, HTML/Vue/Svelte e hash-configs.
+    Retorna lista de CommentSpan(start_line, start_col, end_line, end_col, text)."""
+    lang = lang.lstrip(".").lower()
+    spans: list[CommentSpan] = []
+
+    if lang in ("py", "python"):
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+            for tok_type, tok_str, start, end, _ in tokens:
+                if tok_type == tokenize.COMMENT:
+                    spans.append(CommentSpan(start[0], start[1], end[0], end[1], tok_str))
+            return spans
+        except (tokenize.TokenError, IndentationError, SyntaxError):
+            pass
+
+    line_starts = [0]
+    for idx, ch in enumerate(text):
+        if ch == "\n":
+            line_starts.append(idx + 1)
+
+    def _offset_to_pos(pos: int) -> tuple[int, int]:
+        l_idx = bisect.bisect_right(line_starts, pos) - 1
+        return l_idx + 1, pos - line_starts[l_idx]
+
+    i, n = 0, len(text)
+    is_hash_lang = lang in ("py", "python", "tf", "tfvars", "toml", "yaml", "yml", "dockerfile", "sh", "bash")
+    can_html_comment = lang not in ("rs", "go")
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if c == "/" and nxt == "/":
+            j = text.find("\n", i)
+            j = n if j == -1 else j
+            sl, sc = _offset_to_pos(i)
+            el, ec = _offset_to_pos(j)
+            spans.append(CommentSpan(sl, sc, el, ec, text[i:j]))
+            i = j
+        elif c == "/" and nxt == "*":
+            j = text.find("*/", i + 2)
+            end_pos = n if j == -1 else j + 2
+            sl, sc = _offset_to_pos(i)
+            el, ec = _offset_to_pos(end_pos)
+            spans.append(CommentSpan(sl, sc, el, ec, text[i:end_pos]))
+            i = end_pos
+        elif can_html_comment and text.startswith("<!--", i):
+            j = text.find("-->", i + 4)
+            end_pos = n if j == -1 else j + 3
+            sl, sc = _offset_to_pos(i)
+            el, ec = _offset_to_pos(end_pos)
+            spans.append(CommentSpan(sl, sc, el, ec, text[i:end_pos]))
+            i = end_pos
+        elif is_hash_lang and c == "#":
+            j = text.find("\n", i)
+            j = n if j == -1 else j
+            sl, sc = _offset_to_pos(i)
+            el, ec = _offset_to_pos(j)
+            spans.append(CommentSpan(sl, sc, el, ec, text[i:j]))
+            i = j
+        elif c in "'\"`":
+            if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
+                i += 1
+                continue
+            i = _template_end(text, i) if c == "`" else _string_end(text, i, c)
+        else:
+            i += 1
+    return spans
+
+
+def mask_py(text: str) -> str:
+    """Mascara comentários e strings em Python preservando \n e colunas."""
+    out = list(text)
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        line_starts = [0]
+        for idx, ch in enumerate(text):
+            if ch == "\n":
+                line_starts.append(idx + 1)
+        for tok_type, tok_str, start, end, _ in tokens:
+            if tok_type in (tokenize.COMMENT, tokenize.STRING):
+                s_off = line_starts[start[0] - 1] + start[1]
+                e_off = line_starts[end[0] - 1] + end[1]
+                for k in range(s_off, min(e_off, len(out))):
+                    if out[k] != "\n":
+                        out[k] = " "
+        return "".join(out)
+    except Exception:
+        def _repl(m):
+            return "".join("\n" if c == "\n" else " " for c in m.group(0))
+        t = re.sub(r"#.*$", lambda m: " " * len(m.group(0)), text, flags=re.M)
+        t = re.sub(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'|"[^"\n]*"|\'[^\'\n]*\'', _repl, t)
+        return t
 
 
 def _template_end(text, i):

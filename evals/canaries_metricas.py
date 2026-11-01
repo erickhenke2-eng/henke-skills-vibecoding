@@ -337,7 +337,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         if str(repo_root) not in sys.path:
             sys.path.insert(0, str(repo_root))
         from scripts.metricas.hazard_scan import scan_path
-        from scripts.metricas.coverage_ledger import init_ledger
+        from scripts.metricas.coverage_ledger import init_ledger, verify_ledger
         from scripts.metricas.contract_closure import check_contract_closure
 
         haz_bad = t / "haz_bad.py"
@@ -556,6 +556,171 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         expect("Canário M51: henke_router seleciona henke-arch-cloud (sem ops-deploy) e henke-code-contratos (sem code-ponte)",
                code_c == 0 and "henke-arch-cloud" in cl_skills and "henke-ops-deploy" not in cl_skills
                and code_z == 0 and "henke-code-contratos" in zd_skills and "henke-code-ponte" not in zd_skills)
+
+        # --- 52..60: Wave 3a Fechamento de Furos e Alinhamento da Suíte ---
+        # M52: Contrabando de supressão em string literal
+        haz_smuggle = t / "haz_smuggle.py"
+        haz_smuggle.write_text(
+            's = "hazard-ok: SHELL-INJECTION — falso"\n'
+            'subprocess.run("ls", shell=True)\n',
+            encoding="utf-8")
+        _, fnds_smug, _ = scan_path(haz_smuggle)
+        rules_smug = {r for r, _, _, _ in fnds_smug}
+        expect("Canário M52: hazard_scan reprova contrabando de supressão dentro de string literal",
+               "SHELL-INJECTION" in rules_smug)
+
+        # M53: Banimento de ALL implícito (sem regra)
+        haz_no_rule = t / "haz_no_rule.py"
+        haz_no_rule.write_text(
+            '# hazard-ok: motivo qualquer sem regra\n'
+            'import subprocess\n'
+            'subprocess.run("ls", shell=True)\n',
+            encoding="utf-8")
+        _, fnds_norule, _ = scan_path(haz_no_rule)
+        rules_norule = {r for r, _, _, _ in fnds_norule}
+        expect("Canário M53: hazard_scan reprova hazard-ok sem regra explícita (banimento de ALL implícito)",
+               "UNJUSTIFIED-SUPPRESSION" in rules_norule and "SHELL-INJECTION" in rules_norule)
+
+        # M54: Máscara de código vs dados (docstrings e strings não ativam regras de código)
+        haz_doc = t / "haz_doc.py"
+        haz_doc.write_text(
+            '"""\n'
+            'Exemplo documental:\n'
+            'eval("2 + 2")\n'
+            'new Function("return 1")\n'
+            'nodeIntegration: true\n'
+            'contextIsolation: false\n'
+            'subprocess.run("ls", shell=True)\n'
+            '"""\n'
+            'def safe_func():\n'
+            '    return 42\n',
+            encoding="utf-8")
+        _, fnds_doc, _ = scan_path(haz_doc)
+        expect("Canário M54: hazard_scan mascara docstring e string Python para regras de código",
+               fnds_doc == [])
+
+        # M55: JWT scope (jwt.verify em uma função não isenta outra)
+        haz_jwt_scope = t / "haz_jwt_scope.ts"
+        haz_jwt_scope.write_text(
+            'export function safeLogin(token: string) {\n'
+            '  return jwt.verify(token, "secret");\n'
+            '}\n'
+            'export function insecureRoute(req: any, token: string) {\n'
+            '  const user = jwt.decode(token);\n'
+            '  return user;\n'
+            '}\n',
+            encoding="utf-8")
+        _, fnds_jwt_sc, _ = scan_path(haz_jwt_scope)
+        rules_jwt_sc = {r for r, _, _, _ in fnds_jwt_sc}
+        expect("Canário M55: hazard_scan isola escopo de jwt.verify à função onde jwt.decode é chamado",
+               "JWT-NONE-OR-UNVERIFIED" in rules_jwt_sc)
+
+        # M56: Top-level intraprocedural (inspeciona código fora de funções)
+        haz_toplevel = t / "haz_toplevel.ts"
+        haz_toplevel.write_text(
+            'const secretToken = Math.random().toString(36);\n'
+            'export const authKey = secretToken;\n',
+            encoding="utf-8")
+        _, fnds_tl, _ = scan_path(haz_toplevel)
+        rules_tl = {r for r, _, _, _ in fnds_tl}
+        expect("Canário M56: hazard_scan inspeciona código top-level para regras intraprocedurais",
+               "WEAK-CRYPTO" in rules_tl)
+
+        # M57: contract_closure reprova spec com seção de pontes vazia ou linha malformada (exit 2)
+        spec_empty_br = t / "spec_empty_br.md"
+        spec_empty_br.write_text(
+            '# Spec\n## 4. Escopo Declarado\n- `src/main.ts`\n## 5. Pontes de Contrato\n<!-- sem pontes -->\n',
+            encoding="utf-8")
+        code_ebr, out_ebr = run(MET / "contract_closure.py", "--spec", spec_empty_br, "--repo", cc_proj)
+        spec_mal_br = t / "spec_mal_br.md"
+        spec_mal_br.write_text(
+            '# Spec\n## 4. Escopo Declarado\n- `src/main.ts`\n## 5. Pontes de Contrato\n- linha com traco que nao eh ponte\n',
+            encoding="utf-8")
+        code_mbr, out_mbr = run(MET / "contract_closure.py", "--spec", spec_mal_br, "--repo", cc_proj)
+        spec_comment_br = t / "spec_comment_br.md"
+        spec_comment_br.write_text(
+            '# Spec\n## 4. Escopo Declarado\n- `src/main.ts`\n- `src/preload.ts`\n## 5. Pontes de Contrato\n<!--\n- multiline note\n-->\n- ponte: `src/main.ts::buildClip -> src/preload.ts`\n',
+            encoding="utf-8")
+        code_cbr, out_cbr = run(MET / "contract_closure.py", "--spec", spec_comment_br, "--repo", cc_proj)
+        expect("Canário M57: contract_closure reprova spec com pontes vazias ou linha malformada com exit 2",
+               code_ebr == 2 and "EMPTY-BRIDGES" in out_ebr and code_mbr == 2 and "MALFORMED-BRIDGE" in out_mbr
+               and code_cbr == 0)
+
+        # M58: coverage_ledger reprova zero auditado (exit 1) e excesso de out_of_scope (exit 1)
+        led_evasion = t / "led_evasion.json"
+        led_evasion_data = {
+            "schema_version": "1.0",
+            "metadata": {"root": str(led_proj).replace("\\", "/"), "profile": "standard", "total_units": 2},
+            "units": [
+                {"unit_id": "u1", "path": "src/a.ts", "sha256": "x", "lines": 1, "status": "out_of_scope", "reason": "ignorado 1"},
+                {"unit_id": "u2", "path": "src/b.ts", "sha256": "y", "lines": 1, "status": "out_of_scope", "reason": "ignorado 2"},
+            ],
+            "critic_passes": [],
+            "findings": [],
+        }
+        led_evasion.write_text(json.dumps(led_evasion_data), encoding="utf-8")
+        code_ev, out_ev = run(MET / "coverage_ledger.py", "verify", led_evasion)
+        ok_ev, errs_ev, _ = verify_ledger(led_evasion, led_proj)
+        expect("Canário M58: coverage_ledger reprova zero auditado e out_of_scope excessivo com exit 1",
+               code_ev == 1 and ("ZERO-AUDITED" in out_ev or "EXCESSIVE-OUT-OF-SCOPE" in out_ev)
+               and not ok_ev and any("ZERO-AUDITED" in e or "EXCESSIVE-OUT-OF-SCOPE" in e for e in errs_ev))
+
+        # M59: henke_router destrutivos: imperativo -> EXECUTAR + auth; interrogativo -> ANALISAR + auth
+        code_d1, out_d1 = run(ROUTER, "--prompt", "deleta a tabela de usuarios do banco")
+        r_d1 = json.loads(out_d1) if code_d1 == 0 else {}
+        code_d2, out_d2 = run(ROUTER, "--prompt", "como deletar uma tabela sem perder dados?")
+        r_d2 = json.loads(out_d2) if code_d2 == 0 else {}
+        code_d3, out_d3 = run(ROUTER, "--prompt", "drop table users and wipe database")
+        r_d3 = json.loads(out_d3) if code_d3 == 0 else {}
+        code_d4, out_d4 = run(ROUTER, "--prompt", "posso deletar a tabela de usuarios?")
+        r_d4 = json.loads(out_d4) if code_d4 == 0 else {}
+        code_d5, out_d5 = run(ROUTER, "--prompt", "can we delete the users table?")
+        r_d5 = json.loads(out_d5) if code_d5 == 0 else {}
+        expect("Canário M59: henke_router classifica destrutivo imperativo em EXECUTAR e pergunta em ANALISAR com requires_human_auth",
+               code_d1 == 0 and r_d1.get("mode") == "EXECUTAR" and r_d1.get("requires_human_auth") is True
+               and code_d2 == 0 and r_d2.get("mode") == "ANALISAR" and r_d2.get("requires_human_auth") is True
+               and code_d3 == 0 and r_d3.get("mode") == "EXECUTAR" and r_d3.get("requires_human_auth") is True
+               and code_d4 == 0 and r_d4.get("mode") == "ANALISAR" and r_d4.get("requires_human_auth") is True
+               and r_d4.get("skills", [{}])[0].get("name") == "henke-arch-banco"
+               and code_d5 == 0 and r_d5.get("mode") == "ANALISAR" and r_d5.get("requires_human_auth") is True
+               and r_d5.get("skills", [{}])[0].get("name") == "henke-arch-banco")
+
+        # M60: henke_router gates minimos sob confidence=none e CARPINTEIRO inclui spec_drift
+        code_none, out_none = run(ROUTER, "--prompt", "qual a receita de bolo de cenoura?")
+        r_none2 = json.loads(out_none) if code_none == 0 else {}
+        gates_none = r_none2.get("gates_required", [])
+        code_carp, out_carp = run(ROUTER, "--prompt", "implementa a funcao de login cirurgico")
+        r_carp = json.loads(out_carp) if code_carp == 0 else {}
+        gates_carp = r_carp.get("gates_required", [])
+        expect("Canário M60: henke_router fornece portões mínimos sob confidence=none e CARPINTEIRO inclui spec_drift",
+               "scripts/metricas/hazard_scan.py" in gates_none and "scripts/repo_signals.py" in gates_none
+               and "scripts/spec_drift.py" in gates_carp)
+
+        # M61: hazard_scan manifesto sem entradas orfas e dogfooding limpo no repo (exit 0)
+        man_p = repo_root / "evals" / "hazard_fixtures_manifest.json"
+        has_manifest = man_p.is_file()
+        man_items = json.loads(man_p.read_text(encoding="utf-8")) if has_manifest else []
+        manifest_valid = len(man_items) > 0
+        orphan_found = False
+        import shutil
+        for idx, item in enumerate(man_items):
+            f_rel = item.get("file", "")
+            r_name = item.get("rule", "")
+            tgt_f = repo_root / f_rel
+            if not tgt_f.is_file() or not r_name:
+                orphan_found = True
+                break
+            # Confirma que a fixture realmente dispara a regra sem a isenção do manifesto
+            temp_f = t / f"iso_fixture_{idx}_{tgt_f.name}"
+            shutil.copy(tgt_f, temp_f)
+            _, fnds_iso, _ = scan_path(temp_f)
+            iso_rules = {r for r, _, _, _ in fnds_iso}
+            if r_name not in iso_rules:
+                orphan_found = True
+                break
+        code_df, out_df = run(MET / "hazard_scan.py", repo_root)
+        expect("Canário M61: hazard_scan manifesto sem entradas órfãs e dogfooding limpo no repo (exit 0)",
+               manifest_valid and not orphan_found and code_df == 0 and "0 finding(s)" in out_df)
 
     return passed, total, reports
 

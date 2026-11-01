@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-henke_router.py — Roteador determinístico de catálogo da Suíte Henke (PROTOCOLO v3.3).
+henke_router.py — Roteador determinístico de catálogo da Suíte Henke (PROTOCOLO v3.4).
 
 Inspirado na disciplina do `nvidia-skill-finder` (NVIDIA/skills):
 - Lê os 53 `SKILL.md` como fonte única da verdade (`description`, `## 2. Ponto de Partida`
   e `when_not` opcional no frontmatter).
 - Opera como veto de Modo (`ANALISAR` default sob ambiguidade/pergunta; `requires_human_auth`
-  quando detecta vocabulário `PUBLISH`).
+  quando detecta vocabulário destrutivo ou `PUBLISH`).
 - Usa tabela declarativa de desambiguação negativa (`NEGATIVE_DISAMBIGUATION`).
 - Permite `skills: []` (`confidence: "none"`, exit 0) quando o pedido não pertence ao
   catálogo Henke — nunca força pipeline fixo (§8).
@@ -38,36 +38,53 @@ def _norm(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
-# Vocabulário PUBLISH (PROTOCOLO §1) — exige autorização humana explícita
-PUBLISH_SIGNALS = (
-    "deploy", "publica", "publicar", "producao", "push --force", "force push",
-    "faxina", "limpa o repo", "apaga arquivos", "reversao", "reverte", "rollback",
-    "rm -rf", "drop table",
+# Vocabulário destrutivo e PUBLISH (PROTOCOLO §1) — exige autorização humana explícita
+DESTRUCTIVE_SIGNALS = (
+    "deleta", "deletar", "delete", "exclui", "excluir", "drop", "drop table",
+    "truncate", "wipe", "wipe database", "destroi", "destroy", "purge",
+    "force-push", "push --force", "force push", "push -f", "reset --hard",
+    "hard reset", "rm -rf", "apaga o banco", "apagar o banco", "derruba",
 )
+
+PUBLISH_SIGNALS = (
+    "deploy", "publica", "publicar", "producao", "production",
+    "faxina", "limpa o repo", "apaga arquivos", "reversao", "reverte", "rollback",
+) + DESTRUCTIVE_SIGNALS
 
 # Sinais interrogativos / somente-inspeção -> travam teto em ANALISAR
 INTERROGATIVE_PREFIXES = (
-    "como ", "qual ", "quais ", "por que ", "porque ", "o que e ", "o que faz ",
-    "me explica", "explica ", "onde fica", "existe algum", "tem como saber",
+    "como ", "qual ", "quais ", "por que ", "porque ", "o que ", "o que e ", "o que faz ",
+    "me explica", "explica ", "onde ", "onde fica", "existe ", "existe algum", "tem como ", "tem como saber",
+    "posso ", "podemos ", "devo ", "devemos ", "e seguro ", "e possivel ", "sera que ",
+    "how ", "what ", "why ", "where ", "which ", "who ", "explain ", "is there ", "are there ",
+    "can i ", "can we ", "could i ", "could we ", "should i ", "should we ", "is it ", "are we ",
+    "do we ", "does it ", "how to ", "how do ", "how can ",
 )
 
 AUDIT_SIGNALS = (
     "audita", "auditoria", "vibecode", "revisa", "inspeciona", "checa",
     "verifica se", "diagnostica", "investiga", "acha o bug", "onde ta o erro",
     "por que ta falhando", "olha o console", "pentest", "vulnerabilidade",
+    "audit", "review", "inspect", "check", "verify", "diagnose", "investigate",
+    "find bug", "where is the error", "why is it failing", "vulnerability",
 )
 
 PLAN_SIGNALS = (
     "planeja", "plano", "spec", "mvp", "historias", "cartoes de tarefa",
     "fluxo de telas", "jornada do usuario", "ideia de app", "referencias de mercado",
     "pre-mortem", "arquitetura de pastas", "qual stack", "modela o banco",
+    "plan", "roadmap", "user stories", "task cards", "user journey", "screen flow",
+    "app idea", "market references", "folder architecture", "database model",
 )
 
 EXEC_SIGNALS = (
     "implementa", "cria ", "construa", "corrige", "conserta", "edita",
     "adiciona ", "refatora", "desmembra", "renomeia", "integra ", "protege ",
     "prepara o projeto", "inicia o henke", "mudanca", "muda ", "alinha", "ajusta",
-    "atualiza", "aplica",
+    "atualiza", "aplica", "deleta", "deletar", "delete", "exclui", "excluir",
+    "drop", "wipe", "truncate", "destroy", "purge",
+    "implement", "create", "build", "fix", "patch", "edit", "add", "refactor",
+    "split", "rename", "integrate", "protect", "update", "align", "adjust", "apply",
 )
 
 # Tabela declarativa de desambiguação negativa (padrão nvidia-skill-finder):
@@ -144,6 +161,7 @@ DOMAIN_BOOSTS: dict[str, tuple[str, ...]] = {
     "henke-code-cirurgico": ("mudanca cirurgica", "bisturi", "alteracao pontual", "muda so essa linha", "sem quebrar nada"),
     "henke-code-ponte": ("contrato front e back", "tipos compartilhados", "ipc", "dados sumiram na tela", "campos vieram errados"),
     "henke-code-contratos": ("zod", "typebox", "pydantic", "openapi", "trpc", "json schema", "contrato formal", "schema compartilhado", "contrato de api", "fechamento de contrato", "contract_closure"),
+    "henke-arch-banco": ("banco de dados", "modela o banco", "tabela", "database", "table", "schema", "migration", "migracao", "sqlite", "postgres", "sql"),
     "henke-debug-raiz": ("nao sei onde ta o erro", "causa raiz", "bissecta", "ta falhando mas nao sei", "investiga o bug"),
     "henke-plan-mvp": ("define o mvp", "primeira versao", "corta o escopo", "guilhotina"),
     "henke-plan-historias": ("quebra em tarefas", "escreve as historias", "cartoes de tarefa", "spec egm"),
@@ -268,15 +286,19 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             if rule.get("force_mode"):
                 forced_mode = rule["force_mode"]
 
-    requires_human_auth = any(sig in norm_p for sig in PUBLISH_SIGNALS)
+    requires_human_auth = any(sig in norm_p for sig in PUBLISH_SIGNALS) or any(sig in norm_p for sig in DESTRUCTIVE_SIGNALS)
 
     # Determinação de Modo com Veto de Segurança (§1)
-    is_question = norm_p.startswith(INTERROGATIVE_PREFIXES) or (
-        norm_p.endswith("?") and not any(s in norm_p for s in EXEC_SIGNALS)
-    )
+    is_question = norm_p.startswith(INTERROGATIVE_PREFIXES) or norm_p.endswith("?")
+    is_destructive_cmd = any(sig in norm_p for sig in DESTRUCTIVE_SIGNALS)
+
     if forced_mode:
         mode = forced_mode
-    elif is_question or any(s in norm_p for s in AUDIT_SIGNALS):
+    elif is_question:
+        mode = "ANALISAR"
+    elif is_destructive_cmd:
+        mode = "EXECUTAR"
+    elif any(s in norm_p for s in AUDIT_SIGNALS):
         mode = "ANALISAR"
     elif any(s in norm_p for s in PLAN_SIGNALS) and not any(s in norm_p for s in EXEC_SIGNALS):
         mode = "PLANEJAR"
@@ -367,6 +389,7 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
     else:
         archetype = "CARPINTEIRO"
         gates_required = [
+            "scripts/spec_drift.py",
             "scripts/metricas/ratchet.py",
             "scripts/metricas/hazard_scan.py",
             "scripts/metricas/assertless_scan.py",
@@ -385,7 +408,10 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             {"name": name, "path": path, "score": sc, "reason": rsn}
             for sc, name, path, rsn in top
         ],
-        "gates_required": gates_required if confidence != "none" else [],
+        "gates_required": gates_required if confidence != "none" else [
+            "scripts/repo_signals.py",
+            "scripts/metricas/hazard_scan.py",
+        ],
         "scope_paths": scope_paths,
         "negative_rules_triggered": matched_negatives,
         "unrouted_catalog_skills": unrouted,

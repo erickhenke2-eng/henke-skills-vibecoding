@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-contract_closure.py — Portão mecânico do Carpinteiro ("nem código de menos, nem ponte quebrada", PROTOCOLO v3.3).
+contract_closure.py — Portão mecânico do Carpinteiro ("nem código de menos, nem ponte quebrada", PROTOCOLO v3.4).
 
 Complementa `spec_drift.py`:
   - Enquanto `spec_drift.py` prova `touched ⊆ declared` ("não escreveu de mais"),
@@ -47,27 +47,40 @@ import hazard_scan as _hs    # noqa: E402
 import spec_drift as _sd     # noqa: E402
 
 _BRIDGE_RE = re.compile(
-    r"ponte:\s*`?([^`:\s]+)::(\"[^\"]+\"|'[^']+'|[A-Za-z_$][\w$]*)\s*->\s*([^`\s]+)`?"
+    r"ponte:\s*`?([^`:\s]+)::(\"[^\"]+\"|'[^']+'|[A-Za-z_$][\w$]*)\s*->\s*([^`\s]+)`?",
+    re.IGNORECASE
 )
 
 
-def parse_declared_bridges(spec_path: Path) -> list[tuple[str, str, str]]:
-    """Extrai `(origem, simbolo, destino)` da seção '## 5. Pontes'."""
+def parse_declared_bridges_with_validation(spec_path: Path) -> tuple[bool, list[tuple[str, str, str]], list[str]]:
+    """Extrai `(origem, simbolo, destino)` da seção '## 5. Ponte[s]'.
+    Retorna (has_section, bridges, malformed_lines)."""
     text = spec_path.read_text(encoding="utf-8").replace("\r\n", "\n")
-    match = re.search(r"(?m)^## 5\..*?Pontes.*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
+    match = re.search(r"(?mi)^## 5\..*?Ponte.*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
     if not match:
-        return []
+        return False, [], []
     bridges: list[tuple[str, str, str]] = []
-    for line in match.group(1).splitlines():
+    malformed: list[str] = []
+    body_clean = re.sub(r"<!--[\s\S]*?-->", "", match.group(1))
+    for line in body_clean.splitlines():
         line = line.strip()
-        if not line.startswith("-") or "<!--" in line:
+        if not line:
             continue
-        m = _BRIDGE_RE.search(line)
-        if m:
-            src = m.group(1).strip().replace("\\", "/")
-            sym = m.group(2).strip()
-            dst = m.group(3).strip().replace("\\", "/")
-            bridges.append((src, sym, dst))
+        if line.startswith("-"):
+            m = _BRIDGE_RE.search(line)
+            if m:
+                src = m.group(1).strip().replace("\\", "/")
+                sym = m.group(2).strip()
+                dst = m.group(3).strip().replace("\\", "/")
+                bridges.append((src, sym, dst))
+            else:
+                malformed.append(line)
+    return True, bridges, malformed
+
+
+def parse_declared_bridges(spec_path: Path) -> list[tuple[str, str, str]]:
+    """Extrai `(origem, simbolo, destino)` da seção '## 5. Ponte[s]'."""
+    _, bridges, _ = parse_declared_bridges_with_validation(spec_path)
     return bridges
 
 
@@ -111,7 +124,13 @@ def check_contract_closure(
             errors.append(f"UNTOUCHED-DECLARED-FILE: arquivo declarado '{norm}' não foi tocado no diff")
 
     # 2. Verifica fechamento de cada ponte declarada em ## 5. Pontes de Contrato
-    bridges = parse_declared_bridges(spec_path)
+    has_bridges_sec, bridges, malformed = parse_declared_bridges_with_validation(spec_path)
+    if malformed:
+        for m_line in malformed:
+            errors.append(f"MALFORMED-BRIDGE: linha malformada na seção de pontes: '{m_line}' (esperado: '- ponte: <origem>::<simbolo_ou_\"canal\"> -> <destino>')")
+    if has_bridges_sec and not bridges and not malformed:
+        errors.append(f"EMPTY-BRIDGES: seção '## 5' presente em '{spec_path.name}', mas 0 pontes válidas foram declaradas")
+
     for src_rel, sym, dst_rel in bridges:
         src_path = (repo_root / src_rel).resolve()
         dst_path = (repo_root / dst_rel).resolve()
@@ -165,9 +184,9 @@ def main() -> None:
     ok, errors = check_contract_closure(
         spec_path, repo_root, against=args.against, require_touched=args.require_touched
     )
-    if errors and errors[0].startswith(("SPEC-NOT-FOUND", "EMPTY-SCOPE")):
+    if errors and any(e.startswith(("SPEC-NOT-FOUND", "EMPTY-SCOPE", "EMPTY-BRIDGES", "MALFORMED-BRIDGE")) for e in errors):
         for e in errors:
-            print(e, file=sys.stderr)
+            print(f"ERRO: {e}", file=sys.stderr)
         sys.exit(2)
 
     try:

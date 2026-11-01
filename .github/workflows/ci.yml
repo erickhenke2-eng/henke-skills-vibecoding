@@ -59,6 +59,9 @@ jobs:
       - name: Executar Canários Bilaterais dos Portões Métricos
         run: python evals/canaries_metricas.py
 
+      - name: Executar Dogfooding do Hazard Scan (. no próprio repositório)
+        run: python scripts/metricas/hazard_scan.py .
+
       - name: Testar Dry-Run do Instalador (Linux/macOS)
         if: runner.os == 'Linux'
         run: bash install.sh --dry-run
