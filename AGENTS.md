@@ -6,7 +6,7 @@ O cumprimento das diretrizes abaixo é **obrigatório e verificado mecanicamente
 
 ---
 
-## 1. Princípios Fundamentais (PROTOCOLO v3.3)
+## 1. Princípios Fundamentais (PROTOCOLO v3.4 — 53 Skills)
 
 1. **A Regra dos Dois Agentes (Elefante vs. Peixinho Dourado):**
    - Nunca use o mesmo agente para implementar código e se auto-aprovar no mesmo prompt.

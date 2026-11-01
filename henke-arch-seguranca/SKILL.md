@@ -1,5 +1,6 @@
 ---
 name: henke-arch-seguranca
+when_not: terraform, iam policy, bucket s3, google cloud, cloudflare
 description: >
   Blindagem estrutural do projeto: protege contra vazamento de senhas e chaves,
   injeção de dados, permissões abertas demais e configurações inseguras. Use antes

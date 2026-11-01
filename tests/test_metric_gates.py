@@ -107,6 +107,12 @@ class TestMetricGates(unittest.TestCase):
         spec_w2 = repo_root / "docs" / "designs" / "wave2-cloudflare-nvidia-tob.md"
         code, out = run(MET / "contract_closure.py", "--spec", spec_w2, "--repo", repo_root)
         self.assertEqual(code, 0, out)
+        spec_w25 = repo_root / "docs" / "designs" / "wave25-pentest-multicloud-53skills.md"
+        code25, out25 = run(MET / "contract_closure.py", "--spec", spec_w25, "--repo", repo_root)
+        self.assertEqual(code25, 0, out25)
+        res_pt = route_request("faz um pentest e red team local nas rotas")
+        self.assertEqual(res_pt["skills"][0]["name"], "henke-audit-pentest")
+        self.assertEqual(res_pt["unrouted_catalog_skills"], [])
 
 
 if __name__ == "__main__":

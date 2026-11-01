@@ -3,7 +3,7 @@
 henke_router.py — Roteador determinístico de catálogo da Suíte Henke (PROTOCOLO v3.3).
 
 Inspirado na disciplina do `nvidia-skill-finder` (NVIDIA/skills):
-- Lê os 49 `SKILL.md` como fonte única da verdade (`description`, `## 2. Ponto de Partida`
+- Lê os 53 `SKILL.md` como fonte única da verdade (`description`, `## 2. Ponto de Partida`
   e `when_not` opcional no frontmatter).
 - Opera como veto de Modo (`ANALISAR` default sob ambiguidade/pergunta; `requires_human_auth`
   quando detecta vocabulário `PUBLISH`).
@@ -95,16 +95,55 @@ NEGATIVE_DISAMBIGUATION = (
         "exclude_skills": ("henke-debug-reversao",),
         "force_mode": "ANALISAR",
     },
+    {
+        "id": "pentest_is_not_generic_sec_audit",
+        "when_matches": r"\b(pentest|red team|teste de invasao|idor|bola|toctou|race condition|prototype pollution|bypass de auth|poc reproduzivel)\b",
+        "exclude_skills": ("henke-audit-seguranca", "henke-audit-vibecode"),
+    },
+    {
+        "id": "coverage_audit_is_not_quality_or_sec",
+        "when_matches": r"\b(ledger de cobertura|coverage_ledger|auditoria completa com ledger|90% de cobertura na auditoria|o que nao foi verificado)\b",
+        "exclude_skills": ("henke-audit-seguranca", "henke-audit-vibecode", "henke-debug-sanidade"),
+    },
+    {
+        "id": "test_coverage_is_not_coverage_audit",
+        "when_matches": r"\b(cobertura de testes?|test coverage|coverage do (jest|vitest|pytest)|codecov|lcov)\b",
+        "exclude_skills": ("henke-audit-cobertura",),
+    },
+    {
+        "id": "formal_schema_is_not_bridge_fix",
+        "when_matches": r"\b(zod|typebox|pydantic|openapi|trpc|json ?schema|avro|protobuf|contrato formal|schemas? compartilhados?)\b",
+        "exclude_skills": ("henke-code-ponte",),
+    },
+    {
+        "id": "bridge_fix_is_not_formal_schema",
+        "when_matches": r"\b(dados sumiram|campos vieram errados|front e back nao se entend|alinha os tipos)\b",
+        "exclude_skills": ("henke-code-contratos",),
+    },
+    {
+        "id": "cloud_design_is_not_deploy_action",
+        "when_matches": r"\b(arquitetura|desenha|blinda|hardening|menor privilegio|least privilege|iam|oidc|bucket)\b.*\b(aws|gcp|google cloud|cloudflare|nuvem|infra|s3|gcs|r2)\b",
+        "exclude_skills": ("henke-ops-deploy",),
+    },
+    {
+        "id": "env_file_is_not_cloud_arch",
+        "when_matches": r"\b(\.env\b|variaveis de ambiente locais|dotenv|env\.example)\b",
+        "exclude_skills": ("henke-arch-cloud",),
+    },
 )
 
 # Mapa de palavras-chave de alto sinal por skill (complementa o frontmatter/seção 2)
 DOMAIN_BOOSTS: dict[str, tuple[str, ...]] = {
     "henke-audit-vibecode": ("audita o codigo", "revisa a qualidade", "vibecode", "gambiarra", "sr-only", "migue", "auditoria forense"),
-    "henke-audit-seguranca": ("audita a seguranca", "vulnerabilidade", "pentest", "vetor de ataque", "cve", "seguranca audit"),
-    "henke-arch-seguranca": ("deixa isso seguro", "chave exposta", "segredo vazado", "cors", "proteger antes de subir"),
+    "henke-audit-seguranca": ("audita a seguranca", "vulnerabilidade", "vetor de ataque", "cve", "seguranca audit", "postura de seguranca"),
+    "henke-audit-pentest": ("pentest", "red team", "teste de invasao", "idor", "bola", "race condition", "toctou", "mass assignment", "prototype pollution", "jwt none", "bypass de auth", "poc reproduzivel"),
+    "henke-audit-cobertura": ("ledger de cobertura", "coverage_ledger", "auditoria completa com ledger", "90% de cobertura", "dossie de cobertura", "o que nao foi verificado"),
+    "henke-arch-seguranca": ("deixa isso seguro", "chave exposta", "segredo vazado", "proteger antes de subir"),
+    "henke-arch-cloud": ("arquitetura cloud", "multi-cloud", "google cloud", "na aws", "da aws", "no gcp", "cloudflare", "bucket s3", "iam policy", "least privilege", "menor privilegio", "oidc", "secrets manager", "terraform", "imdsv2", "anti-custo", "blinda a infra"),
     "henke-blindagem": ("3 gavetas", "idempotencia", "escrita atomica", "semaforo de gpu", "processo zumbi", "blindagem"),
     "henke-code-cirurgico": ("mudanca cirurgica", "bisturi", "alteracao pontual", "muda so essa linha", "sem quebrar nada"),
     "henke-code-ponte": ("contrato front e back", "tipos compartilhados", "ipc", "dados sumiram na tela", "campos vieram errados"),
+    "henke-code-contratos": ("zod", "typebox", "pydantic", "openapi", "trpc", "json schema", "contrato formal", "schema compartilhado", "contrato de api", "fechamento de contrato", "contract_closure"),
     "henke-debug-raiz": ("nao sei onde ta o erro", "causa raiz", "bissecta", "ta falhando mas nao sei", "investiga o bug"),
     "henke-plan-mvp": ("define o mvp", "primeira versao", "corta o escopo", "guilhotina"),
     "henke-plan-historias": ("quebra em tarefas", "escreve as historias", "cartoes de tarefa", "spec egm"),
@@ -138,9 +177,16 @@ def _parse_skill_file(skill_md: Path) -> dict:
             m_single = re.search(r"(?m)^description:\s*(.+)$", fm_text)
             if m_single:
                 desc = m_single.group(1).strip().strip("\"'")
-        m_wn = re.search(r"(?m)^when_not:\s*(.+)$", fm_text)
-        if m_wn:
-            when_not.extend(x.strip().strip("\"'") for x in m_wn.group(1).split(",") if x.strip())
+        m_wn_list = re.search(r"(?m)^when_not:\s*\n((?:[ \t]*-\s*.+\n?)+)", fm_text)
+        if m_wn_list:
+            for item_ln in m_wn_list.group(1).splitlines():
+                val = re.sub(r"^[ \t]*-\s*", "", item_ln).strip().strip("\"'")
+                if val:
+                    when_not.append(val)
+        else:
+            m_wn = re.search(r"(?m)^when_not:\s*(.+)$", fm_text)
+            if m_wn:
+                when_not.extend(x.strip().strip("\"'") for x in m_wn.group(1).split(",") if x.strip())
 
     # Extrai frases-gatilho da seção "## 2. Ponto de Partida"
     triggers: list[str] = []
@@ -261,7 +307,8 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
                 break
 
         for tok in sk["slug_tokens"]:
-            if tok in words or any(w.startswith(tok[:5]) for w in words if len(tok) >= 5):
+            pref = tok[:6] if len(tok) >= 6 else tok
+            if tok in words or (len(tok) >= 5 and any(w.startswith(pref) for w in words)):
                 score += 2.0
                 reasons.append(f"domínio '{tok}'")
 

@@ -383,6 +383,48 @@ def run(suite: Suite):
         else:
             record("D16 código de menos (arquivo declarado ausente + ponte quebrada)", "NO-INSTRUMENT")
 
+        # --- D17, D18 & C3: Multi-Cloud IaC (AWS/GCP/Docker) e Pentest Red Team ---
+        (proj / "infra.tf").write_text(
+            'resource "aws_iam_policy" "wild" {\n'
+            '  policy = jsonencode({ Effect = "Allow", Action = "*", Resource = "*" })\n'
+            '}\n'
+            'resource "google_storage_bucket_iam_member" "pub" {\n'
+            '  role = "roles/owner"\n'
+            '  member = "allUsers"\n'
+            '}\n',
+            encoding="utf-8")
+        (proj / "src" / "exec" / "pentestVuln.ts").write_text(
+            "const cors = { origin: '*', credentials: true };\n"
+            "export async function orderEndpoint(req: any, token: string) {\n"
+            "  const user = jwt.decode(token);\n"
+            "  await fetch(req.query.webhookUrl);\n"
+            "  return db.orders.findById(req.params.id);\n"
+            "}\n",
+            encoding="utf-8")
+        (proj / "src" / "exec" / "pentestSafe.ts").write_text(
+            "export async function orderSafe(req: any, app: any, token: string) {\n"
+            "  app.get('/ping', () => 'pong');\n"
+            "  const user = jwt.verify(token, process.env.JWT_SECRET);\n"
+            "  return db.orders.findOne({ where: { id: req.params.id, userId: req.user.id } });\n"
+            "}\n",
+            encoding="utf-8")
+        if suite.has("scripts", "metricas", "hazard_scan.py"):
+            code, out_iac = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+                                           args=(proj / "infra.tf",))
+            record("D17 Multi-Cloud IaC (AWS IAM wildcard + GCP allUsers/owner)",
+                   "DETECTED" if (code == 1 and "CLOUD-IAM-WILDCARD" in out_iac and "CLOUD-BUCKET-PUBLIC" in out_iac) else "MISSED")
+            code, out_pt = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+                                          args=(proj / "src" / "exec" / "pentestVuln.ts",))
+            record("D18 Pentest Red Team (IDOR sem ownership + SSRF + JWT decode + CORS '*'+cred)",
+                   "DETECTED" if (code == 1 and "IDOR-NO-OWNERSHIP" in out_pt and "SSRF-UNVALIDATED" in out_pt) else "MISSED")
+            code, _ = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+                                     args=(proj / "src" / "exec" / "pentestSafe.ts",))
+            record("C3 Rota Express app.get com jwt.verify e filtro ownership userId (controle)",
+                   {0: "APPROVED", 1: "FALSE-RED"}.get(code, f"ERROR:{code}"), control=True)
+        else:
+            record("D17 Multi-Cloud IaC (AWS IAM wildcard + GCP allUsers/owner)", "NO-INSTRUMENT")
+            record("D18 Pentest Red Team (IDOR sem ownership + SSRF + JWT decode + CORS '*'+cred)", "NO-INSTRUMENT")
+
     return rows
 
 

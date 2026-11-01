@@ -31,7 +31,9 @@ Códigos de saída:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import io
+import json
 import os
 from pathlib import Path
 import re
@@ -53,11 +55,24 @@ import polyglot as _pg  # noqa: E402
 
 MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB cap (evita bundles/minified)
 SCAN_EXTS = {".py", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".rs", ".go", ".vue", ".svelte"}
+CONFIG_PATTERNS = (
+    "*.tf", "*.tfvars", "Dockerfile*", "docker-compose*.yml", "docker-compose*.yaml",
+    "serverless.yml", "serverless.yaml", "wrangler.toml", "cloudbuild.yml", "cloudbuild.yaml",
+    "Pulumi.yml", "Pulumi.yaml", "*policy*.json", "iam*.json", "*bucket*.json", "firebase.json",
+)
+_EXCLUDED_JSON_NAMES = {"package.json", "package-lock.json", "tsconfig.json", "jsconfig.json"}
 SKIP_DIRS = {
     ".git", ".hg", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
     "node_modules", "target", "dist", "build", "out", "release", "vendor",
     ".next", ".nuxt", ".svelte-kit", ".turbo", "coverage", ".venv", "venv",
 }
+
+
+def _is_config_file(path: Path) -> bool:
+    name_low = path.name.lower()
+    if name_low in _EXCLUDED_JSON_NAMES:
+        return False
+    return any(fnmatch.fnmatch(name_low, pat.lower()) for pat in CONFIG_PATTERNS)
 
 # Regras de Pass 2 (strings preservadas, comentários removidos)
 _SECRET_PATTERNS = (
@@ -104,6 +119,48 @@ _UNSAFE_DESER_RE = re.compile(r"(?<![.\w$])eval\s*\(|\bnew\s+Function\s*\(|\bpic
 _XSS_HTML_RE = re.compile(r"\bdangerouslySetInnerHTML\b|\.innerHTML\s*=(?!=)|\bv-html\s*=|\{@html\b")
 _SANITIZER_RE = re.compile(r"(?i)\b(?:DOMPurify|sanitize|escapeHtml)\b")
 _ELECTRON_INSEC_RE = re.compile(r"\bnodeIntegration\s*:\s*true\b|\bcontextIsolation\s*:\s*false\b")
+
+# Regras Wave 2.5: Multi-Cloud (AWS/GCP/Cloudflare/Docker) & Pentest Red Team
+_CLOUD_IAM_WILDCARD_RE = re.compile(
+    r'(?i)"?(?:Action|actions)"?\s*[:=]\s*\[?\s*["\']\*["\']|\broles/(?:owner|editor)\b'
+)
+_CLOUD_BUCKET_PUB_RE = re.compile(
+    r'\b(?:allUsers|allAuthenticatedUsers)\b|(?i:\bacl\s*[:=]\s*["\'](?:public-read|public-read-write)["\'])'
+)
+_CLOUD_SA_TYPE_RE = re.compile(r'"type"\s*:\s*"service_account"')
+_DOCKER_ESC_RE = re.compile(r"(?m)\bprivileged\s*:\s*true\b|--privileged\b|/var/run/docker\.sock\b")
+_IMDS_HOST_RE = re.compile(r"\b(?:169\.254\.169\.254|metadata\.google\.internal)\b")
+_IMDS_SAFE_RE = re.compile(r"(?i)\b(?:X-aws-ec2-metadata-token|Metadata-Flavor)\b")
+
+_CORS_WILD_ORIGIN_RE = re.compile(
+    r"""(?i)(?:Access-Control-Allow-Origin['"\s:,]+\*|\borigin\s*:\s*['"]\*['"]|\ballow_origins\s*=\s*\[\s*['"]\*['"]\s*\])"""
+)
+_CORS_CRED_TRUE_RE = re.compile(
+    r"""(?i)(?:\bcredentials\s*:\s*true\b|Access-Control-Allow-Credentials['"\s:,]+true\b|\ballow_credentials\s*=\s*True\b)"""
+)
+_PROTO_POLLUTION_RE = re.compile(r"""\[\s*['"]__proto__['"]\s*\]|\.constructor\.prototype\s*=""")
+_JWT_INSEC_FILE_RE = re.compile(
+    r"""(?i)\balgorithms?\s*[:=]\s*\[?\s*['"]none['"]|\bverify_signature['"]?\s*[:=]\s*(?:false|False)\b|\bjwt\.decode\s*\([^)]*\bverify\s*=\s*False\b"""
+)
+_JWT_DECODE_CALL_RE = re.compile(r"\bjwt\.decode\s*\(")
+_AUTH_FN_CONTEXT_RE = re.compile(r"(?i)(?:auth|verify_?token|session|guard|middleware|login)")
+
+_SSRF_SINK_RE = re.compile(
+    r"""\b(?:fetch|axios\.(?:get|post|request)|got|requests\.(?:get|post|request)|httpx\.(?:get|post)|urlopen)\s*\(\s*(?![`'"])([A-Za-z_$][\w$.]*)"""
+)
+_SSRF_SOURCE_RE = re.compile(
+    r"\b(?:req|request)\.(?:query|params|body|headers)\b|\b(?:targetUrl|webhookUrl|callbackUrl|redirectUrl|userUrl|externalUrl|endpointUrl)\b"
+)
+_SSRF_SAFE_RE = re.compile(
+    r"\b(?:new\s+URL|urlparse|urlsplit|allowlist|whitelist|allowedHosts|isPrivateIP|ipaddress\.|hostname)\b"
+)
+
+_IDOR_SINK_RE = re.compile(
+    r"\.(?:findById|findByPk|findOne|findUnique|findOneAndUpdate|findOneAndDelete|findByIdAndUpdate|findByIdAndDelete|deleteById)\s*\([^)]*\b(?:req|request)\.(?:params|query|body)\b"
+)
+_IDOR_SAFE_RE = re.compile(
+    r"\b(?:req\.user|request\.user|userId|ownerId|tenantId|orgId|session|authorize|authorise|ability\.can|policy)\b|where\s*:\s*\{[^}]*\b(?:user|owner|tenant|org)"
+)
 
 
 def _strip_py_comments(raw: str) -> str:
@@ -171,10 +228,16 @@ def _is_suppressed(suppressed: dict[int, set[str]], lineno: int, rule: str) -> b
     return False
 
 
+def _strip_hash_comments(raw: str) -> str:
+    """Remove comentários `# ...` de arquivos IaC/YAML/TOML/Terraform/Dockerfile preservando quebras de linha."""
+    return "\n".join(re.sub(r"\s*#.*$", "", ln) for ln in raw.splitlines())
+
+
 def scan_file(path: Path) -> tuple[int, list[tuple[str, str, str, str]], bool]:
-    """Escaneia um arquivo. Retorna (1 se escaneado, findings, skipped_oversize)."""
+    """Escaneia um arquivo de código ou manifesto IaC/Cloud. Retorna (1 se escaneado, findings, skipped_oversize)."""
     ext = path.suffix.lower()
-    if ext not in SCAN_EXTS:
+    is_cfg = _is_config_file(path)
+    if ext not in SCAN_EXTS and not is_cfg:
         return 0, [], False
     try:
         size = path.stat().st_size
@@ -199,8 +262,11 @@ def scan_file(path: Path) -> tuple[int, list[tuple[str, str, str, str]], bool]:
         if not _is_suppressed(suppressed, line_no, rule):
             findings.append((rule, f"{path_str}:{line_no}", scope, msg))
 
-    # --- PASS 2: Strings preservadas, comentários removidos ---
-    no_comments = _strip_py_comments(raw) if ext == ".py" else _pg.mask_comments_only(raw, ext)
+    # --- PASS 2 / CONFIG: Strings preservadas, comentários removidos ---
+    if is_cfg and ext not in SCAN_EXTS:
+        no_comments = _pg.mask_comments_only(raw, ".js") if ext == ".json" else _strip_hash_comments(raw)
+    else:
+        no_comments = _strip_py_comments(raw) if ext == ".py" else _pg.mask_comments_only(raw, ext)
 
     for label, pat in _SECRET_PATTERNS:
         for m in pat.finditer(no_comments):
@@ -219,11 +285,57 @@ def scan_file(path: Path) -> tuple[int, list[tuple[str, str, str, str]], bool]:
         lineno = no_comments.count("\n", 0, m.start()) + 1
         add("URL-CRED", lineno, host, "credentials embedded in URL")
 
+    # Regras Multi-Cloud / IaC (aplicadas em arquivos de config/IaC e também em código inline)
+    if is_cfg:
+        nc_lines = no_comments.splitlines()
+        for m in _CLOUD_IAM_WILDCARD_RE.finditer(no_comments):
+            lineno = no_comments.count("\n", 0, m.start()) + 1
+            tok = m.group(0)
+            if "roles/" in tok:
+                add("CLOUD-IAM-WILDCARD", lineno, f"line:{lineno}", f"over-permissive GCP IAM role ({tok.strip()})")
+            else:
+                win = "\n".join(nc_lines[max(0, lineno - 10):min(len(nc_lines), lineno + 10)])
+                if re.search(r'(?i)\bAllow\b', win) and not re.search(r'(?i)"?Effect"?\s*[:=]\s*["\']Deny["\']', win):
+                    add("CLOUD-IAM-WILDCARD", lineno, f"line:{lineno}", "wildcard IAM Action '*' with Effect Allow")
+
+        for m in _CLOUD_BUCKET_PUB_RE.finditer(no_comments):
+            lineno = no_comments.count("\n", 0, m.start()) + 1
+            add("CLOUD-BUCKET-PUBLIC", lineno, f"line:{lineno}", f"public cloud storage exposure ({m.group(0).strip()})")
+
+        if _CLOUD_SA_TYPE_RE.search(no_comments) and '"private_key"' in no_comments:
+            m_sa = _CLOUD_SA_TYPE_RE.search(no_comments)
+            lineno = no_comments.count("\n", 0, m_sa.start()) + 1 if m_sa else 1
+            add("CLOUD-SECRET-MATERIAL", lineno, "service_account", "GCP service_account JSON with private_key material")
+
+        for m in _DOCKER_ESC_RE.finditer(no_comments):
+            lineno = no_comments.count("\n", 0, m.start()) + 1
+            add("DOCKER-ESCALATED", lineno, f"line:{lineno}", f"escalated container privilege or docker.sock mount ({m.group(0).strip()})")
+
+        return 1, findings, False
+
     sql_pats = (_SQL_INTERP_PY_RE, _SQL_CONCAT_RE) if ext == ".py" else (_SQL_INTERP_JS_RE, _SQL_CONCAT_RE, _SQL_SPRINTF_RE)
     for sp in sql_pats:
         for m in sp.finditer(no_comments):
             lineno = no_comments.count("\n", 0, m.start()) + 1
             add("SQL-CONCAT", lineno, f"line:{lineno}", "SQL query built via string interpolation/concatenation")
+
+    if not _IMDS_SAFE_RE.search(no_comments):
+        for m in _IMDS_HOST_RE.finditer(no_comments):
+            lineno = no_comments.count("\n", 0, m.start()) + 1
+            add("IMDS-V1", lineno, m.group(0), "cloud metadata endpoint accessed without IMDSv2 token/Metadata-Flavor header")
+
+    if _CORS_WILD_ORIGIN_RE.search(no_comments) and _CORS_CRED_TRUE_RE.search(no_comments):
+        m_cors = _CORS_WILD_ORIGIN_RE.search(no_comments)
+        lineno = no_comments.count("\n", 0, m_cors.start()) + 1 if m_cors else 1
+        add("CORS-CRED-WILDCARD", lineno, f"line:{lineno}", "wildcard CORS origin ('*') combined with credentials=true")
+
+    for m in _PROTO_POLLUTION_RE.finditer(no_comments):
+        lineno = no_comments.count("\n", 0, m.start()) + 1
+        add("PROTO-POLLUTION", lineno, f"line:{lineno}", f"direct prototype pollution vector ({m.group(0).strip()})")
+
+    for m in _JWT_INSEC_FILE_RE.finditer(no_comments):
+        lineno = no_comments.count("\n", 0, m.start()) + 1
+        add("JWT-NONE-OR-UNVERIFIED", lineno, f"line:{lineno}", f"JWT verification disabled or 'none' algorithm allowed ({m.group(0).strip()})")
 
     # --- PASS 1: Código mascarado (strings e comentários vazios) ---
     masked = _pg.mask_c_like(raw, ext) if ext != ".py" else _strip_py_comments(raw)
@@ -269,9 +381,8 @@ def scan_file(path: Path) -> tuple[int, list[tuple[str, str, str, str]], bool]:
                 lineno = masked.count("\n", 0, m.start()) + 1
                 add("UNBOUNDED-CONCURRENCY", lineno, f"line:{lineno}", "unbounded Promise.all/asyncio.gather spawning heavy process without semaphore")
 
-    # Escopo intraprocedural por função (WEAK-CRYPTO e PATH-TRAVERSAL)
+    # Escopo intraprocedural por função (WEAK-CRYPTO, PATH-TRAVERSAL, SSRF, JWT, IDOR)
     if ext == ".py":
-        # Extrai blocos def simples por indentação/regex ou arquivo como fallback
         fn_iter = [
             (m.group(1), raw.count("\n", 0, m.start()) + 1, 0, raw[m.start():m.start() + 1500])
             for m in re.finditer(r"(?m)^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(", no_comments)
@@ -284,6 +395,13 @@ def scan_file(path: Path) -> tuple[int, list[tuple[str, str, str, str]], bool]:
             add("WEAK-CRYPTO", sl, fn_name, "non-CSPRNG random generator used in function handling token/secret/auth")
         if _FILE_SINK_RE.search(fn_body) and _EXT_SOURCE_RE.search(fn_body) and not _PATH_SAFE_RE.search(fn_body):
             add("PATH-TRAVERSAL", sl, fn_name, "dynamic file sink with external input and no path normalization/resolve in function")
+        if _SSRF_SINK_RE.search(fn_body) and _SSRF_SOURCE_RE.search(fn_body) and not _SSRF_SAFE_RE.search(fn_body):
+            add("SSRF-UNVALIDATED", sl, fn_name, "outbound HTTP request with external input and no URL/hostname validation in function")
+        if _JWT_DECODE_CALL_RE.search(fn_body) and _AUTH_FN_CONTEXT_RE.search(fn_name + " " + fn_body) and "jwt.verify" not in raw:
+            if not _JWT_INSEC_FILE_RE.search(fn_body):
+                add("JWT-NONE-OR-UNVERIFIED", sl, fn_name, "jwt.decode() used in auth context without jwt.verify()")
+        if _IDOR_SINK_RE.search(fn_body) and not _IDOR_SAFE_RE.search(fn_body):
+            add("IDOR-NO-OWNERSHIP", sl, fn_name, "direct ORM lookup/mutation by req.params/query/body without ownership/session check in function")
 
     return 1, findings, False
 
@@ -303,7 +421,11 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
     for rel in res.stdout.splitlines():
         rel_clean = rel.strip().strip('"').replace("\\", "/")
         name = Path(rel_clean).name.lower()
-        if name in (".env", ".env.local", ".env.production", "id_rsa", "id_ed25519") or name.endswith((".pem", ".key")):
+        if (
+            name in (".env", ".env.local", ".env.production", "id_rsa", "id_ed25519", "credentials.json")
+            or name.endswith((".pem", ".key", ".p12", ".kubeconfig"))
+            or fnmatch.fnmatch(name, "*service*account*.json")
+        ):
             out.append(("ENV-COMMITTED", str(root / rel_clean), "git-index", f"sensitive file '{rel_clean}' is tracked by git"))
     return out
 
@@ -325,7 +447,7 @@ def scan_path(target: Path) -> tuple[int, list[tuple[str, str, str, str]], int]:
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for fn in sorted(filenames):
             p = Path(dirpath) / fn
-            if p.suffix.lower() not in SCAN_EXTS:
+            if p.suffix.lower() not in SCAN_EXTS and not _is_config_file(p):
                 continue
             sc, fnd, ov = scan_file(p)
             total_scanned += sc

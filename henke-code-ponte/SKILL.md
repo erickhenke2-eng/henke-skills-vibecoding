@@ -1,5 +1,6 @@
 ---
 name: henke-code-ponte
+when_not: zod, typebox, pydantic, openapi, trpc, contrato formal
 description: >
   Conecta frontend e backend com tipos compartilhados e contratos claros:
   garante que o que a tela pede é exatamente o que o servidor responde.

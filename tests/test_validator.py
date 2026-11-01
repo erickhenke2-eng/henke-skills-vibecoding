@@ -41,7 +41,7 @@ def test_legitimate_repo():
     print("Teste 1: Repositório canônico legítimo deve passar...")
     res = run_validator(repo_root)
     assert res.returncode == 0, f"Falha inesperada no repo legítimo: {res.stdout}\n{res.stderr}"
-    assert "OK: 49 skills com estrutura válida" in res.stdout
+    assert "OK: 53 skills com estrutura válida" in res.stdout
     assert "Semântica e execução não verificadas" in res.stdout
     print("  [PASSOU] Repositório legítimo aprovado com exit code 0.")
 

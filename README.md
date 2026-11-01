@@ -1,4 +1,4 @@
-# ⚡ Suíte Henke — 49 Macro-Skills & Portões Métricos para Vibecoding de Respeito
+# ⚡ Suíte Henke — 53 Macro-Skills & Portões Métricos para Vibecoding de Respeito
 
 > **"De um vibecoder para vibecoders: o kit definitivo para a sua IA parar de fazer cagada, não apagar metade do seu projeto, não forjar testes e finalmente codar como engenheiro sênior."**  
 > *(E sejamos sinceros: a galera de TI 'raiz' adora torcer o nariz e zoar quem vibecoda... mas na primeira sexta-feira às 18h com o servidor caindo, até eles vão clonar esse repositório no sigilo pra salvar o dia).*
@@ -16,7 +16,7 @@ Quem cria sistemas com IA no fluxo de vibecoding conhece bem o ciclo da loucura:
 4. **O Chute Aleatório no Debug:** O servidor dá erro 500 e a IA tenta 7 chutes no escuro, quebrando o banco, o contrato front-back e a sua paciência.
 5. **A Vitória Teatral (Falso-Verde):** A IA afirma que "todos os testes passaram com 100% de sucesso", mas quando você vai ver, ela escreveu testes sem nenhuma asserção real (`assertless`), criou mocks circulares ou usou truques de CSS (`.sr-only`) para forçar o teste a passar.
 
-A **Suíte Henke v3.3** nasceu para aniquilar esses 5 problemas combinando **49 Macro-Skills especializadas** com **8 Portões Mecânicos determinísticos (fail-closed exit code)**.
+A **Suíte Henke v3.4** nasceu para aniquilar esses 5 problemas combinando **53 Macro-Skills especializadas** com **8 Portões Mecânicos determinísticos (fail-closed exit code)**.
 
 ---
 
@@ -102,7 +102,7 @@ A eficácia da Suíte Henke é testada contra um corpus físico de **15 classes 
 
 ---
 
-## 🧭 O Catálogo das 49 Macro-Skills
+## 🧭 O Catálogo das 53 Macro-Skills
 
 ### 1. Concepção & Ideias (`henke-plan-*`)
 * [`henke-plan-radar`](./henke-plan-radar/SKILL.md): Radar de referências e benchmarking de produtos concorrentes reais.
@@ -126,6 +126,7 @@ A eficácia da Suíte Henke é testada contra um corpus físico de **15 classes 
 * [`henke-arch-monorepo`](./henke-arch-monorepo/SKILL.md): Monorepos limpos (Electron + Frontend + Backend) com execução em 1 comando.
 * [`henke-arch-banco`](./henke-arch-banco/SKILL.md): Modelagem relacional descomplicada (SQLite modo WAL, busy_timeout e migrações limpas).
 * [`henke-arch-seguranca`](./henke-arch-seguranca/SKILL.md): Blindagem estrutural contra vazamento de chaves e permissões excessivas.
+* [`henke-arch-cloud`](./henke-arch-cloud/SKILL.md): Arquitetura e blindagem Multi-Cloud agnóstica (**AWS, Google Cloud GCP, Cloudflare e Containers/Serverless**): IAM menor privilégio, OIDC sem chave estática, buckets privados (S3/GCS/R2), IMDSv2 e travas anti-custo infinito.
 * [`henke-blindagem`](./henke-blindagem/SKILL.md): Regras de ouro de escrita atômica, idempotência e controle de processos filhos.
 
 ### 4. Visual Profissional & Anti-AI-Slop (`henke-ui-*`)
@@ -139,6 +140,7 @@ A eficácia da Suíte Henke é testada contra um corpus físico de **15 classes 
 
 ### 5. Construção Cirúrgica & Vibecoding (`henke-code-*`)
 * [`henke-code-ponte`](./henke-code-ponte/SKILL.md): Conecta frontend e backend com contratos tipados e canais IPC alinhados.
+* [`henke-code-contratos`](./henke-code-contratos/SKILL.md): Engenharia e fechamento bilateral de contratos formais (**Zod, TypeBox, Pydantic, OpenAPI, tRPC, JSON Schema e IPC**) validados por `contract_closure.py`.
 * [`henke-code-mock`](./henke-code-mock/SKILL.md): Cria fixtures hiper-realistas para desenvolver a tela antes do backend existir.
 * [`henke-code-cirurgico`](./henke-code-cirurgico/SKILL.md): Bisturi de código — faz alterações milimétricas sem reescrever o arquivo inteiro.
 * [`henke-code-formulario`](./henke-code-formulario/SKILL.md): Formulários acessíveis com validação amigável e UX fluida.
@@ -159,6 +161,8 @@ A eficácia da Suíte Henke é testada contra um corpus físico de **15 classes 
 ### 7. Auditoria Adversarial & Refatoração (`henke-audit-*` / `henke-refactor-*`)
 * [`henke-audit-vibecode`](./henke-audit-vibecode/SKILL.md): Caça gambiarras, trapaças de teste (`.sr-only`), métricas falsas e atalhos.
 * [`henke-audit-seguranca`](./henke-audit-seguranca/SKILL.md): Auditoria profunda contra vulnerabilidades, injeções e segredos expostos.
+* [`henke-audit-pentest`](./henke-audit-pentest/SKILL.md): **Red Team local e simulação adversarial controlada**: caça IDOR/BOLA, bypass de JWT, SSRF, race conditions (TOCTOU) e prototype pollution com PoC reprodutível em `localhost`.
+* [`henke-audit-cobertura`](./henke-audit-cobertura/SKILL.md): Auditoria determinística de cobertura ($\ge 90\%$) por SHA-256 com `coverage_ledger.py`, dossiê de premissas (`enforced`/`unenforced`) e `render-gaps`.
 * [`henke-refactor-duplicado`](./henke-refactor-duplicado/SKILL.md): Unifica código repetido e lógicas duplicadas em uma fonte da verdade.
 * [`henke-refactor-nomes`](./henke-refactor-nomes/SKILL.md): Renomeia variáveis e funções crípticas para nomes que se explicam sozinhos.
 

@@ -482,6 +482,81 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         expect("Canário M45: henke_router devolve 0 skills (confidence=none, exit 0) quando fora de escopo",
                code == 0 and r_none.get("confidence") == "none" and r_none.get("skills") == [])
 
+        # --- 46..51: Wave 2.5 Multi-Cloud IaC, Pentest Red Team & Roteamento 53 Skills ---
+        iac_bad = t / "main.tf"
+        iac_bad.write_text(
+            'resource "aws_iam_policy" "bad" {\n'
+            '  policy = jsonencode({ Effect = "Allow", Action = "*", Resource = "*" })\n'
+            '}\n'
+            'resource "google_storage_bucket_iam_member" "pub" {\n'
+            '  role = "roles/owner"\n'
+            '  member = "allUsers"\n'
+            '}\n',
+            encoding="utf-8")
+        dc_bad = t / "docker-compose.yml"
+        dc_bad.write_text("services:\n  app:\n    privileged: true\n", encoding="utf-8")
+        sc_iac, fnds_iac, _ = scan_path(iac_bad)
+        _, fnds_dc, _ = scan_path(dc_bad)
+        iac_rules = {r for r, _, _, _ in fnds_iac + fnds_dc}
+        expect("Canário M46: hazard_scan reprova IaC Multi-Cloud (CLOUD-IAM-WILDCARD, CLOUD-BUCKET-PUBLIC, DOCKER-ESCALATED)",
+               sc_iac == 1 and {"CLOUD-IAM-WILDCARD", "CLOUD-BUCKET-PUBLIC", "DOCKER-ESCALATED"} <= iac_rules)
+
+        # Controle IaC: package.json com '*' e wrangler.toml limpo não disparam falso-positivo
+        pkg_clean = t / "package.json"
+        pkg_clean.write_text('{"name": "app", "dependencies": {"foo": "*"}}\n', encoding="utf-8")
+        wrangler_clean = t / "wrangler.toml"
+        wrangler_clean.write_text('# Action = "*" em comentario\nname = "meu-worker"\nmain = "src/index.ts"\n', encoding="utf-8")
+        sc_pkg, fnds_pkg, _ = scan_path(pkg_clean)
+        sc_wrg, fnds_wrg, _ = scan_path(wrangler_clean)
+        expect("Canário M47: hazard_scan ignora package.json com '*' e aprova wrangler.toml limpo",
+               sc_pkg == 0 and fnds_pkg == [] and sc_wrg == 1 and fnds_wrg == [])
+
+        pentest_bad = t / "pentest_bad.ts"
+        pentest_bad.write_text(
+            "const cors = { origin: '*', credentials: true };\n"
+            "export async function authHandler(req: any, token: string, payload: any) {\n"
+            "  payload['__proto__'].isAdmin = true;\n"
+            "  const user = jwt.decode(token);\n"
+            "  const meta = await fetch('http://169.254.169.254/latest/meta-data/');\n"
+            "  const ext = await fetch(req.query.targetUrl);\n"
+            "  return db.orders.findById(req.params.id);\n"
+            "}\n",
+            encoding="utf-8")
+        _, fnds_pt, _ = scan_path(pentest_bad)
+        pt_rules = {r for r, _, _, _ in fnds_pt}
+        expect("Canário M48: hazard_scan reprova IDOR-NO-OWNERSHIP, SSRF-UNVALIDATED, JWT-NONE-OR-UNVERIFIED, CORS-CRED-WILDCARD, PROTO-POLLUTION e IMDS-V1",
+               {"IDOR-NO-OWNERSHIP", "SSRF-UNVALIDATED", "JWT-NONE-OR-UNVERIFIED", "CORS-CRED-WILDCARD", "PROTO-POLLUTION", "IMDS-V1"} <= pt_rules)
+
+        pentest_good = t / "pentest_good.ts"
+        pentest_good.write_text(
+            "export async function getOrderSafe(req: any, app: any, token: string) {\n"
+            "  app.get('/health', () => 'ok');\n"
+            "  const verified = jwt.verify(token, process.env.SECRET);\n"
+            "  const parsed = new URL(req.query.url);\n"
+            "  if (parsed.hostname === 'api.exemplo.com') { await fetch(parsed.toString()); }\n"
+            "  return db.orders.findOne({ where: { id: req.params.id, userId: req.user.id } });\n"
+            "}\n",
+            encoding="utf-8")
+        _, fnds_pt_ok, _ = scan_path(pentest_good)
+        expect("Canário M49: hazard_scan aprova rota com jwt.verify, new URL hostname check, ownership userId e app.get()",
+               fnds_pt_ok == [])
+
+        code, out = run(ROUTER, "--prompt", "faz um pentest e red team local procurando IDOR e race condition")
+        r_pt = json.loads(out) if code == 0 else {}
+        pt_skills = [s["name"] for s in r_pt.get("skills", [])]
+        expect("Canário M50: henke_router seleciona henke-audit-pentest e exclui henke-audit-seguranca via when_not/disambiguation",
+               code == 0 and pt_skills and pt_skills[0] == "henke-audit-pentest" and "henke-audit-seguranca" not in pt_skills)
+
+        code_c, out_c = run(ROUTER, "--prompt", "desenha a arquitetura cloud na AWS e Google Cloud com menor privilegio IAM e OIDC")
+        r_cl = json.loads(out_c) if code_c == 0 else {}
+        cl_skills = [s["name"] for s in r_cl.get("skills", [])]
+        code_z, out_z = run(ROUTER, "--prompt", "cria o contrato formal da API com Zod e OpenAPI validando schemas compartilhados")
+        r_zd = json.loads(out_z) if code_z == 0 else {}
+        zd_skills = [s["name"] for s in r_zd.get("skills", [])]
+        expect("Canário M51: henke_router seleciona henke-arch-cloud (sem ops-deploy) e henke-code-contratos (sem code-ponte)",
+               code_c == 0 and "henke-arch-cloud" in cl_skills and "henke-ops-deploy" not in cl_skills
+               and code_z == 0 and "henke-code-contratos" in zd_skills and "henke-code-ponte" not in zd_skills)
+
     return passed, total, reports
 
 

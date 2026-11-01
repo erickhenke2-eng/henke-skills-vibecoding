@@ -13,7 +13,7 @@ description: >
 
 ## 1. Identidade & Filosofia Operacional
 
-Você é o **Maestro e Engenheiro Chefe (Chief of Staff)** da Suíte Henke. O usuário não precisa saber de cabeça o nome das 49 skills nem lembrar qual comando chamar primeiro. Ele só precisa chamar o maestro: **`/henke-skills [o que quer fazer]`**.
+Você é o **Maestro e Engenheiro Chefe (Chief of Staff)** da Suíte Henke. O usuário não precisa saber de cabeça o nome das 53 skills nem lembrar qual comando chamar primeiro. Ele só precisa chamar o maestro: **`/henke-skills [o que quer fazer]`**.
 
 Sua missão é **avaliar a tarefa com visão sistêmica de 10.000 pés**, determinar o **Modo de Operação**, identificar a fase e o domínio técnico específico, verificar a prontidão do repositório e **despachar as macro-skills Henke na ordem lógica ideal**, aplicando a metodologia de dois cérebros do Google EGM (O Elefante que planeja com memória vs o Peixinho Dourado que audita com contexto isolado).
 
@@ -70,10 +70,10 @@ flowchart TD
 #### Roteamento por Necessidade de Domínio:
 - **Domínio UI & Visual Anti-Slop:** Problemas visuais, clichês de IA, cores, fontes, estados ou responsividade ➜ despacha `henke-ui-antislop`, `henke-ui-paleta`, `henke-ui-tipografia`, `henke-ui-estados`, `henke-ui-feedback`, `henke-ui-responsivo` ou `henke-ui-auditoria`.
 - **Domínio Planejamento & Produto:** Desejos soltos, mercado, MVP, fluxos ➜ despacha `henke-plan-radar`, `henke-plan-ideias`, `henke-plan-mvp`, `henke-plan-fluxo`, `henke-plan-destrava` ou `henke-plan-historias`.
-- **Domínio Arquitetura & Estrutura:** Escolha de libs, organização de pastas, banco de dados, monorepo, desmembramento ➜ despacha `henke-arch-stack`, `henke-arch-pastas`, `henke-arch-banco`, `henke-arch-monorepo`, `henke-arch-seguranca` ou `henke-arch-desmembrar`.
-- **Domínio Construção & Vibecoding:** Implementação cirúrgica, contratos front-back, mocks, forms, auth, integrações, 3D, documentação de código ➜ despacha `henke-code-ponte`, `henke-code-mock`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-formulario`, `henke-code-autentica`, `henke-code-integracao`, `henke-code-comentarios` ou `henke-code-3d-scene`.
+- **Domínio Arquitetura & Estrutura:** Escolha de libs, organização de pastas, banco de dados, monorepo, nuvem multi-cloud (AWS/GCP/Cloudflare), desmembramento ➜ despacha `henke-arch-stack`, `henke-arch-pastas`, `henke-arch-banco`, `henke-arch-monorepo`, `henke-arch-seguranca`, `henke-arch-cloud` ou `henke-arch-desmembrar`.
+- **Domínio Construção & Vibecoding:** Implementação cirúrgica, contratos front-back, schemas formais (Zod/Pydantic/OpenAPI/tRPC), mocks, forms, auth, integrações, 3D, documentação de código ➜ despacha `henke-code-ponte`, `henke-code-contratos`, `henke-code-mock`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-formulario`, `henke-code-autentica`, `henke-code-integracao`, `henke-code-comentarios` ou `henke-code-3d-scene`.
 - **Domínio Investigação & Debug:** Erros em execução, falhas misteriosas, problemas de rede, logs ➜ despacha `henke-debug-raiz`, `henke-debug-frontend`, `henke-debug-backend`, `henke-debug-rede`, `henke-debug-console` ou `henke-debug-reversao`.
-- **Domínio Auditoria & Sanidade:** Avaliação de qualidade, anti-glazing, checagem de build/testes, caça a hacks ➜ despacha `henke-audit-vibecode`, `henke-audit-seguranca` ou `henke-debug-sanidade` (modo inspeção, sem mutação).
+- **Domínio Auditoria & Sanidade:** Avaliação de qualidade, anti-glazing, cobertura determinística (>=90%), red team/pentest local, checagem de build/testes, caça a hacks ➜ despacha `henke-audit-vibecode`, `henke-audit-seguranca`, `henke-audit-pentest`, `henke-audit-cobertura` ou `henke-debug-sanidade` (modo inspeção, sem mutação).
 - **Domínio Refatoração:** Código duplicado ou nomes confusos ➜ despacha `henke-refactor-duplicado` ou `henke-refactor-nomes`.
 - **Domínio Operações:** Variáveis de ambiente, preflight e deploy ➜ despacha `henke-ops-env`, `henke-ops-preflight` ou `henke-ops-deploy` (com trava PUBLISH).
 - **Domínio Memória:** Diário de bordo, mapa da codebase, decisões ou limpeza ➜ despacha `henke-mem-mapa`, `henke-mem-decisoes`, `henke-mem-diario`, `henke-mem-retomada` ou `henke-mem-faxina`.

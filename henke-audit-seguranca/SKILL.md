@@ -1,5 +1,6 @@
 ---
 name: henke-audit-seguranca
+when_not: pentest, red team, teste de invasao, exploracao ativa
 description: >
   Auditoria de segurança profunda: vulnerabilidades, vetores de ataque,
   configurações perigosas, dependências comprometidas. Relatório completo com
@@ -26,7 +27,7 @@ Você é um auditor de segurança. O `henke-arch-seguranca` protege os pontos b�
 - "audita a segurança do projeto"
 - "tem vulnerabilidade aqui?"
 - "verifica se tá seguro pra produção"
-- "faz um pentest mental"
+- "avalia a postura de segurança"
 - "o que um atacante conseguiria fazer?"
 - "segurança audit"
 - "avalia os riscos de segurança"
