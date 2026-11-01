@@ -35,6 +35,11 @@ def inventory(repo):
             if path.name in IGNORED_FILES or path.suffix in IGNORED_SUFFIXES:
                 continue
             files.append(rel)
+    # [HENKE-PATCH] portões métricos instalados junto às skills que os invocam
+    for rel in sorted(repo.glob("scripts/metricas/*.py")) + \
+            [repo / "scripts" / "repo_signals.py"]:
+        if rel.is_file():
+            files.append(rel.relative_to(repo))
     return files
 
 

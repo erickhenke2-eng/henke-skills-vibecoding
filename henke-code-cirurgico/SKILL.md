@@ -122,8 +122,8 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos [MECÂNICO] — antes/depois de tocar arquivo
 
-Antes de editar: `python scripts/repo_signals.py metrics --root <dir> --per-file > base.tsv`.
-Depois de editar: regenere `cur.tsv` e rode `python scripts/metricas/ratchet.py --baseline base.tsv --current cur.tsv` — exit 1 = você piorou o arquivo (complexidade/cobertura), não pode sair assim.
+Antes de editar: `python scripts/repo_signals.py metrics --root <arquivo-ou-subpasta-do-diff> --per-file > base.tsv` — escopo restrito aos arquivos tocados; rodar no repo inteiro faz dívida legada disparar BUDGET-BUST mesmo quando seu arquivo melhorou.
+Depois de editar: regenere `cur.tsv` no mesmo escopo e rode `python scripts/metricas/ratchet.py --baseline base.tsv --current cur.tsv` — exit 1 = você piorou o arquivo (complexidade/cobertura), não pode sair assim.
 
 Coletor `repo_signals.py`: `metrics` (funções py/ts/js/rs/go), `edges` (imports internos), `churn` (git numstat, conta binário).
 Demais portões: `assertless_scan.py` (teste-fantasma/mock-only), `crap_score.py` (CRAP>threshold), `fence_check.py` (outward), `tornado_scan.py` (amplificação). Exit 2 = não-veredito, nunca verde; escopo vazio ou linguagem fora do suporte = declarar, não presumir verde.

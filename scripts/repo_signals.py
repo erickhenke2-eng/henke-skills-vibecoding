@@ -111,7 +111,8 @@ def cmd_churn(args):
            "--format=__C__%H"]
     if args.order == "oldest-first":
         cmd.append("--reverse")
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
     if res.returncode != 0:
         _fail(f"git log falhou: {res.stderr.strip()[:200]}")
     sha, count = None, 0
@@ -186,15 +187,37 @@ def load_coverage(path):
     return out
 
 
+def _cov_lookup(cov: dict, rel: str, py: Path) -> float:
+    """Match de coverage por caminho: rel exato → absoluto → sufixo '/'+rel →
+    basename só se for único (index.ts de monorepo não pode colidir)."""
+    if not cov:
+        return 0.0
+    if rel in cov:
+        return cov[rel]
+    ap = py.as_posix()
+    if ap in cov:
+        return cov[ap]
+    hits = [v for k, v in cov.items() if k.endswith("/" + rel)]
+    if hits:
+        return hits[0]
+    by_name = [v for k, v in cov.items()
+               if k == py.name or k.endswith("/" + py.name)]
+    return by_name[0] if len(by_name) == 1 else 0.0
+
+
 def cmd_metrics(args):
     root = Path(args.root).resolve()
     cov = load_coverage(args.coverage)
     per_file = {}
     for py in iter_files(root):
-        if py.name.endswith(".d.ts") or pg.TEST_RE.search(py.as_posix()):
+        if py.name.endswith(".d.ts"):
             continue
         rel = relposix(py, root)
-        pct = cov.get(rel, cov.get(py.as_posix(), cov.get(py.name, 0.0)))
+        # TEST_RE sobre o caminho RELATIVO ("/"+rel): aplicar no absoluto
+        # contaminava tudo sob /tmp/test/... com 0 funções.
+        if pg.TEST_RE.search("/" + rel):
+            continue
+        pct = _cov_lookup(cov, rel, py)
         worst_crap, max_comp = 0.0, 0
         for name, lineno, comp in iter_functions(py):
             crap = comp ** 2 * (1 - pct / 100) ** 3 + comp
@@ -236,7 +259,17 @@ def py_edges(py: Path, tree, root: Path, edges):
                 targets = [(n.name.split("."), node.level) for n in node.names]
         for parts, level in targets:
             for base in (py.parent, root):
-                hit = resolve_py(list(parts), base, max(level, base != py.parent))
+                lv = max(level, base != py.parent)
+                hit = resolve_py(list(parts), base, lv)
+                # from pkg import mod: tenta pkg/mod.py antes de pkg/__init__.py
+                if isinstance(node, ast.ImportFrom) and hit:
+                    for alias in node.names:
+                        if alias.name == "*":
+                            continue
+                        sub = resolve_py(list(parts) + [alias.name], base, lv)
+                        if sub and root in sub.parents:
+                            hit = sub
+                            break
                 if hit and root in hit.parents:
                     edges.append((relposix(py, root), relposix(hit, root)))
                     break
@@ -276,6 +309,11 @@ def cmd_edges(args):
                     cands = [crate.joinpath(*parts).with_suffix(".rs"),
                              crate.joinpath(*parts, "mod.rs"),
                              crate.joinpath("src", *parts).with_suffix(".rs")]
+                    # 'use crate::a::b::Simbolo' → cai pro módulo pai a/b.rs
+                    if len(parts) > 1:
+                        cands += [crate.joinpath(*parts[:-1]).with_suffix(".rs"),
+                                  crate.joinpath(*parts[:-1], "mod.rs"),
+                                  crate.joinpath("src", *parts[:-1]).with_suffix(".rs")]
                 for c in cands:
                     if c.is_file():
                         raw_edges.append((relposix(f, root), relposix(c.resolve(), root)))
@@ -311,7 +349,8 @@ def main():
     p = sub.add_parser("metrics", help="funções -> TSV complexidade/coverage")
     p.add_argument("--root", default=".")
     p.add_argument("--per-file", action="store_true", help="linhas no formato ratchet")
-    p.add_argument("--coverage", default=None,
+    p.add_argument("--coverage", "--coverage-json", "--lcov", dest="coverage",
+                   default=None,
                    help="coverage.py json | coverage-summary.json | coverage-final.json | lcov.info")
     p.set_defaults(fn=cmd_metrics)
 

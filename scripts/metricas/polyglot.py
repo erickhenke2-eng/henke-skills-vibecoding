@@ -15,7 +15,9 @@ from pathlib import Path
 
 C_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx", ".rs", ".go"}
 JS_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx"}
-TEST_RE = re.compile(r"(\.test\.|\.spec\.|_test\.go$|_test\.rs$|/tests?/|__tests__)")
+TEST_RE = re.compile(
+    r"(\.test\.|\.spec\.|_test\.go$|_test\.rs$|(?:^|/)test_[^/]*\.py$|_test\.py$|"
+    r"(?:^|/)tests?/|__tests__)")
 PRUNE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "target",
               "dist", "out", "release", "vendor", ".runtime", "coverage",
               ".next", ".nuxt", "build", ".turbo", ".cache", ".henke", ".worktrees"}
@@ -41,9 +43,10 @@ def iter_source_files(root: Path, exts=None):
                 yield Path(dirpath) / fn
 
 
-def mask_c_like(text: str) -> str:
+def mask_c_like(text: str, lang: str = "") -> str:
     """Mascara comentários/strings/template-literals preservando \n e colunas.
     Saída tem o mesmo comprimento; código vive, conteúdo textual vira espaço."""
+    lang = lang.lstrip(".").lower()
     out = list(text)
     i, n = 0, len(text)
     prev = ""  # último char significativo (heurística p/ regex literal JS)
@@ -64,8 +67,8 @@ def mask_c_like(text: str) -> str:
                     out[k] = " "
             i = j + 2
         elif c in "'\"":
-            # Rust: 'a' é char literal; 'a sem par é lifetime → não mascara
-            if c == "'" and _looks_like_lifetime(text, i):
+            # 'a/'static é lifetime — existe só em Rust. Fora de rs, ' é string.
+            if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
                 prev = c
                 i += 1
                 continue
@@ -90,13 +93,19 @@ def mask_c_like(text: str) -> str:
 
 
 def _looks_like_lifetime(text, i):
-    """'x' com 1 char antes do próximo ' é char literal; 'nome sem ' é lifetime."""
+    """Rust apenas: 'a, 'static, '_ = lifetime (sem ' de fechamento).
+    Char literal ('x', 'é', escape de 1 char) tem ' de fechamento OBRIGATÓRIO
+    — nunca newline. Retorna True só se o próximo delimitador não for '
+    próximo (lifetime)."""
     j = i + 1
     if j < len(text) and text[j] == "\\":
         j += 2
     while j < len(text) and text[j] not in "'\n":
         j += 1
-    return not (j < len(text) and j - i <= 4)  # 'a' / '\n' ok; 'a, 'a> = lifetime
+    # fechou com ' a até 4 chars ('a', 'é', '\n', '\t') → char literal → mascara
+    if j < len(text) and text[j] == "'" and j - i <= 4:
+        return False
+    return True
 
 
 def _string_end(text, i, q):
@@ -113,32 +122,59 @@ def _string_end(text, i, q):
 
 
 def _mask_template(text, out, i):
-    """Mascara `template` mantendo ${...} como código (interpolação conta)."""
+    """Mascara `template` mantendo ${...} como código (interpolação conta).
+    Dentro de ${...} strings, comentários e templates aninhados são tratados
+    como código — o backtick interno nunca fecha o template externo."""
     n = len(text)
     out[i] = " "
     j = i + 1
     depth = 0
     while j < n:
         c = text[j]
-        if c == "\\":
+        nxt = text[j + 1] if j + 1 < n else ""
+        if c == "\\" and j + 1 < n:
             out[j] = out[j + 1] = " "
             j += 2
             continue
         if depth == 0 and c == "`":
             out[j] = " "
             return j + 1
-        if c == "{" and depth > 0:
-            depth += 1
-        elif c == "}":
-            if depth == 0:
-                pass
-            else:
+        if depth > 0:
+            # dentro de ${...}: strings/comments/templates aninhados são código
+            if c == "/" and nxt == "/":
+                k = text.find("\n", j)
+                k = n if k == -1 else k
+                for x in range(j, k):
+                    out[x] = " "
+                j = k
+                continue
+            if c == "/" and nxt == "*":
+                k = text.find("*/", j + 2)
+                k = n - 2 if k == -1 else k
+                for x in range(j, min(k + 2, n)):
+                    if out[x] != "\n":
+                        out[x] = " "
+                j = min(k + 2, n)
+                continue
+            if c in "'\"":
+                k = _string_end(text, j, c)
+                for x in range(j, k):
+                    if out[x] != "\n":
+                        out[x] = " "
+                j = k
+                continue
+            if c == "`":
+                j = _mask_template(text, out, j)
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
                 depth -= 1
                 if depth == 0:
                     out[j] = " "
                     j += 1
                     continue
-        elif c == "$" and j + 1 < n and text[j + 1] == "{":
+        elif c == "$" and nxt == "{":
             depth = 1
             out[j] = out[j + 1] = " "
             j += 2
@@ -149,8 +185,9 @@ def _mask_template(text, out, i):
     return n
 
 
-def mask_comments_only(text: str) -> str:
+def mask_comments_only(text: str, lang: str = "") -> str:
     """Apaga apenas comentários, preservando strings (imports/specifiers vivem nelas)."""
+    lang = lang.lstrip(".").lower()
     out = list(text)
     i, n = 0, len(text)
     while i < n:
@@ -170,7 +207,7 @@ def mask_comments_only(text: str) -> str:
                     out[k] = " "
             i = j + 2
         elif c in "'\"`":
-            if c == "'" and _looks_like_lifetime(text, i):
+            if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
                 i += 1
                 continue
             i = _template_end(text, i) if c == "`" else _string_end(text, i, c)
@@ -184,15 +221,22 @@ def _template_end(text, i):
     j, depth = i + 1, 0
     while j < n:
         c = text[j]
-        if c == "\\":
+        if c == "\\" and j + 1 < n:
             j += 2
             continue
         if depth == 0 and c == "`":
             return j + 1
-        if c == "{" and depth > 0:
-            depth += 1
-        elif c == "}" and depth > 0:
-            depth -= 1
+        if depth > 0:
+            if c in "'\"":
+                j = _string_end(text, j, c)
+                continue
+            if c == "`":
+                j = _template_end(text, j)
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
         elif c == "$" and j + 1 < n and text[j + 1] == "{":
             depth = 1
             j += 2
@@ -233,7 +277,7 @@ def _regex_end(text, i):
 
 
 _FUNC_RE = re.compile(
-    r"(?:^|[^\w$.])(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s*([A-Za-z_$][\w$]*)\s*\("
+    r"(?:^|[^\w$.])(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s*([A-Za-z_$][\w$]*)\s*[<(]"
     r"|(?:^|[^\w$.])(?:export\s+)?(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+([A-Za-z_][\w]*)\s*[<(]"
     r"|(?:^|[^\w$.])func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\s*\("
     r"|(?:^|[,{\n]\s*)(?:get\s+|set\s+|static\s+|async\s+|public\s+|private\s+|protected\s+|readonly\s+|override\s+)*"
@@ -243,8 +287,10 @@ _FUNC_RE = re.compile(
     re.M)
 
 _TESTCALL_RE = re.compile(
-    r"\b(?:it|test|specify|xit|fit)(?:\.(?:each|skip|only|todo|concurrent|fails)\s*(?:\([^)]*\))?)*\s*\(",
-    re.M)
+    r"(?<![.\w$])(?:it|test|specify|xit|fit)"
+    r"(?:\.(?:each|skip|only|todo|concurrent|fails|runIf|skipIf)\s*"
+    r"(?:\((?:[^()]|\([^()]*\))*\))?)*"
+    r"\s*\(", re.M)
 _RUST_TEST_RE = re.compile(r"#\s*\[(?:tokio::|async_std::)?test(?:\s*\([^)]*\))?\]\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)")
 _GO_TEST_RE = re.compile(r"func\s+(Test[A-Z0-9_]\w*)\s*\(\s*\w+\s*\*?testing\.[A-Z]\w*")
 
@@ -274,9 +320,25 @@ def _paren_end(masked: str, open_idx: int) -> int:
     return -1
 
 
+def _angle_end(masked: str, open_idx: int) -> int:
+    """Índice do '>' que fecha o '<' em open_idx (genéricos TS/Rust)."""
+    depth = 0
+    for i in range(open_idx, len(masked)):
+        c = masked[i]
+        if c == "<":
+            depth += 1
+        elif c == ">":
+            depth -= 1
+            if depth == 0:
+                return i
+        elif c in "{;\n":
+            return -1
+    return -1
+
+
 def find_functions(text: str, lang: str):
     """yield (nome, start_line, end_line, corpo_mascarado). O(N), fronteiras por chaves."""
-    masked = mask_c_like(text)
+    masked = mask_c_like(text, lang)
     seen = set()
     for m in _FUNC_RE.finditer(masked):
         name = next((g for g in m.groups() if g), None)
@@ -290,8 +352,8 @@ def find_functions(text: str, lang: str):
             if pend == -1:
                 continue
             after = pend + 1
-        elif tail == "<":        # generics rust/ts: pula até '>' depois '(...)'
-            gt = masked.find(">", m.end())
+        elif tail == "<":        # generics <T> ts/rust: casa '>' depois '(...)'
+            gt = _angle_end(masked, m.end() - 1)
             if gt == -1:
                 continue
             pp = masked.find("(", gt)
@@ -330,7 +392,9 @@ def find_functions(text: str, lang: str):
         if b == -1:
             continue
         between = masked[after:b]
-        if "(" in between or ";" in between:
+        # tipo de retorno pode conter '(' (Go "(T, error)", Rust tupla) —
+        # só ';' denuncia que a assinatura não era de função.
+        if ";" in between:
             continue
         e = _brace_end(masked, b)
         if e == -1:
@@ -354,7 +418,7 @@ def complexity_masked(body: str, lang: str) -> int:
     score = 1
     score += len(_DECIDE_WORD.findall(body))
     score += len(_DECIDE_OP.findall(body))
-    if lang == "rs":
+    if lang.lstrip(".").lower() == "rs":
         score += len(_RUST_ARM.findall(body))
     else:
         score += len(re.findall(r"\?(?![.:,)\]\w?]*:\s*[\w<>[\]|&])(?!\?)(?!\.)(?=[^:]*:)", body))
@@ -363,31 +427,50 @@ def complexity_masked(body: str, lang: str) -> int:
 
 def find_test_blocks(text: str, lang: str):
     """yield (nome, start_line, end_line, corpo_mascarado) de testes não-Python."""
-    masked = mask_c_like(text)
-    if lang in JS_EXTS or lang in {".ts", ".tsx", ".js", ".mjs", ".jsx"}:
+    masked = mask_c_like(text, lang)
+    bare = lang.lstrip(".").lower()
+    if lang in JS_EXTS or bare in ("ts", "tsx", "js", "mjs", "jsx"):
         for m in _TESTCALL_RE.finditer(masked):
+            head = masked[m.start():m.end()]
+            if re.search(r"\.todo\s*\($", head):
+                continue  # it.todo(...) não tem callback — não é teste executável
             pos = m.end() - 1  # '(' de abertura da chamada
             pend = _paren_end(masked, pos)
             if pend == -1:
                 continue
             inner = masked[pos:pend]
-            fname = ""
-            fm = re.match(r"\s*\(\s*([A-Za-z_$`\"'][^,]*)", inner)
-            arrow = re.search(r"(?:=>|function)", inner)
-            if not arrow:
+            # callback = primeiro '=>'/'function' em profundidade 1 dos args —
+            # '=>' aninhados DENTRO do corpo (.map(x => y)) não contam.
+            arrow = None
+            depth = 0
+            for am in re.finditer(r"=>|function\b|[()\[\]{}]", inner):
+                tok = am.group(0)
+                if tok in "([":
+                    depth += 1
+                elif tok in ")]}":
+                    depth -= 1
+                elif depth == 1:
+                    arrow = am
+                    break
+            if arrow is None:
                 continue
-            b = masked.find("{", pos + arrow.end() - 1)
-            if b == -1 or b > pend:
-                continue
-            e = _brace_end(masked, b)
-            if e == -1:
-                continue
+            after = pos + arrow.end()
+            b = masked.find("{", after)
+            if b != -1 and b <= pend:
+                e = _brace_end(masked, b)
+                if e == -1:
+                    continue
+                body = masked[b:e + 1]
+            else:
+                # arrow concisa: `() => expr` — corpo = expr até o ')' da chamada
+                e = pend
+                body = masked[after:pend]
             nm = re.search(r"[\"'`]([^\"'`]+)[\"'`]", text[pos:pend])
             name = nm.group(1)[:60] if nm else "(anon)"
             sl = masked.count("\n", 0, m.start()) + 1
             el = masked.count("\n", 0, e) + 1
-            yield name, sl, el, masked[b:e + 1]
-    elif lang == ".rs":
+            yield name, sl, el, body
+    elif bare == "rs":
         for m in _RUST_TEST_RE.finditer(masked):
             b = masked.find("{", m.end())
             if b == -1:
@@ -397,7 +480,7 @@ def find_test_blocks(text: str, lang: str):
                 continue
             yield m.group(1), masked.count("\n", 0, m.start()) + 1, \
                 masked.count("\n", 0, e) + 1, masked[b:e + 1]
-    elif lang == ".go":
+    elif bare == "go":
         for m in _GO_TEST_RE.finditer(masked):
             b = masked.find("{", m.end())
             if b == -1:
@@ -415,7 +498,8 @@ _JS_IMPORT = re.compile(
     r"""|require\s*\(\s*['"]([^'"]+)['"]"""
     r"""|import\s*['"]([^'"]+)['"]""", re.M)
 _RS_MOD = re.compile(r"(?:^|\n)\s*(?:pub\s+)?mod\s+([A-Za-z_][\w]*)\s*;", re.M)
-_RS_USE = re.compile(r"(?:^|\n)\s*use\s+((?:crate|self|super)::[\w:]+)", re.M)
+_RS_USE = re.compile(
+    r"(?:^|\n)\s*(?:pub(?:\([^)]*\))?\s+)?use\s+((?:crate|self|super)::[\w:]+)", re.M)
 _GO_IMPORT_BLK = re.compile(r"import\s*\(([^)]*)\)", re.S)
 _GO_IMPORT_ONE = re.compile(r"import\s+(?:\w+\s+)?\"([^\"]+)\"")
 _GO_QUOTED = re.compile(r'"([^"]+)"')
@@ -424,7 +508,7 @@ _GO_QUOTED = re.compile(r'"([^"]+)"')
 def find_imports(text: str, lang: str):
     """Lista de specifiers de import. Mascara só comentários: o specifier
     mora dentro da string e precisa chegar inteiro ao resolvedor."""
-    masked = mask_comments_only(text)
+    masked = mask_comments_only(text, lang)
     out = []
     if lang in JS_EXTS:
         for m in _JS_IMPORT.finditer(masked):
@@ -450,6 +534,10 @@ def resolve_js(spec: str, base: Path, root: Path, pkgmap: dict):
             stem = cand_base.with_suffix("")
             tries += [stem.with_suffix(e) for e in
                       (".ts", ".tsx", ".js", ".mjs", ".jsx")]
+        # concatena antes de with_suffix: 'tela.service' → 'tela.service.ts',
+        # não 'tela.ts' (with_suffix engoliria '.service')
+        tries += [Path(str(cand_base) + e) for e in
+                  (".ts", ".tsx", ".js", ".mjs", ".jsx")]
         tries += [cand_base.with_suffix(e) for e in
                   (".ts", ".tsx", ".js", ".mjs", ".jsx")]
         tries += [(cand_base / "index").with_suffix(e) for e in
@@ -506,7 +594,7 @@ def go_module_path(root: Path):
 def cargo_root(path: Path, stop: Path):
     """Sobe de path até achar Cargo.toml (crate root); fallback stop."""
     d = path.parent
-    while d != d.parent and stop in d.parents or d == stop:
+    while (d != d.parent and stop in d.parents) or d == stop:
         if (d / "Cargo.toml").is_file():
             return d
         if d == stop:

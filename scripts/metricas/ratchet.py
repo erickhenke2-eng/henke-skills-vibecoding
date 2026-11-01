@@ -39,7 +39,7 @@ import unicodedata
 from pathlib import Path
 
 # [HENKE-PATCH] streams UTF-8 no Windows (cp1252 não derruba o portão)
-for _s in (sys.stdout, sys.stderr):
+for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")

@@ -46,6 +46,10 @@ class InstallTests(unittest.TestCase):
             self.assertEqual((target / "PROTOCOLO.md").read_bytes(), (ROOT / "PROTOCOLO.md").read_bytes())
             for skill in ROOT.glob("henke-*/SKILL.md"):
                 self.assertEqual((target / skill.relative_to(ROOT)).read_bytes(), skill.read_bytes())
+            # [HENKE-PATCH] portões métricos instalados junto às skills
+            self.assertTrue((target / "scripts/metricas/fence_check.py").is_file())
+            self.assertTrue((target / "scripts/metricas/polyglot.py").is_file())
+            self.assertTrue((target / "scripts/repo_signals.py").is_file())
             self.assertEqual((target / "unrelated.txt").read_text(), "preserve")
             self.assertFalse(list(target.glob(".henke-install-*")))
 

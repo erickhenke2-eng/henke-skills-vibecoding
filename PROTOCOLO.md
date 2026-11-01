@@ -169,7 +169,7 @@ Todo relatório de entrega contém, sem exceção:
 | `scripts/repo_signals.py` | Coletores churn/metrics/edges (medir ≠ julgar) | **[EXISTENTE]** |
 | CI | Qualquer portão acima falhando em push | **[EXISTENTE: matriz Ubuntu/Windows x py3.11/py3.12]** |
 
-**[PROSA]** O disparo automático dos portões métricos pelo Maestro/audit-vibecode depende de referência em SKILL.md — até lá, a execução é manual e o relatório deve marcá-la como *manual*.
+**[PROSA]** O disparo automático dos portões métricos pelo Maestro/audit-vibecode agora tem referência em SKILL.md (audit-vibecode, code-cirurgico, arch-pastas, ops-preflight, henke-skills) — a decisão de *quando* acionar continua do agente e é reportada no ledger.
 
 **Critérios de aceite da rodada** (um portão que bloqueia tudo também falhou):
 1. Rejeitar as adulterações já reproduzidas (suite esvaziada, YAML inválido, link quebrado, chave duplicada) **preservando** aprovação de pacotes válidos.

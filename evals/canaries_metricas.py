@@ -233,6 +233,81 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         expect("Canário M25: metrics poda node_modules",
                code == 0 and "node_modules" not in out)
 
+        # --- 26: aspas simples no fim da linha + 'src/*' não corrompem o lexer ---
+        sq = tsproj / "src" / "sq.test.ts"
+        sq.write_text(
+            "import { join } from 'path';\n"
+            "import { tmpdir } from 'os';\n"
+            "it('aspas simples', () => {\n"
+            "  const p = join(tmpdir(), 'vc-blender-'));\n"
+            "  expect(p).toContain('vc-blender-');\n"
+            "});\n"
+            "it('glob em aspas', () => { expect('src/*').toBe('src/*'); });\n",
+            encoding="utf-8")
+        code, out = run(MET / "assertless_scan.py", sq)
+        expect("Canário M26: 'aspas simples' no fim da linha não corrompe lexer",
+               code == 0 and "2 test function(s)" in out)
+
+        # --- 27: template literal aninhado ${`...`} ---
+        tpl = tsproj / "src" / "tpl.test.ts"
+        tpl.write_text(
+            "it('aninhado', () => {\n"
+            "  const s = { title: 'a', status: 'b', error: 'e' };\n"
+            "  const t = `${s.title}:${s.status}${s.error ? ` (${s.error})` : ''}`;\n"
+            "  expect(t).toContain('a');\n"
+            "});\n"
+            "it('depois do template', () => { expect(1).toBe(1); });\n",
+            encoding="utf-8")
+        code, out = run(MET / "assertless_scan.py", tpl)
+        expect("Canário M27: template aninhado preserva teste seguinte",
+               code == 0 and "2 test function(s)" in out)
+
+        # --- 28/29: Go multi-retorno e TS genérico <T> nas métricas ---
+        poly2 = t / "poly2"
+        (poly2 / "src").mkdir(parents=True)
+        (poly2 / "src" / "parse.go").write_text(
+            "package p\n"
+            'import "strconv"\n'
+            "func Parse(s string) (int, error) {\n"
+            "  if s == \"\" {\n    return 0, strconv.ErrSyntax\n  }\n"
+            "  return strconv.Atoi(s)\n}\n", encoding="utf-8")
+        (poly2 / "src" / "gen.ts").write_text(
+            "export async function wrap<T extends object>(x: T): Promise<T> {\n"
+            "  if (x && typeof x === 'object' || !x) return x;\n"
+            "  return x;\n}\n", encoding="utf-8")
+        (poly2 / "src" / "m.rs").write_text(
+            "use crate::a::b::Simbolo;\n"
+            "fn calc(x: i32) -> i32 {\n"
+            "  match x { 0 => 1, _ => 2 }\n}\n", encoding="utf-8")
+        code, out = run(SIGNALS, "metrics", "--root", poly2)
+        expect("Canário M28: metrics vê Go (int, error) e TS <T> e Rust match",
+               code == 0 and "Parse" in out and "wrap" in out and "calc" in out)
+        calc_row = [l for l in out.splitlines() if "calc" in l]
+        expect("Canário M29: match Rust conta complexidade (>=2)",
+               bool(calc_row) and int(calc_row[0].split("\t")[1]) >= 2)
+
+        # --- 30: edges './tela.service' → tela.service.ts ---
+        (poly2 / "src" / "ui").mkdir()
+        (poly2 / "src" / "ui" / "tela.service.ts").write_text(
+            "export const S = 1;\n", encoding="utf-8")
+        (poly2 / "src" / "ui" / "main.ts").write_text(
+            'import { S } from "./tela.service";\nexport const M = S;\n',
+            encoding="utf-8")
+        code, out = run(SIGNALS, "edges", "--root", poly2)
+        svc = json.loads(out) if code == 0 else []
+        expect("Canário M30: edges resolve ./tela.service → tela.service.ts",
+               any(e["to"].endswith("tela.service.ts") for e in svc))
+
+        # --- 31: TEST_RE não contamina path absoluto terminando em '/test/' ---
+        tdir = t / "test" / "src"
+        tdir.mkdir(parents=True)
+        (tdir / "code.ts").write_text(
+            "export function g(x: number) { if (x) return 1; return 0; }\n",
+            encoding="utf-8")
+        code, out = run(SIGNALS, "metrics", "--root", t / "test")
+        expect("Canário M31: metrics não zera quando root se chama 'test'",
+               code == 0 and "code.ts::g" in out)
+
     return passed, total, reports
 
 

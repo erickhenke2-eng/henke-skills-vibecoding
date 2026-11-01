@@ -51,14 +51,13 @@ def parse_declared_scope(spec_path: Path) -> list[str]:
         if not line.startswith("-"):
             continue
         line_item = line.lstrip("-* ").strip()
-        # Se contiver crases: - `caminho`: descrição
-        code_match = re.search(r"`([^`]+)`", line_item)
-        if code_match:
-            candidate = code_match.group(1).split(":")[0].strip()
-        else:
-            candidate = line_item.split(":")[0].strip()
-        if candidate and not candidate.startswith("<!--"):
-            paths.append(candidate.replace("\\", "/"))
+        # [HENKE-PATCH] múltiplos paths por bullet: - `a/x.py`, `b/y.py`, `c/z.py`
+        code_matches = re.findall(r"`([^`]+)`", line_item)
+        candidates = ([c.split(":")[0].strip() for c in code_matches]
+                      if code_matches else [line_item.split(":")[0].strip()])
+        for candidate in candidates:
+            if candidate and not candidate.startswith("<!--"):
+                paths.append(candidate.replace("\\", "/"))
     return paths
 
 

@@ -90,7 +90,7 @@ except ImportError:
     import polyglot as _pg
 
 # [HENKE-PATCH] streams UTF-8 no Windows (cp1252 não derruba o portão)
-for _s in (sys.stdout, sys.stderr):
+for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
         try:
             _s.reconfigure(encoding="utf-8", errors="replace")
@@ -116,20 +116,18 @@ SELF_NAMES = frozenset({"self", "cls"})
 
 # [HENKE-PATCH] padrões léxicos para testes não-Python (corpo já mascarado).
 _JS_EXPECT = re.compile(r"\bexpect\s*\(")
+_JS_MATCHER = re.compile(
+    r"\)\s*\.\s*(?:not\s*\.\s*)?(?:resolves\s*\.\s*|rejects\s*\.\s*)?[A-Za-z_]\w*\s*\(")
+_JS_MOCK_ONLY = re.compile(
+    r"toHaveBeenCalled|toBeCalled|toHaveReturned|toHaveBeenCalledWith|"
+    r"toHaveBeenCalledTimes|calledTimes|calledWith|\.mock\b")
 _JS_OTHER_ASSERT = re.compile(
     r"\bassert(?:\.\w+)?\s*\(|\b(?:assertThat|assertThrows|assertRejects|assertEquals|"
-    r"assertMatch|fail|assertNodeContains)\s*\(|\.should\s*\(|chai\b")
-_JS_REAL_MATCH = re.compile(
-    r"\.to(?:Be|Equal|StrictEqual|Match|Contain|Throw|HaveProperty|HaveLength|"
-    r"BeTruthy|BeFalsy|BeDefined|BeUndefined|BeNull|BeNaN|BeGreaterThan|"
-    r"BeLessThan|BeCloseTo|BeInstanceOf|BeTypeOf|Satisfy)|\.resolves|\.rejects")
-_JS_MOCK_MATCH = re.compile(
-    r"toHaveBeenCalled|toBeCalled|toHaveReturned|toHaveBeenCalledWith|"
-    r"toHaveBeenCalledTimes|\.mock\b|calledTimes|calledWith")
-_JS_CATCH = re.compile(r"\bcatch\s*(?:\([^)]*\))?\s*\{")
+    r"assertMatch|assertNodeContains)\s*\(|\b(?:assert|expect)\.fail\s*\(|"
+    r"\bfail\s*\(|\.should\s*\(|chai\b|\bthrow\b")
+_JS_CATCH = re.compile(r"\bcatch\s*\(\s*([A-Za-z_$][\w$]*)?\s*[^)]*\)\s*\{|\bcatch\s*\{")
 _RS_ASSERT = re.compile(
-    r"\bassert(?:_eq|_ne|_matches)?\s*!|\bpanic!|\.unwrap\s*\(|\.expect\s*\(|"
-    r"should_panic|insta::|assert_fs")
+    r"\bassert(?:_eq|_ne|_matches)?\s*!|\bpanic!|should_panic|insta::|assert_fs")
 _GO_ASSERT = re.compile(
     r"\bt\.(?:Error|Fatal|Fail)\w*\s*\(|\b(?:assert|require)\.[A-Z]\w+\s*\(|"
     r"\bpanic\s*\(|\bt\.Helper\s*\(")
@@ -162,30 +160,49 @@ def scan_polyglot(path: Path, helpers):
         fn = _Fn(sl, name)
         has_helper = bool(helper_re and helper_re.search(body))
         if ext in _pg.JS_EXTS:
-            expects = list(_JS_EXPECT.finditer(body))
+            real_expect = mock_expect = 0
+            for m in _JS_EXPECT.finditer(body):
+                # cadeia completa: do ')' que fecha expect(...) até o ';'
+                pe = _pg._paren_end(body, body.find("(", m.start()))
+                chain = body[pe:pe + 400] if pe != -1 else ""
+                mm = _JS_MATCHER.search(chain)
+                if not mm:
+                    continue  # expect(x) solto, sem matcher → não é asserção
+                if _JS_MOCK_ONLY.search(mm.group(0)):
+                    mock_expect += 1
+                else:
+                    real_expect += 1
             other = bool(_JS_OTHER_ASSERT.search(body)) or has_helper
-            segs = []
-            for m in expects:
-                seg = body[m.start():m.start() + 500]
-                seg = seg.split(";", 1)[0]
-                segs.append(seg)
-            real_expect = any(
-                _JS_REAL_MATCH.search(s) or not _JS_MOCK_MATCH.search(s)
-                for s in segs) if segs else False
-            if not expects and not other:
-                findings.append(("NO-ASSERTION", path, fn,
-                                 "executes code, asserts nothing"))
-            elif not other and not real_expect and expects:
-                findings.append(("MOCK-ONLY", path, fn,
-                                 f"{len(segs)} expect(s) on the double, none on the code under test"))
+            if real_expect == 0 and not other:
+                if mock_expect:
+                    findings.append(("MOCK-ONLY", path, fn,
+                                     f"{mock_expect} expect(s) on the double, none on the code under test"))
+                else:
+                    findings.append(("NO-ASSERTION", path, fn,
+                                     "executes code, asserts nothing"))
             for cm in _JS_CATCH.finditer(body):
                 b = body.find("{", cm.end() - 1)
                 e = _pg._brace_end(body, b) if b != -1 else -1
                 inner = body[b:e + 1] if e != -1 else ""
-                if inner and not re.search(
-                        r"\b(throw|expect|assert|return|fail|rejects)\b", inner):
+                if not inner:
+                    continue
+                if re.search(r"\b(throw|expect|assert|return|fail|rejects)\b", inner):
+                    continue
+                # isenção: catch(e){ x = e } com 'x' inspecionada fora do catch
+                # (expect(x), f(x) asserido, ou qualquer uso posterior)
+                param = cm.group(1)
+                exempt = False
+                if param:
+                    am = re.search(r"\b([A-Za-z_$][\w$]*)\s*=\s*" + re.escape(param) + r"\b", inner)
+                    if am:
+                        var = re.escape(am.group(1))
+                        outside = body[:b] + body[e + 1:] if e != -1 else ""
+                        if re.search(r"\b" + var + r"\b", outside):
+                            exempt = True
+                if not exempt:
                     findings.append(("SWALLOWED", path, fn,
                                      "catch block that cannot propagate — the test cannot go red"))
+                    break  # 1 achado por teste — não duplicar
         elif ext == ".rs":
             if not _RS_ASSERT.search(body) and not has_helper:
                 findings.append(("NO-ASSERTION", path, fn,
