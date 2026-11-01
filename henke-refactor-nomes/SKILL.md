@@ -3,7 +3,7 @@ name: henke-refactor-nomes
 description: >
   Renomeia variáveis, funções e arquivos pra nomes que dizem o que fazem:
   substitui "data", "temp", "handleStuff", "x" por nomes claros. Garante que
-  o código se explica sem legenda. Use quando nomes forem genéricos ou confusos.
+  o código se explica sem legenda. Use quando o usuário pedir "renomeia essas variáveis", "melhora os nomes" ou quando nomes forem genéricos ou confusos.
 ---
 
 # Henke | Refactor : Renomeador de Clareza

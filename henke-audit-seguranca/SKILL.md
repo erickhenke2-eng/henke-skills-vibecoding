@@ -165,7 +165,7 @@ Você é um auditor de segurança. O `henke-arch-seguranca` protege os pontos b�
 | `henke-audit-vibecode` | Auditoria geral + segurança |
 | `henke-ops-preflight` | Segurança é critério de deploy |
 
-**Papel no ecossistema:** é o pentester — pensa como atacante pra defender como engenheiro.
+**Papel no ecossistema:** é o auditor de postura — avalia a higiene estrutural, configurações, dependências e código para defender a aplicação antes de ir ao ar.
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
 
@@ -179,7 +179,10 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos & Segurança [MECÂNICO] — Sherlock Holmes (Cloudflare + Trail of Bits)
 
-1. **Varredura estática em 2 passes**: `python scripts/metricas/hazard_scan.py <alvo>` (ou `../scripts/metricas/hazard_scan.py` relativo à skill instalada) detecta `HARDCODED-SECRET`, `ENV-COMMITTED`, `URL-CRED`, `SHELL-INJECTION`, `SQL-CONCAT`, `WEAK-CRYPTO` (escopo de função), `PATH-TRAVERSAL`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG` e `UNJUSTIFIED-SUPPRESSION`.
+1. **Varredura estática em 2 passes, IaC e Bundles**: `python scripts/metricas/hazard_scan.py <alvo> [--dist <dir>]` detecta:
+   - **Código e runtime**: `HARDCODED-SECRET`, `ENV-COMMITTED`, `URL-CRED`, `SHELL-INJECTION`, `SQL-CONCAT`, `WEAK-CRYPTO`, `PATH-TRAVERSAL`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG`, `SSRF-UNVALIDATED`, `IDOR-NO-OWNERSHIP`, `JWT-NONE-OR-UNVERIFIED`, `CORS-CRED-WILDCARD`, `PROTO-POLLUTION`, `FRAME-INTROSPECTION` e `DYNAMIC-DISPATCH-IPC`.
+   - **IaC / Multi-Cloud**: `CLOUD-IAM-WILDCARD`, `CLOUD-BUCKET-PUBLIC`, `CLOUD-SECRET-MATERIAL`, `DOCKER-ESCALATED`, `IMDS-V1`.
+   - **Anti-fraude**: `UNJUSTIFIED-SUPPRESSION`.
 2. **Coverage Ledger & Dossier**:
    - Inicialize fora do repo auditado: `python scripts/metricas/coverage_ledger.py init --root <dir> --out <ledger.json> [--profile quick|standard|deep]`
    - Preencha cada unidade (`covered` exige `checks[]` com `assumptions[]: {text, status: enforced|unenforced|unknown}`; `finding_confirmed` exige `trace[]` `source → sink` com `file:line` reais no disco + `boundary_crossed` + `real_impact` + `reproduction_cmd_or_poc`; dúvidas externas viram `needs_validation` **sem severidade**).

@@ -44,7 +44,7 @@ Você é o **Engenheiro de Contratos Formais (`CARPINTEIRO`)** da Suíte Henke. 
 
    ## 5. Pontes de Contrato
    - ponte: `packages/shared/src/schemas/clips.ts::BakeRequestSchema -> apps/desktop/src/main/ipc.ts`
-   - ponte: `apps/desktop/src/main/ipc.ts::"clips:bake" -> apps/desktop/src/renderer/hooks/useBake.ts`
+   - ponte: `apps/desktop/src/main/ipc.ts::"clips:bake" -> apps/desktop/src/renderer/hooks/useBake.ts` [ações: "bake:start", "bake:cancel"]
    ```
 
 ### Fase 2: Construção do Schema Executável (Single Source of Truth)
@@ -65,7 +65,8 @@ Execute os dois portões complementares:
 python scripts/spec_drift.py --repo . --spec docs/designs/<feature>.md
 python scripts/metricas/contract_closure.py --repo . --spec docs/designs/<feature>.md --require-touched
 ```
-- Se faltar qualquer arquivo prometido (`MISSING-DECLARED-FILE`, `UNTOUCHED-DECLARED-FILE`) ou se o identificador/string literal do canal não existir em ambos os lados fora de comentários (`BROKEN-BRIDGE-SYMBOL-*`, `BROKEN-BRIDGE-STRING-*`), o portão barra com `exit 1`.
+- Se faltar qualquer arquivo prometido (`MISSING-DECLARED-FILE`, `UNTOUCHED-DECLARED-FILE`) ou se o identificador/string literal do canal não existir em ambos os lados fora de comentários (`BROKEN-BRIDGE-SYMBOL-*`, `BROKEN-BRIDGE-STRING-*`), se ações declaradas não forem consumidas no destino (`BROKEN-BRIDGE-ACTION`), ou se o literal constar na origem mas não for argumento direto de callsite IPC (`CHANNEL-LITERAL-DEAD`), o portão barra com `exit 1`.
+- Checagem automática de higiene IPC: barra canais computados dinamicamente (`COMPUTED-CHANNEL`), despachos dinâmicos cegos (`HIDDEN-DISPATCH`) e switches sem default-deny (`NO-DEFAULT-DENY`).
 
 ### Fase 5: Entrega & Registro
 

@@ -162,6 +162,20 @@ Responda em português direto:
 
 **Papel no ecossistema:** é o médico — check-up regular evita a emergência.
 
+## Portões Métricos [MECÂNICO] — Check-up de Integridade e Código
+
+Bateria mínima de sanidade mecânica para aprovar a árvore (py/ts/tsx/js/mjs/rs/go):
+
+```bash
+python scripts/metricas/assertless_scan.py <dir-de-testes>
+python scripts/repo_signals.py metrics --root <dir> | python scripts/metricas/crap_score.py --threshold 6
+python scripts/repo_signals.py edges --root <dir> > edges.json && python scripts/metricas/fence_check.py fence.json edges.json
+python scripts/metricas/hazard_scan.py <dir>
+python scripts/repo_signals.py churn --repo <dir> --order oldest-first | python scripts/metricas/tornado_scan.py --order oldest-first
+```
+
+Contrato de saída: 0=verde · 1=vermelho · 2=não-veredito.
+
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
 
 Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. Antes de declarar qualquer tarefa como concluída, confirme mentalmente cada item:

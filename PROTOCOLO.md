@@ -26,7 +26,7 @@ Toda tarefa recebe **um modo antes de qualquer bootstrap**. O modo define o teto
 
 Regras:
 - **Autorização por escopo, não por turno:** uma autorização concedida persiste dentro do escopo aprovado. Re-perguntar apenas quando **ação, destino ou impacto** mudarem — confirmação a cada turno cria fadiga de consentimento, que é pior que ausência de trava.
-- **[MECÂNICO → A CONSTRUIR]** Intenção interrogativa ("como faço X?", "me explica") resolve para ANALISAR. Corrige o bug de `ops-deploy` que traduzia pergunta em execução.
+- **[MECÂNICO]** Intenção interrogativa ("como faço X?", "me explica") resolve para ANALISAR (implementado em `scripts/henke_router.py`). Corrige o bug de `ops-deploy` que traduzia pergunta em execução.
 - **[PROSA]** Auditoria produz achados, nunca correções. Uma correção é **nova etapa** e **invalida a revisão anterior** — exige re-auditoria.
 - **[PROSA]** `henke-prepara` só roda em PLANEJAR/EXECUTAR, e nunca "silenciosamente": declara o que vai criar antes de criar.
 - **[PROSA]** A trilha de auditoria só pode conter skills em modo inspeção. `henke-debug-sanidade` dentro de auditoria opera **sem a Fase 4** ("corrige agora") — relata, não toca.
@@ -168,6 +168,7 @@ Todo relatório de entrega contém, sem exceção:
 | `evals/canaries_metricas.py` | Regressão bilateral dos portões métricos (reprova o ruim, aprova o permitido) | **[EXISTENTE]** |
 | `scripts/repo_signals.py` | Coletores churn/metrics/edges (medir ≠ julgar) | **[EXISTENTE]** |
 | `scripts/henke_router.py` | Roteador determinístico de catálogo (`nvidia-skill-finder`): veto de modo (`ANALISAR` default / `requires_human_auth` em `PUBLISH`), desambiguação negativa declarativa e seleção de 0..3 skills | **[EXISTENTE]** |
+| `metricas/metaconfig_diff.py` | Mutação de scripts, hooks de lifecycle (pre/posttest, postinstall), dependências ou metaconfiguração de build (`package.json`, `pyproject.toml`, `Cargo.toml`, CI) sem autorização humana explícita (`requires_human_auth`) | **[EXISTENTE]** |
 | `metricas/hazard_scan.py` | Scanner poliglota em 2 passes (`masked` + `raw` sem comentários): `HARDCODED-SECRET`, `ENV-COMMITTED`, `URL-CRED`, `SHELL-INJECTION`, `SQL-CONCAT`, `WEAK-CRYPTO`, `PATH-TRAVERSAL`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG` e `UNJUSTIFIED-SUPPRESSION` | **[EXISTENTE]** |
 | `metricas/coverage_ledger.py` | Ledger de cobertura de auditoria e Dossier (`cloudflare/security-audit-skill` + Trail of Bits `fp-check`): unidades priorizadas com `sha256` (`STALE`/`UNMAPPED`), `assumptions[]` (`enforced\|unenforced`), verificação física de `file:line` em `trace[]`, proibição de severidade em `needs_validation` e geração mecânica de "O que NÃO foi verificado" | **[EXISTENTE]** |
 | `metricas/contract_closure.py` | Fechamento de contrato e escopo (`declared ⊆ existing` em `## 4.` + pontes `- ponte: origem::simbolo -> destino` em `## 5.` nos modos identificador e string/IPC) | **[EXISTENTE]** |

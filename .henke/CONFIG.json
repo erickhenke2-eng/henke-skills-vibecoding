@@ -1,5 +1,5 @@
 {
-  "versao_protocolo": "3.1.1",
+  "versao_protocolo": "3.4",
   "stack": "Python 3.12 (unittest) + Shell Scripts (PowerShell/Bash) + Agent Skills Spec (SKILL.md YAML)",
   "economia_tokens": {
     "caveman": "auto",

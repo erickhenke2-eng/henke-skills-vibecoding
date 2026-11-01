@@ -62,9 +62,9 @@ flowchart TD
     M -->|"Arquitetura / Spec EGM / Fila"| MP["PLANEJAR"]
     M -->|"Código / Correção / Testes"| ME["EXECUTAR"]
 
-    MA --> D_AUD["Domínio Auditoria (vibecode, seguranca) ou Debug (raiz, rede, console)"]
-    MP --> D_PLAN["Domínio Planejamento (radar, ideias, mvp, historias) ou Arch (stack, pastas, banco)"]
-    ME --> D_CODE["Domínio Code (ponte, cirurgico, mock) ou UI (antislop, paleta, estados)"]
+    MA --> D_AUD["Domínio Auditoria (vibecode, seguranca, pentest, cobertura) ou Debug (raiz, rede, console)"]
+    MP --> D_PLAN["Domínio Planejamento (radar, ideias, mvp, historias) ou Arch (stack, pastas, banco, cloud)"]
+    ME --> D_CODE["Domínio Code (ponte, contratos, cirurgico, mock) ou UI (antislop, paleta, estados)"]
 ```
 
 #### Roteamento por Necessidade de Domínio:
@@ -124,12 +124,12 @@ Responda em português direto, transparente e sem fórmulas ufanistas vazias:
 - **PROIBIDO** impor burocracia de spec EGM para correções cirúrgicas de menos de 15 linhas.
 - **PROIBIDO** ignorar preferência `"off"` de economia de tokens configurada pelo usuário.
 
-## 5. Integração com as 49 Macro-Skills
+## 5. Integração com as 53 Macro-Skills
 
 O Maestro comanda todo o catálogo da Suíte Henke de forma coordenada:
-- `henke-plan-*` (6 skills) | `henke-mem-*` (5 skills) | `henke-arch-*` (6 skills)
-- `henke-blindagem` (1 skill) | `henke-ui-*` (7 skills) | `henke-code-*` (8 skills)
-- `henke-debug-*` (7 skills) | `henke-audit-*` (2 skills) | `henke-refactor-*` (2 skills)
+- `henke-plan-*` (6 skills) | `henke-mem-*` (5 skills) | `henke-arch-*` (7 skills)
+- `henke-blindagem` (1 skill) | `henke-ui-*` (7 skills) | `henke-code-*` (9 skills)
+- `henke-debug-*` (7 skills) | `henke-audit-*` (4 skills) | `henke-refactor-*` (2 skills)
 - `henke-ops-*` (3 skills) | `henke-prepara` (1 skill) | `henke-skills` (1 skill)
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
@@ -148,7 +148,7 @@ Infra métrica poliglota da suíte (py/ts/tsx/js/mjs/rs/go), stdlib pura:
 - Coletor `scripts/repo_signals.py` (ou `../scripts/repo_signals.py` relativo à skill instalada): `metrics` (funções+complexidade+coverage: coverage.py json, Istanbul summary/final, lcov), `edges` (imports internos com poda de node_modules/target/dist/vendor), `churn` (git numstat, conta binários, omite commits vazios).
 - Portões em `scripts/metricas/` (0=verde · 1=vermelho · 2/3=não-veredito): `assertless_scan.py` (teste-fantasma/mock-only/engolidor em py+ts+js+rs+go), `crap_score.py` (complexidade×cobertura), `ratchet.py` (arquivo tocado não piora), `fence_check.py` (sem dependência outward; `edges=[]`→2), `tornado_scan.py` (amplificação de mudança).
 - Roteamento determinístico (Passo 0): `python scripts/henke_router.py --prompt "<pedido>" [--repo <dir>]` (ou `../scripts/henke_router.py` relativo à skill instalada) resolve `mode` (`ANALISAR|PLANEJAR|EXECUTAR`), `archetype` (`SHERLOCK|CARPINTEIRO|ESTADISTA`), `confidence` (`high|medium|low|none`), `requires_human_auth`, as `skills` exatas (0..3) a ler via `read_file` e os `gates_required`.
-- Portões adicionais em `scripts/metricas/`: `hazard_scan.py` (segredos, shell/SQL injection, weak crypto, path traversal, concorrência sem semáforo), `coverage_ledger.py` (cobertura de auditoria com `sha256` + `assumptions[]` + `render-gaps`), `contract_closure.py` (`declared ⊆ existing` + fechamento de pontes `## 5. Pontes de Contrato`).
+- Portões adicionais em `scripts/metricas/`: `hazard_scan.py` (segredos, shell/SQL injection, weak crypto, path traversal, concorrência sem semáforo), `coverage_ledger.py` (cobertura de auditoria com `sha256` + `assumptions[]` + `render-gaps`), `contract_closure.py` (`declared ⊆ existing` + fechamento de pontes `## 5. Pontes de Contrato`), `metaconfig_diff.py` (trava anti-TOCTOU de package.json/workflows/build.rs) e `evals/canaries_metricas.py` (bateria de 70 canários bilaterais M1-M70).
 - Roteamento manual de fallback: auditoria de código → `henke-audit-vibecode`; cirurgia → `henke-code-cirurgico`; estrutura/camadas → `henke-arch-pastas`; verificação de ambiente → `henke-ops-preflight`.
 
 Dispatch deve repassar a regra: escopo vazio, linguagem não suportada ou coverage ausente = não-veredito declarado, nunca verde presumido.

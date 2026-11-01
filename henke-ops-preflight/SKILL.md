@@ -177,11 +177,20 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 Bateria mínima antes de aprovar ambiente/diff (py/ts/tsx/js/mjs/rs/go; scripts em `scripts/` da suíte ou `../scripts/` relativo à skill instalada):
 
 ```bash
+# 1. Sanidade dos portões métricos (canários bilaterais M1-M70)
+python evals/canaries_metricas.py
+
+# 2. Portões de qualidade de código, fronteiras e cobertura
 python scripts/repo_signals.py metrics --root <dir> [--coverage cov.json|coverage-summary.json|coverage-final.json|lcov.info] | python scripts/metricas/crap_score.py --threshold 6
 python scripts/metricas/assertless_scan.py <dir-de-testes>
 python scripts/repo_signals.py edges --root <dir> > edges.json && python scripts/metricas/fence_check.py fence.json edges.json
 python scripts/repo_signals.py churn --repo <dir> --order oldest-first | python scripts/metricas/tornado_scan.py --order oldest-first
 python scripts/metricas/ratchet.py --baseline base.tsv --current cur.tsv   # se houver baseline
+
+# 3. Portões de segurança, blindagem e fechamento de contratos
+python scripts/metricas/hazard_scan.py <dir> [--dist <dir_build>]
+python scripts/metricas/metaconfig_diff.py --repo <dir> --against HEAD [--spec <spec.md>]
+python scripts/metricas/contract_closure.py --spec <spec.md> [--root <dir>] [--require-touched]
 ```
 
 Contrato de saída: 0=verde · 1=vermelho · 2/3=não-veredito. Preflight trata 2 como bloqueio com motivo declarado, nunca como passe. Escopo vazio, coverage ausente ou linguagem fora do suporte entram na seção "O que NÃO foi verificado".

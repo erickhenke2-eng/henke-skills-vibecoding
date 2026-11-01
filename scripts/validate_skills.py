@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validação estrutural da Suíte Henke (PROTOCOLO v3.1.1).
+Validação estrutural da Suíte Henke (PROTOCOLO v3.4).
 Endurecido para rejeitar adulterações: YAML inválido, chaves duplicadas,
 links quebrados e ausência de marcadores mínimos. Não avalia semântica.
 """
@@ -80,7 +80,7 @@ else:
         if marker not in proto_text:
             errors.append(f"PROTOCOLO.md sem estrutura canônica obrigatória: marcador ausente '{marker}'")
 
-# 2. Validação da contagem de skills (49 skills esperadas)
+# 2. Validação da contagem de skills (53 skills esperadas)
 if len(skills) != 53:
     errors.append(f"Inventário divergente: esperadas 53 skills, encontradas {len(skills)}")
 

@@ -3,7 +3,7 @@ name: henke-refactor-duplicado
 description: >
   Encontra e unifica código duplicado: mesma lógica em vários lugares, cópias
   modificadas, funções idênticas com nomes diferentes. Extrai a lógica comum
-  e reduz a manutenção. Use quando "tem código repetido", "mesma coisa em 3 lugares".
+  e reduz a manutenção. Use quando o usuário disser "tem código repetido", "mesma coisa em 3 lugares" ou pedir para unificar código.
 ---
 
 # Henke | Refactor : Unificador de Duplicados

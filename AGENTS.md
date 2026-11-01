@@ -33,7 +33,7 @@ Antes de executar qualquer ação, determine o modo da sessão:
 |---|---|---|---|
 | **`ANALISAR`** | Perguntas, diagnóstico, auditoria, caça a bugs, investigação. | **NENHUMA**. Proibido alterar qualquer arquivo do projeto auditado. Arquivos temporários/ledger devem ir para `$TEMP`. | `repo_signals.py`, `hazard_scan.py`, `assertless_scan.py`, `coverage_ledger.py` |
 | **`PLANEJAR`** | Concepção, desenho de arquitetura, histórias, MVP. | **APENAS** em `docs/designs/` e `.henke/`. Proibido alterar código-fonte (`src/`, `packages/`). | `TEMPLATE.md`, `spec_drift.py`, `fence_check.py` |
-| **`EXECUTAR`** | Implementação cirúrgica, correção de bugs, testes. | **APENAS nos arquivos declarados** em `## 4. Escopo Declarado` da spec aprovada. | `spec_drift.py`, `contract_closure.py`, `ratchet.py`, `assertless_scan.py` |
+| **`EXECUTAR`** | Implementação cirúrgica, correção de bugs, testes. | **APENAS nos arquivos declarados** em `## 4. Escopo Declarado` da spec aprovada. | `spec_drift.py`, `contract_closure.py`, `ratchet.py`, `assertless_scan.py`, `metaconfig_diff.py` |
 
 > ⚠️ **Trava de PUBLISH:**  
 > Ações destrutivas ou de publicação (`deploy`, `push --force`, remoção em massa de arquivos, `drop table`, `rollback`) exigem **autorização humana prévia e explícita** com alvo e comando confirmados.
@@ -81,6 +81,15 @@ python scripts/metricas/contract_closure.py --repo . --spec docs/designs/<sua-fe
 # 6. Inicialização e verificação de cobertura (para auditorias)
 python scripts/metricas/coverage_ledger.py init --root . --out $TEMP/ledger.json
 python scripts/metricas/coverage_ledger.py verify $TEMP/ledger.json --min-pct 90
+
+# 7. Inspeção de metaconfiguração e anti-TOCTOU de scripts/dependências
+python scripts/metricas/metaconfig_diff.py --repo . --against main
+
+# 8. Verificação de custódia e baseline git
+python scripts/henke_gate.py check --repo .
+
+# 9. Auditoria do ledger executável e expansão de lifecycle
+python scripts/audit_ledger.py --ledger .henke/LEDGER.json
 ```
 
 Se qualquer um desses scripts retornar **código diferente de 0**, a tarefa **NÃO ESTÁ PRONTA**. Corrija a raiz da falha em vez de tentar contornar a verificação.

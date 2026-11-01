@@ -401,8 +401,8 @@ def main() -> None:
     p_ver.add_argument("ledger", help="Caminho do arquivo ledger.json")
     p_ver.add_argument("--root", default=None, help="Override do diretório raiz")
     p_ver.add_argument("--min-pct", type=float, default=90.0)
-    p_ver.add_argument("--max-out-of-scope-pct", type=float, default=20.0, help="Teto máximo permitido de unidades fora de escopo (padrão 20.0%)")
-    p_ver.add_argument("--max-out-of-scope-per-dir-pct", dest="max_oos_per_dir_pct", type=float, default=20.0, help="Teto de out_of_scope por diretório-pai (padrão 20.0%, dirs com >=3 unidades)")
+    p_ver.add_argument("--max-out-of-scope-pct", type=float, default=20.0, help="Teto máximo permitido de unidades fora de escopo (padrão 20.0%%)")
+    p_ver.add_argument("--max-out-of-scope-per-dir-pct", dest="max_oos_per_dir_pct", type=float, default=20.0, help="Teto de out_of_scope por diretório-pai (padrão 20.0%%, dirs com >=3 unidades)")
     p_ver.add_argument("--against", type=str, default=None, help="Ref git base: arquivo criado na PR marcado out_of_scope -> NEW-FILE-OUT-OF-SCOPE")
     p_ver.add_argument("--require-critic", action="store_true")
 

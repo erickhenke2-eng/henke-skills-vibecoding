@@ -4,8 +4,8 @@ description: >
   Auditoria determinística de cobertura de código e repositório (>=90%) com
   coverage_ledger.py: indexa 100% dos arquivos elegíveis com SHA-256, prioriza
   por score de risco (hazards + fan-in + complexidade), exige dossiê de
-  premissas (enforced/unenforced) e gera mecanicamente a seção "O que NÃO foi
-  verificado". Use quando o usuário pedir "auditoria completa com ledger",
+  premissas (enforced/unenforced), aplica travas anti-diluição (Wave 4) e gera
+  mecanicamente a seção "O que NÃO foi verificado". Use quando o usuário pedir "auditoria completa com ledger",
   "garante 90% de cobertura na auditoria" ou "mapeia o que falta auditar".
 when_not: cobertura de testes do jest, cobertura do pytest, estilizar tela
 ---
@@ -69,9 +69,9 @@ Em auditorias profundas (`--profile deep` ou `--require-critic`), execute uma se
 
 Execute o portão verificador:
 ```bash
-python scripts/metricas/coverage_ledger.py verify $TEMP/audit-ledger.json --min-pct 90
+python scripts/metricas/coverage_ledger.py verify $TEMP/audit-ledger.json --min-pct 90 --max-out-of-scope-pct 20.0 --max-out-of-scope-per-dir-pct 20.0 [--against <base_ref>]
 ```
-- Se retornar `exit 1` (`PENDING-UNIT`, `LOW-COVERAGE`, `STALE-HASH`, `UNMAPPED-FILE`, `THEATRICAL-SEVERITY`, `FABRICATED-LINE`), corrija as pendências reais antes de prosseguir.
+- Se retornar `exit 1` (`PENDING-UNIT`, `LOW-COVERAGE`, `STALE-HASH`, `UNMAPPED-FILE`, `THEATRICAL-SEVERITY`, `FABRICATED-LINE`, `EXCESSIVE-OUT-OF-SCOPE`, `DILUTED-OUT-OF-SCOPE`, `NEW-FILE-OUT-OF-SCOPE`), corrija as pendências reais antes de prosseguir.
 
 ### Fase 5: Renderização Mecânica de Lacunas & Entrega
 
@@ -96,6 +96,8 @@ E cole a saída literalmente no relatório final:
 - **PROIBIDO** gravar o arquivo `ledger.json` dentro da árvore de trabalho do repositório auditado em modo `ANALISAR` (use sempre `$TEMP`).
 - **PROIBIDO** preencher `checks[]` em lote com texto copiado-e-colado sem ter inspecionado o arquivo correspondente.
 - **PROIBIDO** marcar status `out_of_scope` ou `deferred` sem justificativa real em `reason` só para inflar a porcentagem de cobertura.
+- **PROIBIDO** marcar arquivo criado na própria PR/branch como `out_of_scope` (`NEW-FILE-OUT-OF-SCOPE` — código novo não nasce fora de escopo).
+- **PROIBIDO** concentrar unidades fora de escopo em um único diretório crítico para contornar o portão (`DILUTED-OUT-OF-SCOPE`, teto de 20% por diretório).
 - **PROIBIDO** declarar auditoria concluída se `coverage_ledger.py verify` retornar código diferente de `0`.
 
 ## 5. Integração com a Suíte Henke
@@ -119,5 +121,5 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 ## Portões Métricos & Segurança [MECÂNICO] — Coverage Ledger Gate
 
 1. `python scripts/metricas/coverage_ledger.py init --root <dir> --out $TEMP/ledger.json [--profile standard|deep]`
-2. `python scripts/metricas/coverage_ledger.py verify $TEMP/ledger.json --min-pct 90 [--require-critic]`
+2. `python scripts/metricas/coverage_ledger.py verify $TEMP/ledger.json --min-pct 90 [--max-out-of-scope-pct 20.0] [--max-out-of-scope-per-dir-pct 20.0] [--against <ref>] [--require-critic]`
 3. `python scripts/metricas/coverage_ledger.py render-gaps $TEMP/ledger.json`

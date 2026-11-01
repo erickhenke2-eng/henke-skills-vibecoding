@@ -16,7 +16,7 @@ Quem cria sistemas com IA no fluxo de vibecoding conhece bem o ciclo da loucura:
 4. **O Chute Aleatório no Debug:** O servidor dá erro 500 e a IA tenta 7 chutes no escuro, quebrando o banco, o contrato front-back e a sua paciência.
 5. **A Vitória Teatral (Falso-Verde):** A IA afirma que "todos os testes passaram com 100% de sucesso", mas quando você vai ver, ela escreveu testes sem nenhuma asserção real (`assertless`), criou mocks circulares ou usou truques de CSS (`.sr-only`) para forçar o teste a passar.
 
-A **Suíte Henke v3.4** nasceu para aniquilar esses 5 problemas combinando **53 Macro-Skills especializadas** com **8 Portões Mecânicos determinísticos (fail-closed exit code)**.
+A **Suíte Henke v3.4** nasceu para aniquilar esses 5 problemas combinando **53 Macro-Skills especializadas** com **9 Portões Mecânicos determinísticos (fail-closed exit code)**.
 
 ---
 
@@ -60,7 +60,8 @@ Texto em prosa não segura agente de IA sob pressão. O que protege código de v
 | **Fechamento de Contrato** | [`contract_closure.py`](./scripts/metricas/contract_closure.py) | **Código de menos**: barra arquivos declarados ausentes e pontes quebradas (símbolos ou canais IPC literais `"clips:bake"` não consumidos nas duas pontas). |
 | **Deriva de Especificação** | [`spec_drift.py`](./scripts/spec_drift.py) | **Código a mais / à toa**: barra qualquer arquivo alterado no `git status` que não conste na seção `## 4. Escopo Declarado` da spec. |
 | **Dossiê de Cobertura & SHA-256** | [`coverage_ledger.py`](./scripts/metricas/coverage_ledger.py) | **Pular arquivos difíceis**: indexa 100% dos arquivos com hash SHA-256. Reprova unidades `pending`, arquivos alterados pós-auditoria (`STALE-HASH`) ou cobertura abaixo de 90%. |
-| **Varredura de Perigos (Hazards)** | [`hazard_scan.py`](./scripts/metricas/hazard_scan.py) | **10 riscos críticos**: `SHELL-INJECTION`, `HARDCODED-SECRET`, `SQL-CONCAT`, `PATH-TRAVERSAL`, `WEAK-CRYPTO`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG` e `.env` commitado. Reprova supressões sem motivo (`UNJUSTIFIED-SUPPRESSION`). |
+| **Metaconfiguração & Anti-TOCTOU** | [`metaconfig_diff.py`](./scripts/metricas/metaconfig_diff.py) | **Mutação furtiva de build**: barra alterações em `scripts`, lifecycle hooks (`pretest`, `postinstall`), dependências e metaconfiguração (`package.json`, `pyproject.toml`, `Cargo.toml`, CI) sem autorização humana explícita (`requires_human_auth`). |
+| **Varredura de Perigos (Hazards)** | [`hazard_scan.py`](./scripts/metricas/hazard_scan.py) | **Riscos de segurança em código, IaC e runtime**: `SHELL-INJECTION`, `HARDCODED-SECRET`, `SQL-CONCAT`, `PATH-TRAVERSAL`, `WEAK-CRYPTO`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG`, `.env` commitado, IaC Multi-Cloud (`CLOUD-IAM-WILDCARD`, `CLOUD-BUCKET-PUBLIC`, `DOCKER-ESCALATED`, `IMDS-V1`), Pentest (`IDOR`, `SSRF`, `JWT`, `CORS`, `PROTO-POLLUTION`), `FRAME-INTROSPECTION`, `DYNAMIC-DISPATCH-IPC` e re-scan de bundle `--dist`. Reprova supressões sem motivo (`UNJUSTIFIED-SUPPRESSION`). |
 | **Caça a Testes Fantasmas** | [`assertless_scan.py`](./scripts/metricas/assertless_scan.py) | **Testes teatrais**: reprova testes sem nenhuma asserção real, testes puramente `mock-only` (que só verificam spies sem asserir saída) e testes engolindo erros com `catch`. |
 | **Complexidade vs Cobertura (CRAP)** | [`crap_score.py`](./scripts/metricas/crap_score.py) | **Código espaguete sem teste**: mede complexidade ciclomática poliglotta (Python, TypeScript, Rust, Go) ponderada pela cobertura de testes. |
 | **Catraca Anti-Regressão** | [`ratchet.py`](./scripts/metricas/ratchet.py) | **Piora gradual**: barra qualquer commit que piore as métricas em relação ao baseline do repositório. |
@@ -88,21 +89,25 @@ Você **não precisa memorizar** 53 skills nem adivinhar qual chamar primeiro. B
 
 ## 📊 Benchmark Adversarial Oficial (`evals/bench_corpus.py`)
 
-A eficácia da Suíte Henke é testada contra um corpus físico de **15 classes de defeitos reais (`D1..D16`)** e **2 controles legítimos (`D9, C2`)**:
+A eficácia da Suíte Henke é testada contra um corpus físico de **17 classes de defeitos reais (`D1..D18`)** e **3 controles legítimos (`D9, C2, C3`)**:
 
-| Métrica | Base Original (`f2f9c64`) | Wave 1 (`f847f25`) | **Wave 2 (`ece01ff` — Atual)** |
+| Métrica | Base Original (`f2f9c64`) | Wave 1 (`f847f25`) | **Wave 4 (Atual)** |
 |---|---|---|---|
-| **Cobertura Instrumental de Defeitos** | `3/15` (20,0%) | `11/15` (73,3%) | **`15/15` (100,0%)** |
-| **Defeitos Detectados (Recall)** | `3/15` (20,0%) | `11/15` (73,3%) | **`15/15` (100,0%)** |
-| **Controles Legítimos Aprovados (Zero Falso-Positivo)** | `0` | `1/1` (100%) | **`2/2` (100%)** |
-| **Canários Bilaterais (`canaries_metricas.py`)** | `5/5` | `38/38` | **`50/50` (100% PASS)** |
-| **Testes de Instalação e Portões (`tests/`)** | `29/29` | `38/38` | **`40/40` (100% PASS)** |
+| **Cobertura Instrumental de Defeitos** | `3/15` (20,0%) | `11/15` (73,3%) | **`17/17` (100,0%)** |
+| **Defeitos Detectados (Recall)** | `3/15` (20,0%) | `11/15` (73,3%) | **`17/17` (100,0%)** |
+| **Controles Legítimos Aprovados (Zero Falso-Positivo)** | `0` | `1/1` (100%) | **`3/3` (100%)** |
+| **Canários Bilaterais (`canaries_metricas.py`)** | `5/5` | `38/38` | **`70/70` (100% PASS)** |
+| **Testes de Instalação e Portões (`tests/`)** | `29/29` | `38/38` | **`44/44` (100% PASS)** |
 
 > **Prova física em monorepo real (`virusclip`):** O scanner varreu **491 arquivos** em segundos sem estourar limites, indexou **264 unidades de código** no `coverage_ledger.py` com SHA-256 e priorizou automaticamente as 3 superfícies mais perigosas sem nenhuma intervenção humana.
 
 ---
 
 ## 🧭 O Catálogo das 53 Macro-Skills
+
+### 0. Orquestração Central & Governança (`henke-skills` / `henke-prepara`)
+* [`henke-skills`](./henke-skills/SKILL.md): Orquestrador mestre e Chief of Staff (roteamento dinâmico em 5 fases, despacho determinístico e handoff operacional).
+* [`henke-prepara`](./henke-prepara/SKILL.md): Bootstrap de governança — inicializa `.henke/`, cofre de decisões, diário e mapa da codebase.
 
 ### 1. Concepção & Ideias (`henke-plan-*`)
 * [`henke-plan-radar`](./henke-plan-radar/SKILL.md): Radar de referências e benchmarking de produtos concorrentes reais.
@@ -211,13 +216,13 @@ python scripts/validate_skills.py
 # 2. Roda os 5 canários comportamentais do PROTOCOLO
 python evals/canaries.py
 
-# 3. Roda os 51 canários bilaterais dos portões métricos (reprova o ruim e aprova o bom)
+# 3. Roda os 70 canários bilaterais dos portões métricos (reprova o ruim e aprova o bom)
 python evals/canaries_metricas.py
 
-# 4. Executa a suíte de 40 testes unitários de integração
+# 4. Executa a suíte de 44 testes unitários de integração
 python -m unittest discover -s tests -v
 
-# 5. Roda o Benchmark Adversarial oficial (15 classes de defeito + 2 controles)
+# 5. Roda o Benchmark Adversarial oficial (17 classes de defeito + 3 controles)
 python evals/bench_corpus.py --suite-dir .
 ```
 
