@@ -115,7 +115,7 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos [MECÂNICO] — poliglotas (py/ts/tsx/js/mjs/rs/go)
 
-Coletor (mede, não julga): `python scripts/repo_signals.py`
+Coletor (mede, não julga): `python scripts/repo_signals.py` (ou `../scripts/repo_signals.py` relativo à pasta da skill instalada)
 - `metrics --root <dir> [--coverage cov.json|coverage-summary.json|coverage-final.json|lcov.info] [--per-file]`
 - `edges --root <dir>` — só arestas internas; poda node_modules/target/dist/vendor
 - `churn --repo <dir> --order oldest-first` — conta binários; omite commit de 0 arquivos

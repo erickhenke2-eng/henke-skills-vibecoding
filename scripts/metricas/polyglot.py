@@ -376,15 +376,38 @@ def find_functions(text: str, lang: str):
                 yield name, sl, el, masked[b:e + 1]
             continue
         elif tail in (">", "(") or seg.rstrip().endswith("=>"):
-            # arrow com corpo-expressão: termina em ';'
-            semi = masked.find(";", m.end())
-            if semi == -1:
-                continue
             sb = m.end() - 1 if tail == "(" else m.end()
-            e = semi
+            while sb < len(masked) and masked[sb] in " \t\r\n":
+                sb += 1
+            if sb >= len(masked):
+                continue
+            if masked[sb] == "{":
+                e = _brace_end(masked, sb)
+            elif masked[sb] == "(":
+                e = _paren_end(masked, sb)
+            else:
+                depth = 0
+                e = len(masked) - 1
+                for i in range(sb, len(masked)):
+                    c = masked[i]
+                    if c in "([{":
+                        depth += 1
+                    elif c in ")]}":
+                        if depth == 0:
+                            e = i - 1
+                            break
+                        depth -= 1
+                    elif depth == 0 and c in ";\n":
+                        e = i
+                        break
+            if e == -1 or e < sb:
+                continue
             sl = masked.count("\n", 0, m.start()) + 1
             el = masked.count("\n", 0, e) + 1
-            yield name, sl, el, masked[sb:e + 1]
+            key = (sl, name)
+            if key not in seen:
+                seen.add(key)
+                yield name, sl, el, masked[sb:e + 1]
             continue
         else:
             continue

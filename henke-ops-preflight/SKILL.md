@@ -174,7 +174,7 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos [MECÂNICO] — preflight do repositório
 
-Bateria mínima antes de aprovar ambiente/diff (py/ts/tsx/js/mjs/rs/go):
+Bateria mínima antes de aprovar ambiente/diff (py/ts/tsx/js/mjs/rs/go; scripts em `scripts/` da suíte ou `../scripts/` relativo à skill instalada):
 
 ```bash
 python scripts/repo_signals.py metrics --root <dir> [--coverage cov.json|coverage-summary.json|coverage-final.json|lcov.info] | python scripts/metricas/crap_score.py --threshold 6

@@ -308,6 +308,31 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         expect("Canário M31: metrics não zera quando root se chama 'test'",
                code == 0 and "code.ts::g" in out)
 
+        # --- 32: catch(err) { code = (err as { code?: string }).code } + expect(code) ---
+        cast_catch = tsproj / "src" / "cast_catch.test.ts"
+        cast_catch.write_text(
+            "it('captura campo com cast TS', () => {\n"
+            "  let code1 = '';\n"
+            "  try { throw { code: 'E1' }; } catch (err) {\n"
+            "    code1 = (err as { code?: string }).code ?? '';\n"
+            "  }\n"
+            "  expect(code1).toBe('E1');\n"
+            "});\n",
+            encoding="utf-8")
+        code, out = run(MET / "assertless_scan.py", cast_catch)
+        expect("Canário M32: catch com cast TS (err as ...).code inspecionado fora é aprovado",
+               code == 0 and "1 test function(s)" in out)
+
+        # --- 33: arrow TS com retorno de objeto entre parênteses sem ponto-e-vírgula ---
+        (tdir / "arrow.ts").write_text(
+            "export const makeObj = (x: number) => ({\n"
+            "  ok: x > 0 && x < 10\n"
+            "})\n",
+            encoding="utf-8")
+        code, out = run(SIGNALS, "metrics", "--root", t / "test")
+        expect("Canário M33: metrics detecta arrow => ({ ... }) sem ';' com decisão",
+               code == 0 and "arrow.ts::makeObj:1\t2\t" in out)
+
     return passed, total, reports
 
 

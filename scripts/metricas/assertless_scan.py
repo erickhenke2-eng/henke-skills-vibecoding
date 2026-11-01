@@ -193,7 +193,7 @@ def scan_polyglot(path: Path, helpers):
                 param = cm.group(1)
                 exempt = False
                 if param:
-                    am = re.search(r"\b([A-Za-z_$][\w$]*)\s*=\s*" + re.escape(param) + r"\b", inner)
+                    am = re.search(r"\b([A-Za-z_$][\w$]*)\s*=[^;}\n]*\b" + re.escape(param) + r"\b", inner)
                     if am:
                         var = re.escape(am.group(1))
                         outside = body[:b] + body[e + 1:] if e != -1 else ""
