@@ -68,7 +68,26 @@ Editados (v2):
 - `evals/canaries_metricas.py` — canários: fence `[]`→2, assertless `.test.ts` bilateral, edges `./helper.js`→`.ts`, churn commit só-binário
 - `tests/test_metric_gates.py` — cobertura dos novos caminhos
 
-Fora de escopo (declarado): `install*`, `prompts/`, `.henke/`, nenhum arquivo do `virusclip` (verificação física é read-only).
+Editados (v3 — correção Goldfish round-2, veredito REJECT sobre b988b88):
+- `docs/designs/portoes-metricos-ub.md` — esta revisão
+- `scripts/metricas/polyglot.py` — (a) `_looks_like_lifetime` só em lang `rs` e `'x'`/`'\x'` exige `'` de fechamento, nunca `\n`; (b) `_mask_template` trata strings/`//`/`/* */`/templates aninhados dentro de `${}` e guarda `j+1<n`; (c) `find_functions` aceita Go `(T, error)`, TS genérico `<T>`, Rust `match`, e `lang` normalizado sem ponto; (d) `_TESTCALL_RE` com lookbehind `(?<![.\w$])`, encadeadores `runIf`/`skipIf`, callback = último arg, corpos `{...}` ou arrow concisa, ignora `.todo`
+- `scripts/metricas/assertless_scan.py` — `expect` exige matcher real (não-mock) após `_paren_end`; `throw`/`assert.fail`/`expect.fail` contam como asserção; SWALLOWED isenta `catch(e){x=e}` com `x` asserido fora e não duplica achados; Rust: `.unwrap(`/`.expect(` não são asserção
+- `scripts/repo_signals.py` — `TEST_RE` aplicado a `"/"+rel` (não ao path absoluto) e cobre `test_*.py`/`_test.py`; edges: `Path(str(base)+e)` antes de `with_suffix`, Rust `use`/módulo-pai, Python `from pkg import mod` tenta submódulo primeiro; flags `--coverage-json`/`--lcov`; match de coverage por sufixo com fronteira `/` sem fallback cego de basename; `churn` subprocess `encoding="utf-8"`; `sys.stdin` reconfigurado
+- `scripts/metricas/crap_score.py` — `sys.stdin` reconfigurado UTF-8
+- `scripts/metricas/ratchet.py` — idem
+- `scripts/metricas/tornado_scan.py` — idem
+- `scripts/metricas/fence_check.py` — idem
+- `scripts/install_skills.py` — instala `scripts/repo_signals.py` + `scripts/metricas/` junto às skills
+- `tests/test_install.py` — cobre a instalação dos scripts
+- `scripts/spec_drift.py` — `re.findall` extrai múltiplos paths por bullet
+- `henke-code-cirurgico/SKILL.md` — ratchet com `--root` escopado aos arquivos tocados (dívida legada não dispara BUDGET-BUST)
+- `henke-arch-pastas/SKILL.md` — corrige invocação `repo_signals.py churn`
+- `PROTOCOLO.md` — §10/linha 172 reflete SKILLs alterados
+- `README.md` — linha 159 idem
+- `evals/canaries_metricas.py` — canários: aspas simples TS, template aninhado, Go `(int, error)`, TS `<T>`, Rust `match`/`use`, `./tela.service`→`.ts`
+- `tests/test_metric_gates.py` — cobertura dos novos caminhos
+
+Fora de escopo (declarado): `prompts/`, `.henke/`, nenhum arquivo do `virusclip` (verificação física é read-only).
 
 ## 5. Casos de borda
 
