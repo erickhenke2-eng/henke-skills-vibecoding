@@ -13,6 +13,7 @@ eliminando a dependência de CWD dos 14 portões mecânicos e fornecendo:
   - `henke check`    : bateria agregada de portões sem abortar no primeiro erro
   - `henke approve`  : aprovação humana auditada de uma run (`.henke/runs/<id>.json`)
   - `henke scope`    : emenda de escopo justificada em uma run ativa
+  - `henke install-hook`: instala o pre-commit hook nativo de 1 comando no repositório Git
 
 Códigos de saída:
   0  sucesso / todos os portões aprovados
@@ -45,6 +46,15 @@ METRICAS_DIR = SCRIPTS_DIR / "metricas"
 
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
+
+from scripts.gate_cache import (
+    clear_cache,
+    compute_cache_key,
+    enforce_ram_limit,
+    get_cached_gate,
+    store_cached_gate,
+)
+from scripts.process_runner import run_process
 
 GATE_MAP: dict[str, Path] = {
     "hazard": METRICAS_DIR / "hazard_scan.py",
@@ -98,10 +108,10 @@ def parse_test_runner_output(stdout: str, stderr: str) -> tuple[int, int]:
         failed = sum(int(m.group(2)) for m in m_cargo)
         return passed + failed, passed
 
-    # 3. Python unittest ("Ran N tests in X.XXXs")
+    # 3. Python unittest ("Ran N tests in X.XXXs" — usa a última ocorrência)
     m_ut = list(_UNITTEST_RAN_RE.finditer(combined))
     if m_ut:
-        ran = sum(int(m.group(1)) for m in m_ut)
+        ran = int(m_ut[-1].group(1))
         failed_count = 0
         for m_f in _UNITTEST_FAIL_RE.finditer(combined):
             for num in re.findall(r"(?:failures|errors)=(\d+)", m_f.group(1), flags=re.I):
@@ -151,6 +161,13 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
     skills_count = len(list(SUITE_ROOT.glob("henke-*/SKILL.md")))
     henke_dir = (repo_root / ".henke").is_dir()
 
+    from scripts.mission_classifier import classify_repository
+    classification = classify_repository(repo_root)
+    stacks_detected = [s.name for s in classification.detected_stacks]
+    stacks_configured = classification.configured_stacks
+    stacks_unconfigured = [s.name for s in classification.unconfigured_stacks]
+    active_gates = classification.active_gates
+
     report = {
         "status": "ok" if (py_ok and git_ok and not missing_scripts) else "degraded",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
@@ -162,12 +179,17 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
         "gates_available": len(GATE_MAP) - len(missing_scripts),
         "missing_gates": missing_scripts,
         "henke_initialized": henke_dir,
+        "stacks_detected": stacks_detected,
+        "stacks_configured": stacks_configured,
+        "stacks_unconfigured": stacks_unconfigured,
+        "active_gates": active_gates,
     }
     if as_json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["status"] == "ok" else 1
+
 
 
 def _cmd_init(repo_root: Path) -> int:
@@ -322,21 +344,18 @@ def _cmd_exec(repo_root: Path, ledger_path: Path, exec_log_path: Path, cmd_token
     timeout_sec = 180.0
 
     try:
-        res = subprocess.run(
+        res = run_process(
             exec_tokens,
             cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
+            timeout_sec=timeout_sec,
             env=child_env,
-            timeout=timeout_sec,
         )
-    except subprocess.TimeoutExpired:
-        print(f"ERRO: Comando expirou após {timeout_sec}s: '{cmd_str}'", file=sys.stderr)
-        return 2
     except OSError as exc:
         print(f"ERRO ao executar '{cmd_str}': {exc}", file=sys.stderr)
+        return 2
+
+    if res.timed_out:
+        print(f"ERRO: Comando expirou após {timeout_sec}s: '{cmd_str}'", file=sys.stderr)
         return 2
 
     out_text = res.stdout or ""
@@ -348,6 +367,8 @@ def _cmd_exec(repo_root: Path, ledger_path: Path, exec_log_path: Path, cmd_token
 
     stdout_sha256 = hashlib.sha256((out_text + err_text).encode("utf-8")).hexdigest()
     discovered, passed = parse_test_runner_output(out_text, err_text)
+    if res.returncode != 0 and discovered > 0 and passed == discovered:
+        passed = 0
 
     # Lê prev_hash da última entrada em exec_log.jsonl
     prev_hash = "0" * 64
@@ -416,67 +437,247 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
             file=sys.stderr,
         )
         return 2
-    args = list(extra_args)
+
+    no_cache = False
+    args: list[str] = []
+    for a in extra_args:
+        if a == "--no-cache":
+            no_cache = True
+        elif a == "--clear-cache":
+            clear_cache(repo_root)
+            print("[OK] Cache de portões limpo.")
+            return 0
+        else:
+            args.append(a)
+
     if not args and gate_name in ("hazard", "a11y", "assertless"):
         if gate_name == "assertless" and (repo_root / "tests").is_dir():
             args = [str(repo_root / "tests")]
         else:
             args = [str(repo_root)]
-    res = subprocess.run([sys.executable, str(script_path), *args])
+
+    cache_key = compute_cache_key(gate_name, script_path, args, repo_root)
+    if not no_cache:
+        cached = get_cached_gate(cache_key, repo_root=repo_root)
+        if cached is not None:
+            code = cached.get("exit_code", cached.get("returncode", 0))
+            print(f"[CACHE HIT] {gate_name} (exit {code})")
+            if cached.get("stdout"):
+                sys.stdout.write(cached["stdout"])
+                if not cached["stdout"].endswith("\n"):
+                    sys.stdout.write("\n")
+            if cached.get("stderr"):
+                sys.stderr.write(cached["stderr"])
+                if not cached["stderr"].endswith("\n"):
+                    sys.stderr.write("\n")
+            return code
+
+    res = run_process([sys.executable, str(script_path), *args], cwd=str(repo_root), timeout_sec=120.0)
+    out_text = res.stdout or ""
+    err_text = res.stderr or ""
+    if out_text:
+        sys.stdout.write(out_text)
+    if err_text:
+        sys.stderr.write(err_text)
+
+    store_cached_gate(
+        cache_key,
+        {
+            "gate": gate_name,
+            "exit_code": res.returncode,
+            "returncode": res.returncode,
+            "stdout": out_text,
+            "stderr": err_text,
+            "passed": res.returncode == 0 and not res.timed_out,
+        },
+        repo_root=repo_root,
+    )
+    enforce_ram_limit(500.0, repo_root=repo_root)
     return res.returncode
 
 
-def _cmd_check(repo_root: Path, spec_path: str | None = None, as_json: bool = False) -> int:
-    checks_to_run: list[tuple[str, list[str]]] = [
-        ("hazard_scan", [sys.executable, str(GATE_MAP["hazard"]), str(repo_root)]),
-    ]
-    tests_dir = repo_root / "tests"
-    if tests_dir.is_dir():
-        checks_to_run.append(("assertless_scan", [sys.executable, str(GATE_MAP["assertless"]), str(tests_dir)]))
-    checks_to_run.append(("a11y_scan", [sys.executable, str(GATE_MAP["a11y"]), str(repo_root)]))
-    if spec_path:
-        checks_to_run.append((
-            "contract_closure",
-            [sys.executable, str(GATE_MAP["contracts"]), "--repo", str(repo_root), "--spec", spec_path],
-        ))
+def _cmd_check(
+    repo_root: Path,
+    spec_path: str | None = None,
+    as_json: bool = False,
+    no_cache: bool = False,
+    clear_cache_flag: bool = False,
+    staged: bool = False,
+) -> int:
+    if clear_cache_flag:
+        clear_cache(repo_root)
+        print("[OK] Cache de portões limpo.")
 
-    results: list[dict] = []
-    overall_ok = True
-    for name, cmd in checks_to_run:
-        res = subprocess.run(
-            cmd,
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        passed = res.returncode == 0
-        if not passed:
-            overall_ok = False
-        results.append({
-            "gate": name,
-            "exit_code": res.returncode,
-            "passed": passed,
-            "output": ((res.stdout or "") + (res.stderr or "")).strip(),
-        })
+    import tempfile
+    staged_temp_ctx = None
+    target_root = repo_root
 
-    if as_json:
-        print(json.dumps({
-            "repo": str(repo_root),
-            "passed": overall_ok,
-            "gates": results,
-        }, ensure_ascii=False, indent=2))
+    if staged:
+        try:
+            git_check = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+            )
+            if git_check.returncode == 0:
+                staged_temp_ctx = tempfile.TemporaryDirectory()
+                prefix = (Path(staged_temp_ctx.name).resolve().as_posix()) + "/"
+                co_res = subprocess.run(
+                    ["git", "checkout-index", "--prefix=" + prefix, "-a", "-f"],
+                    cwd=str(repo_root),
+                    capture_output=True,
+                    text=True,
+                )
+                if co_res.returncode == 0:
+                    target_root = Path(staged_temp_ctx.name)
+                else:
+                    print(f"ERRO: Falha ao extrair snapshot do index Git via git checkout-index (exit {co_res.returncode}): {co_res.stderr}", file=sys.stderr)
+                    return 2
+        except Exception as exc:
+            sys.stderr.write(f"[AVISO] Falha ao extrair index Git para --staged: {exc}\n")
+
+    try:
+        from scripts.mission_classifier import classify_repository, prompt_unconfigured_stack
+
+        classification = classify_repository(target_root)
+
+        # In interactive session, prompt user for any unconfigured stacks (only when checking working tree)
+        if classification.unconfigured_stacks and not staged:
+            is_interactive = sys.stdin.isatty()
+            cfg_path = repo_root / ".henke" / "CONFIG.json"
+            for unconf in list(classification.unconfigured_stacks):
+                prompt_unconfigured_stack(unconf.name, config_path=cfg_path, interactive=is_interactive)
+            # Re-classify in case user enabled a stack
+            classification = classify_repository(target_root)
+
+        checks_to_run: list[tuple[str, Path, list[str]]] = []
+
+        # 1. Universal baseline gate: hazard_scan
+        checks_to_run.append(("hazard_scan", GATE_MAP["hazard"], [str(target_root)]))
+
+        # 2. Universal assertless scan: se diretório tests/ existir no snapshot inspecionado
+        tests_dir = target_root / "tests"
+        if tests_dir.is_dir():
+            checks_to_run.append(("assertless_scan", GATE_MAP["assertless"], [str(tests_dir)]))
+
+        # 3. Universal a11y scan: executado incondicionalmente para evitar regressões
+        checks_to_run.append(("a11y_scan", GATE_MAP["a11y"], [str(target_root)]))
+
+        if spec_path:
+            checks_to_run.append((
+                "contract_closure",
+                GATE_MAP["contracts"],
+                ["--repo", str(target_root), "--spec", spec_path],
+            ))
+
+        effective_no_cache = no_cache or staged
+        results: list[dict] = []
+        overall_ok = True
+        for name, script_path, gate_args in checks_to_run:
+            key = compute_cache_key(name, script_path, gate_args, repo_root)
+            cached = None if effective_no_cache else get_cached_gate(key, repo_root=repo_root)
+
+            if cached is not None:
+                exit_code = cached.get("exit_code", cached.get("returncode", 0))
+                passed = cached.get("passed", exit_code == 0)
+                if not passed:
+                    overall_ok = False
+                output = cached.get("output", cached.get("stdout", "")).strip()
+                results.append({
+                    "gate": name,
+                    "exit_code": exit_code,
+                    "passed": passed,
+                    "output": output,
+                    "cached": True,
+                })
+            else:
+                full_cmd = [sys.executable, str(script_path), *gate_args]
+                res = run_process(
+                    full_cmd,
+                    cwd=str(target_root),
+                    timeout_sec=120.0,
+                )
+                passed = res.returncode == 0 and not res.timed_out
+                if not passed:
+                    overall_ok = False
+                out_text = ((res.stdout or "") + (res.stderr or "")).strip()
+                if not staged:
+                    store_cached_gate(
+                        key,
+                        {
+                            "gate": name,
+                            "exit_code": res.returncode,
+                            "returncode": res.returncode,
+                            "stdout": res.stdout or "",
+                            "stderr": res.stderr or "",
+                            "passed": passed,
+                            "output": out_text,
+                        },
+                        repo_root=repo_root,
+                    )
+                    enforce_ram_limit(500.0, repo_root=repo_root)
+                results.append({
+                    "gate": name,
+                    "exit_code": res.returncode,
+                    "passed": passed,
+                    "output": out_text,
+                    "cached": False,
+                })
+
+        if as_json:
+            print(json.dumps({
+                "repo": str(repo_root),
+                "passed": overall_ok,
+                "staged": staged,
+                "gates": results,
+            }, ensure_ascii=False, indent=2))
+        else:
+            for item in results:
+                if item.get("cached"):
+                    badge = "CACHE HIT" if item["passed"] else "FAIL (CACHED)"
+                else:
+                    badge = "PASS" if item["passed"] else "FAIL"
+                print(f"[{badge}] {item['gate']} (exit {item['exit_code']})")
+                if item["output"]:
+                    for ln in item["output"].splitlines():
+                        print(f"  {ln}")
+
+        if not staged:
+            enforce_ram_limit(500.0, repo_root=repo_root)
+        return 0 if overall_ok else 1
+    finally:
+        if staged_temp_ctx is not None:
+            try:
+                staged_temp_ctx.cleanup()
+            except Exception:
+                pass
+
+
+def _cmd_install_hook(repo_root: Path, force: bool = False) -> int:
+    from scripts.install_hook import install_hook
+
+    ok, msg = install_hook(repo_root, force=force)
+    if ok:
+        print(f"[OK] {msg}")
+        return 0
     else:
-        for item in results:
-            badge = "PASS" if item["passed"] else "FAIL"
-            print(f"[{badge}] {item['gate']} (exit {item['exit_code']})")
-            if item["output"]:
-                for ln in item["output"].splitlines():
-                    print(f"  {ln}")
+        print(f"ERRO: {msg}", file=sys.stderr)
+        return 2 if "não é um repositório git" in msg.lower() else 1
 
-    return 0 if overall_ok else 1
 
+
+
+def _cmd_report(repo_root: Path, out_path: Path | None = None) -> int:
+    from scripts.report_generator import generate_report
+
+    try:
+        res = generate_report(repo_root, output_file=out_path)
+        print(f"[OK] Relatório gerado em: {res}")
+        return 0
+    except Exception as exc:
+        print(f"ERRO: {exc}", file=sys.stderr)
+        return 1
 
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
@@ -528,6 +729,8 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("--spec", default=None, help="Spec de referência para contract_closure")
     p_check.add_argument("--staged", action="store_true", help="Inspeciona estado atual/staged")
     p_check.add_argument("--json", action="store_true", help="Saída em JSON")
+    p_check.add_argument("--no-cache", action="store_true", help="Ignora cache e força re-execução dos portões")
+    p_check.add_argument("--clear-cache", action="store_true", help="Limpa o cache de portões antes de executar")
 
     p_app = sub.add_parser("approve", help="Aprova uma run pendente de autorização humana")
     p_app.add_argument("run_file", type=Path, help="Arquivo .henke/runs/<id>.json")
@@ -545,6 +748,16 @@ def main(argv: list[str] | None = None) -> int:
     p_gf.add_argument("--spec", default=None, help="Spec de referência")
     p_gf.add_argument("--check", action="store_true", help="Executa bateria completa de portões em contexto limpo")
     p_gf.add_argument("--json", action="store_true", help="Saída em JSON")
+    p_gf.add_argument("--no-cache", action="store_true", help="Ignora cache e força re-execução dos portões")
+
+    p_install = sub.add_parser("install-hook", help="Instala o pre-commit hook nativo no repositório Git")
+    p_install.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_install.add_argument("--force", action="store_true", help="Sobrescreve hook pré-existente sem criar backup .legacy")
+
+    
+    p_report = sub.add_parser("report", help="Gera o dashboard visual local em HTML autocontido")
+    p_report.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_report.add_argument("--out", type=Path, default=None, help="Caminho do arquivo HTML de saída (padrão: .henke/report.html)")
 
     try:
         args = parser.parse_args(raw_argv)
@@ -566,7 +779,14 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_route(prompt_val, args.repo.resolve(), compact=is_compact)
 
     if args.subcmd == "check" or args.subcmd == "goldfish":
-        return _cmd_check(args.repo.resolve(), spec_path=args.spec, as_json=args.json)
+        return _cmd_check(
+            args.repo.resolve(),
+            spec_path=args.spec,
+            as_json=args.json,
+            no_cache=getattr(args, "no_cache", False),
+            clear_cache_flag=getattr(args, "clear_cache", False),
+            staged=getattr(args, "staged", False),
+        )
 
     if args.subcmd == "approve":
         from scripts.run_state import main as run_state_main
@@ -582,6 +802,13 @@ def main(argv: list[str] | None = None) -> int:
             "--reason",
             args.reason,
         ])
+
+    if args.subcmd == "install-hook":
+        return _cmd_install_hook(args.repo.resolve(), force=args.force)
+
+    
+    if args.subcmd == "report":
+        return _cmd_report(args.repo.resolve(), out_path=args.out.resolve() if args.out else None)
 
     return 2
 

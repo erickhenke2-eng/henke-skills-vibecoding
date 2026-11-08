@@ -22,5 +22,21 @@
     "testes_passados": 56,
     "stdout_sha256": "3663bfb39b78116de4d0efe253ca08f6ed956661876a9b2237d89e1eb4ee4990",
     "entry_hash": "5441d9e4eaa2518c0a287a29382cadf25dfbab38a64206c99d25e1ca306f2491"
+  },
+  {
+    "cmd": "python -m unittest discover -s tests -p test_*.py",
+    "exit": 0,
+    "testes_descobertos": 226,
+    "testes_passados": 226,
+    "stdout_sha256": "2b90ab0cfeb217c6e290d2ad2d27a9dccae3e9e759fb7341296f30d22eb53b56",
+    "entry_hash": "21b2cb15802dba88d47568d395563694e3a9174ae65a51a5dcd7f886647db1db"
+  },
+  {
+    "cmd": "python -m unittest discover -s tests -v",
+    "exit": 0,
+    "testes_descobertos": 226,
+    "testes_passados": 226,
+    "stdout_sha256": "3f1cec87852e07b48da7b71615ce6920b9e320c7cfc7eae7758f3dedf2d2ae0e",
+    "entry_hash": "a9fde5dfff9aea02a63061375345ec799b04ce85861a5ceb70c7d33060d97e98"
   }
 ]

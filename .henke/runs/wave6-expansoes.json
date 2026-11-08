@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "run_id": "wave6-expansoes",
+  "mode": "EXECUTAR",
+  "archetype": "CARPINTEIRO",
+  "spec_path": "docs/designs/wave6_production_expansions.md",
+  "created_at": "2026-11-08T15:00:00.000000+00:00",
+  "updated_at": "2026-11-08T22:38:00.000000+00:00",
+  "requires_human_auth": false,
+  "review_status": "approved",
+  "gates": {
+    "hazard_scan": {
+      "exit_code": 0,
+      "summary": "51 files scanned, 0 findings",
+      "recorded_at": "2026-11-08T21:58:37+00:00"
+    },
+    "assertless_scan": {
+      "exit_code": 0,
+      "summary": "226 test functions scanned, 0 findings",
+      "recorded_at": "2026-11-08T21:58:44+00:00"
+    },
+    "a11y_scan": {
+      "exit_code": 0,
+      "summary": "0 findings across all templates and frontend files",
+      "recorded_at": "2026-11-08T21:58:51+00:00"
+    },
+    "spec_drift": {
+      "exit_code": 0,
+      "summary": "conforme com escopo declarado e spec hash 9e56d2ec5b38332a7f49c897467295288e7238a7c86488820dc4938baec785bc",
+      "recorded_at": "2026-11-08T22:35:49+00:00"
+    },
+    "contract_closure": {
+      "exit_code": 0,
+      "summary": "todas as 5 pontes de contrato fechadas bilateralmente",
+      "recorded_at": "2026-11-08T21:58:58+00:00"
+    },
+    "audit_ledger": {
+      "exit_code": 0,
+      "summary": "4 comandos auditados, 394 testes descobertos, cadeia de hashes integra",
+      "recorded_at": "2026-11-08T22:37:58+00:00"
+    },
+    "full_unit_and_e2e_tests": {
+      "exit_code": 0,
+      "summary": "226/226 testes unitarios e e2e aprovados em 103s via henke exec",
+      "recorded_at": "2026-11-08T22:37:41+00:00"
+    }
+  },
+  "declared_scope": [
+    ".gitignore",
+    "TEST_READY.md",
+    "docs/BRIDGES.md",
+    "docs/designs/wave6_production_expansions.md",
+    "scripts/audit_ledger.py",
+    "scripts/gate_cache.py",
+    "scripts/henke_cli.py",
+    "scripts/install_hook.py",
+    "scripts/mission_classifier.py",
+    "scripts/process_runner.py",
+    "scripts/report_generator.py",
+    "scripts/run_state.py",
+    "scripts/metricas/mutant_hunt.py",
+    "tests/test_gate_cache.py",
+    "tests/test_install_hook.py",
+    "tests/test_mission_classifier.py",
+    "tests/test_process_runner.py",
+    "tests/test_report.py",
+    "tests/e2e/__init__.py",
+    "tests/e2e/e2e_common.py",
+    "tests/e2e/test_wave6_e2e_tier1.py",
+    "tests/e2e/test_wave6_e2e_tier2.py",
+    "tests/e2e/test_wave6_e2e_tier3.py",
+    "tests/e2e/test_wave6_e2e_tier4.py"
+  ]
+}

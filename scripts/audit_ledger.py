@@ -122,28 +122,32 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
             errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: stdout_sha256 inválido na linha {idx} de '{log_p.name}'.")
             continue
 
-        if idx > 1 and last_ehash and prev_r and prev_r != last_ehash:
-            errors.append(
-                f"UNVERIFIED_EXECUTION_EVIDENCE: quebra de encadeamento prev_hash na linha {idx} de '{log_p.name}'."
-            )
+        if not ehash_r:
+            errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: linha {idx} de '{log_p.name}' sem entry_hash obrigatório.")
             continue
 
-        if ehash_r:
-            cand_pipe = hashlib.sha256(
-                f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{sha_r}".encode("utf-8")
-            ).hexdigest()
-            body_no_ehash = {k: v for k, v in rec.items() if k != "entry_hash"}
-            cand_json1 = hashlib.sha256(
-                json.dumps(body_no_ehash, sort_keys=True, ensure_ascii=False).encode("utf-8")
-            ).hexdigest()
-            cand_json2 = hashlib.sha256(
-                json.dumps(body_no_ehash, sort_keys=True).encode("utf-8")
-            ).hexdigest()
-            if ehash_r not in (cand_pipe, cand_json1, cand_json2):
+        if idx > 1 and last_ehash:
+            if not prev_r or prev_r != last_ehash:
                 errors.append(
-                    f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash adulterado na linha {idx} de '{log_p.name}'."
+                    f"UNVERIFIED_EXECUTION_EVIDENCE: quebra de encadeamento prev_hash na linha {idx} de '{log_p.name}'."
                 )
                 continue
+
+        cand_pipe = hashlib.sha256(
+            f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{sha_r}".encode("utf-8")
+        ).hexdigest()
+        body_no_ehash = {k: v for k, v in rec.items() if k != "entry_hash"}
+        cand_json1 = hashlib.sha256(
+            json.dumps(body_no_ehash, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        cand_json2 = hashlib.sha256(
+            json.dumps(body_no_ehash, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if ehash_r not in (cand_pipe, cand_json1, cand_json2):
+            errors.append(
+                f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash adulterado na linha {idx} de '{log_p.name}'."
+            )
+            continue
 
         last_ehash = ehash_r
         verified_records.append({

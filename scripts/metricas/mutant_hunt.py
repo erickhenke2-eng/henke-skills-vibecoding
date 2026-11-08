@@ -24,6 +24,12 @@ import shlex
 import subprocess
 import sys
 
+SUITE_ROOT = Path(__file__).resolve().parents[2]
+if str(SUITE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SUITE_ROOT))
+
+from scripts.process_runner import run_process
+
 for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
         try:
@@ -164,26 +170,18 @@ def run_mutant_hunt(
         for lineno, desc, mutated_src in mutants:
             try:
                 t.write_bytes((mutated_src + "\n").encode("utf-8"))
-                try:
-                    res = subprocess.run(
-                        test_cmd,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        timeout=timeout_sec,
-                    )
-                    if res.returncode != 0:
-                        killed += 1
-                    else:
-                        survivors.append({
-                            "line": lineno,
-                            "mutation": desc,
-                            "status": "survived",
-                        })
-                except subprocess.TimeoutExpired:
-                    # Timeout infinito causado pela mutação conta como mutante detectado/morto
+                res = run_process(
+                    test_cmd,
+                    timeout_sec=timeout_sec,
+                )
+                if res.returncode != 0 or res.timed_out:
                     killed += 1
+                else:
+                    survivors.append({
+                        "line": lineno,
+                        "mutation": desc,
+                        "status": "survived",
+                    })
             finally:
                 t.write_bytes(original_bytes)
     finally:

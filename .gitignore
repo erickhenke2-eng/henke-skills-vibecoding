@@ -14,5 +14,8 @@ dist/
 build/
 .agents/
 
-# Preferências pessoais do harness
+# Preferências pessoais do harness e runtime local
 .henke/CONFIG.local.json
+.henke/cache/
+.henke/report.html
+.henke/.cache_secret
