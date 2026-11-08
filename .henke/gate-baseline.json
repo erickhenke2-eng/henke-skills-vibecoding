@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "captured_at": "2026-11-01T16:34:37.145497+00:00",
+  "captured_at": "2026-11-07T18:59:01.475535+00:00",
   "toplevel": "F:/DEV/ACTIVE/henke-skills",
   "branch": "main",
-  "head": "19e781a782e53e62c6662c989dcc97a454ef5a74",
+  "head": "36f89c5b71724eb1828b73ed591e92e0c33cab36",
   "dirty": {},
   "staged": {
     ".devcontainer/devcontainer.json": "934e8d7486adef00faa0b464af33a414e6ed4308",
@@ -14,7 +14,7 @@
     ".henke/DECISOES.md": "feafb22070aeaf9a6003e5c9c8adf697363053eb",
     ".henke/DIARIO.md": "fd1a87726b4eff52424a5cc8f2aac0f149b49c5e",
     ".henke/MAPA.md": "1a1da9fd109cdd43d4b430dbba0ce53bcea724ae",
-    ".henke/gate-baseline.json": "0394b7bb5b242a274d512f6f21ccded06000b800",
+    ".henke/gate-baseline.json": "e5985bcfd20f364d2e01538bf3c2db3140710fb6",
     "AGENTS.md": "e7d21ce55407681fcf6e16eaf4540c66f4c9876b",
     "LICENSE": "67236092b97c79f89621e81537d128922dee0912",
     "PROTOCOLO.md": "3b65f068a95f07868c9a7c4b155ca9625a787152",

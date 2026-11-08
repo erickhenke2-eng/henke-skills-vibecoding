@@ -49,6 +49,8 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
             pass
 
 _HERE = Path(__file__).resolve().parent
+_SUITE_ROOT = Path(__file__).resolve().parents[2]
+_SUITE_MANIFEST = _SUITE_ROOT / "evals" / "hazard_fixtures_manifest.json"
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 import polyglot as _pg  # noqa: E402
@@ -59,6 +61,7 @@ CONFIG_PATTERNS = (
     "*.tf", "*.tfvars", "Dockerfile*", "docker-compose*.yml", "docker-compose*.yaml",
     "serverless.yml", "serverless.yaml", "wrangler.toml", "cloudbuild.yml", "cloudbuild.yaml",
     "Pulumi.yml", "Pulumi.yaml", "*policy*.json", "iam*.json", "*bucket*.json", "firebase.json",
+    ".gitlab-ci.yml",
 )
 _EXCLUDED_JSON_NAMES = {"package.json", "package-lock.json", "tsconfig.json", "jsconfig.json"}
 SKIP_DIRS = {
@@ -68,11 +71,23 @@ SKIP_DIRS = {
 }
 
 
+def _is_ci_workflow(path: Path) -> bool:
+    posix_low = "/" + path.as_posix().replace("\\", "/").lower().lstrip("/")
+    if "/.github/workflows/" in posix_low and posix_low.endswith((".yml", ".yaml")):
+        return True
+    return path.name.lower() == ".gitlab-ci.yml"
+
+
 def _is_config_file(path: Path) -> bool:
     name_low = path.name.lower()
     if name_low in _EXCLUDED_JSON_NAMES:
         return False
+    if _is_ci_workflow(path):
+        return True
     return any(fnmatch.fnmatch(name_low, pat.lower()) for pat in CONFIG_PATTERNS)
+
+
+_is_config_surface = _is_config_file
 
 # Regras de Pass 2 (strings preservadas, comentários removidos)
 _SECRET_PATTERNS = (
@@ -113,6 +128,7 @@ _FILE_SINK_RE = re.compile(r"\b(?:readFileSync|readFile|writeFileSync|writeFile|
 _EXT_SOURCE_RE = re.compile(r"\b(?:req|request|params|query|userPath|inputPath|filePathFromUser)\b")
 _PATH_SAFE_RE = re.compile(r"\b(?:resolve|normalize|basename|relpath|is_relative_to|safe_join|safe_member)\b")
 _UNBOUNDED_CONC_RE = re.compile(r"\b(?:Promise\.all|asyncio\.gather)\s*\(")
+_PROMISE_ALL_RE = _UNBOUNDED_CONC_RE
 _HEAVY_EXEC_RE = re.compile(r"\b(?:spawn|exec|execFile|subprocess|ffmpeg|ffprobe|runGpu)\b")
 _SEMAPHORE_RE = re.compile(r"\b(?:pLimit|p-limit|Semaphore|BoundedSemaphore|Bottleneck|runGpuBounded|maxConcurrency)\b")
 _UNSAFE_DESER_RE = re.compile(r"(?<![.\w$])eval\s*\(|\bnew\s+Function\s*\(|\bpickle\.loads?\s*\(|\byaml\.load\s*\(")
@@ -130,7 +146,14 @@ _CLOUD_BUCKET_PUB_RE = re.compile(
 _CLOUD_SA_TYPE_RE = re.compile(r'"type"\s*:\s*"service_account"')
 _DOCKER_ESC_RE = re.compile(r"(?m)\bprivileged\s*:\s*true\b|--privileged\b|/var/run/docker\.sock\b")
 _IMDS_HOST_RE = re.compile(r"\b(?:169\.254\.169\.254|metadata\.google\.internal)\b")
+_IMDS_V1_RE = _IMDS_HOST_RE
 _IMDS_SAFE_RE = re.compile(r"(?i)\b(?:X-aws-ec2-metadata-token|Metadata-Flavor)\b")
+
+# Regras Wave 5: Workflows de CI/CD (.github/workflows/*.y*ml, .gitlab-ci.yml)
+_CI_PRT_RE = re.compile(r"\bpull_request_target\b")
+_CI_PR_HEAD_RE = re.compile(r"\bgithub\.event\.pull_request\.head\b|\brefs/pull/")
+_CI_CURL_PIPE_RE = re.compile(r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba)?sh\b")
+_CI_SECRET_ECHO_RE = re.compile(r"\becho\s+[^\n]*\$\{\{\s*secrets\.")
 
 _CORS_WILD_ORIGIN_RE = re.compile(
     r"""(?i)(?:Access-Control-Allow-Origin['"\s:,]+\*|\borigin\s*:\s*['"]\*['"]|\ballow_origins\s*=\s*\[\s*['"]\*['"]\s*\])"""
@@ -247,27 +270,107 @@ def _strip_hash_comments(raw: str) -> str:
 _MANIFEST_CACHE: dict[str, set[tuple[str, str]]] = {}
 
 
-def _get_manifest_exemptions(file_path: Path) -> set[tuple[str, str]]:
-    """Carrega {(rel_file_posix, rule)} de evals/hazard_fixtures_manifest.json se existir."""
-    cur = file_path.resolve()
-    for parent in [cur.parent] + list(cur.parents):
-        m_path = parent / "evals" / "hazard_fixtures_manifest.json"
-        if m_path.is_file():
-            key = str(m_path)
-            if key not in _MANIFEST_CACHE:
-                try:
-                    data = json.loads(m_path.read_text(encoding="utf-8"))
-                    exempts = set()
-                    for item in data if isinstance(data, list) else []:
-                        f = item.get("file", "").replace("\\", "/").strip()
-                        r = item.get("rule", "").strip()
-                        if f and r:
-                            exempts.add((f, r))
-                    _MANIFEST_CACHE[key] = exempts
-                except Exception:
-                    _MANIFEST_CACHE[key] = set()
-            return _MANIFEST_CACHE[key]
-    return set()
+def _load_manifest_pairs(m_path: Path) -> set[tuple[str, str]]:
+    key = str(m_path)
+    if key not in _MANIFEST_CACHE:
+        try:
+            data = json.loads(m_path.read_text(encoding="utf-8"))
+            exempts = set()
+            for item in data if isinstance(data, list) else []:
+                f = item.get("file", "").replace("\\", "/").strip()
+                r = item.get("rule", "").strip()
+                if f and r:
+                    exempts.add((f, r))
+            _MANIFEST_CACHE[key] = exempts
+        except Exception:
+            _MANIFEST_CACHE[key] = set()
+    return _MANIFEST_CACHE[key]
+
+
+def _get_manifest_exemptions(file_path: Path, fixtures_manifest: Path | None = None) -> set[str]:
+    """Retorna {rule} de isenções válidas para `file_path`.
+    Nunca sobe diretórios pais de repositórios externos arbitrários: só honra `_SUITE_MANIFEST`
+    quando `file_path` pertence a `_SUITE_ROOT`, ou `fixtures_manifest` passado explicitamente,
+    exigindo igualdade exata do caminho relativo POSIX."""
+    p_res = file_path.resolve()
+    if fixtures_manifest is not None:
+        m_path = Path(fixtures_manifest).resolve()
+        if not m_path.is_file():
+            return set()
+        roots = [m_path.parent.parent, m_path.parent] if m_path.parent.name == "evals" else [m_path.parent, m_path.parent.parent]
+    elif p_res.is_relative_to(_SUITE_ROOT) and _SUITE_MANIFEST.is_file():
+        m_path = _SUITE_MANIFEST
+        roots = [_SUITE_ROOT]
+    else:
+        return set()
+
+    pairs = _load_manifest_pairs(m_path)
+    if not pairs:
+        return set()
+
+    rel_candidates: set[str] = set()
+    for root in roots:
+        if p_res.is_relative_to(root):
+            rel_candidates.add(p_res.relative_to(root).as_posix())
+
+    exempt_rules: set[str] = set()
+    for f_name, rule in pairs:
+        if f_name in rel_candidates:
+            exempt_rules.add(rule)
+    return exempt_rules
+
+
+def _scan_config_file(path: Path, no_comments: str, suppressed: dict[int, set[str]], add) -> None:
+    nc_lines = no_comments.splitlines()
+    for m in _CLOUD_IAM_WILDCARD_RE.finditer(no_comments):
+        lineno = no_comments.count("\n", 0, m.start()) + 1
+        tok = m.group(0)
+        if "roles/" in tok:
+            add("CLOUD-IAM-WILDCARD", lineno, f"line:{lineno}", f"over-permissive GCP IAM role ({tok.strip()})")
+        else:
+            win = "\n".join(nc_lines[max(0, lineno - 10):min(len(nc_lines), lineno + 10)])
+            if re.search(r'(?i)\bAllow\b', win) and not re.search(r'(?i)"?Effect"?\s*[:=]\s*["\']Deny["\']', win):
+                add("CLOUD-IAM-WILDCARD", lineno, f"line:{lineno}", "wildcard IAM Action '*' with Effect Allow")
+
+    for m in _CLOUD_BUCKET_PUB_RE.finditer(no_comments):
+        lineno = no_comments.count("\n", 0, m.start()) + 1
+        add("CLOUD-BUCKET-PUBLIC", lineno, f"line:{lineno}", f"public cloud storage exposure ({m.group(0).strip()})")
+
+    if _CLOUD_SA_TYPE_RE.search(no_comments) and '"private_key"' in no_comments:
+        m_sa = _CLOUD_SA_TYPE_RE.search(no_comments)
+        lineno = no_comments.count("\n", 0, m_sa.start()) + 1 if m_sa else 1
+        add("CLOUD-SECRET-MATERIAL", lineno, "service_account", "GCP service_account JSON with private_key material")
+
+    for m in _DOCKER_ESC_RE.finditer(no_comments):
+        lineno = no_comments.count("\n", 0, m.start()) + 1
+        add("DOCKER-ESCALATED", lineno, f"line:{lineno}", f"escalated container privilege or docker.sock mount ({m.group(0).strip()})")
+
+    if _is_ci_workflow(path):
+        m_prt = _CI_PRT_RE.search(no_comments)
+        m_head = _CI_PR_HEAD_RE.search(no_comments)
+        if m_prt and m_head:
+            ln_prt = no_comments.count("\n", 0, m_prt.start()) + 1
+            ln_head = no_comments.count("\n", 0, m_head.start()) + 1
+            if not _is_suppressed(suppressed, ln_prt, "CI-PWN-REQUEST"):
+                add("CI-PWN-REQUEST", ln_head, f"line:{ln_head}", "pull_request_target combined with untrusted PR head checkout")
+
+        for m in _CI_CURL_PIPE_RE.finditer(no_comments):
+            lineno = no_comments.count("\n", 0, m.start()) + 1
+            block = "\n".join(nc_lines[max(0, lineno - 1):min(len(nc_lines), lineno + 2)])
+            if "sha256" not in block.lower():
+                add("CI-CURL-PIPE-SH", lineno, f"line:{lineno}", "unverified curl/wget pipe to shell in CI workflow")
+
+        for m in _CI_SECRET_ECHO_RE.finditer(no_comments):
+            lineno = no_comments.count("\n", 0, m.start()) + 1
+            add("CI-SECRET-ECHO", lineno, f"line:{lineno}", "CI secret directly echoed to workflow log")
+
+
+def _stmt_end_offset(text: str, pos: int) -> int:
+    """Retorna o fim da instrução atual (primeiro ';' ou fim da linha após `pos`)."""
+    nl = text.find("\n", pos)
+    line_end = len(text) if nl == -1 else nl
+    semi = text.find(";", pos, line_end)
+    return semi if semi != -1 else line_end
 
 
 DIST_EXTS = {".js", ".mjs", ".cjs", ".map", ".html", ".json"}
@@ -275,7 +378,9 @@ DIST_MAX_FILE_BYTES = 8 * 1024 * 1024
 
 
 def scan_file(path: Path, extra_exts: set | None = None,
-              max_bytes: int = MAX_FILE_BYTES) -> tuple[int, list[tuple[str, str, str, str]], bool]:
+              max_bytes: int = MAX_FILE_BYTES,
+              legacy_file_scope: bool = False,
+              fixtures_manifest: Path | None = None) -> tuple[int, list[tuple[str, str, str, str]], bool]:
     """Escaneia um arquivo de código ou manifesto IaC/Cloud. Retorna (1 se escaneado, findings, skipped_oversize)."""
     ext = path.suffix.lower()
     is_cfg = _is_config_file(path)
@@ -300,18 +405,10 @@ def scan_file(path: Path, extra_exts: set | None = None,
 
     path_str = str(path)
     suppressed, findings = _extract_suppressions(raw, path_str, ext)
-
-    path_resolved_posix = path.resolve().as_posix()
-    manifest_exemptions = _get_manifest_exemptions(path)
-    rel_posix = None
-    if manifest_exemptions:
-        for f_name, _ in manifest_exemptions:
-            if path_resolved_posix.endswith(f_name):
-                rel_posix = f_name
-                break
+    exempt_rules = _get_manifest_exemptions(path, fixtures_manifest=fixtures_manifest)
 
     def add(rule: str, line_no: int, scope: str, msg: str) -> None:
-        if rel_posix and (rel_posix, rule) in manifest_exemptions:
+        if rule in exempt_rules:
             return
         if not _is_suppressed(suppressed, line_no, rule):
             findings.append((rule, f"{path_str}:{line_no}", scope, msg))
@@ -339,32 +436,9 @@ def scan_file(path: Path, extra_exts: set | None = None,
         lineno = no_comments.count("\n", 0, m.start()) + 1
         add("URL-CRED", lineno, host, "credentials embedded in URL")
 
-    # Regras Multi-Cloud / IaC (aplicadas em arquivos de config/IaC e também em código inline)
+    # Regras Multi-Cloud / IaC / CI Workflows
     if is_cfg:
-        nc_lines = no_comments.splitlines()
-        for m in _CLOUD_IAM_WILDCARD_RE.finditer(no_comments):
-            lineno = no_comments.count("\n", 0, m.start()) + 1
-            tok = m.group(0)
-            if "roles/" in tok:
-                add("CLOUD-IAM-WILDCARD", lineno, f"line:{lineno}", f"over-permissive GCP IAM role ({tok.strip()})")
-            else:
-                win = "\n".join(nc_lines[max(0, lineno - 10):min(len(nc_lines), lineno + 10)])
-                if re.search(r'(?i)\bAllow\b', win) and not re.search(r'(?i)"?Effect"?\s*[:=]\s*["\']Deny["\']', win):
-                    add("CLOUD-IAM-WILDCARD", lineno, f"line:{lineno}", "wildcard IAM Action '*' with Effect Allow")
-
-        for m in _CLOUD_BUCKET_PUB_RE.finditer(no_comments):
-            lineno = no_comments.count("\n", 0, m.start()) + 1
-            add("CLOUD-BUCKET-PUBLIC", lineno, f"line:{lineno}", f"public cloud storage exposure ({m.group(0).strip()})")
-
-        if _CLOUD_SA_TYPE_RE.search(no_comments) and '"private_key"' in no_comments:
-            m_sa = _CLOUD_SA_TYPE_RE.search(no_comments)
-            lineno = no_comments.count("\n", 0, m_sa.start()) + 1 if m_sa else 1
-            add("CLOUD-SECRET-MATERIAL", lineno, "service_account", "GCP service_account JSON with private_key material")
-
-        for m in _DOCKER_ESC_RE.finditer(no_comments):
-            lineno = no_comments.count("\n", 0, m.start()) + 1
-            add("DOCKER-ESCALATED", lineno, f"line:{lineno}", f"escalated container privilege or docker.sock mount ({m.group(0).strip()})")
-
+        _scan_config_file(path, no_comments, suppressed, add)
         return 1, findings, False
 
     sql_pats = (_SQL_INTERP_PY_RE, _SQL_CONCAT_RE) if ext == ".py" else (_SQL_INTERP_JS_RE, _SQL_CONCAT_RE, _SQL_SPRINTF_RE)
@@ -373,10 +447,11 @@ def scan_file(path: Path, extra_exts: set | None = None,
             lineno = no_comments.count("\n", 0, m.start()) + 1
             add("SQL-CONCAT", lineno, f"line:{lineno}", "SQL query built via string interpolation/concatenation")
 
-    if not _IMDS_SAFE_RE.search(no_comments):
-        for m in _IMDS_HOST_RE.finditer(no_comments):
-            lineno = no_comments.count("\n", 0, m.start()) + 1
-            add("IMDS-V1", lineno, m.group(0), "cloud metadata endpoint accessed without IMDSv2 token/Metadata-Flavor header")
+    if legacy_file_scope:
+        if not _IMDS_SAFE_RE.search(no_comments):
+            for m in _IMDS_HOST_RE.finditer(no_comments):
+                lineno = no_comments.count("\n", 0, m.start()) + 1
+                add("IMDS-V1", lineno, m.group(0), "cloud metadata endpoint accessed without IMDSv2 token/Metadata-Flavor header")
 
     if _CORS_WILD_ORIGIN_RE.search(no_comments) and _CORS_CRED_TRUE_RE.search(no_comments):
         m_cors = _CORS_WILD_ORIGIN_RE.search(no_comments)
@@ -421,29 +496,32 @@ def scan_file(path: Path, extra_exts: set | None = None,
                 continue
         add("UNSAFE-DESERIALIZE", lineno, f"line:{lineno}", f"unsafe code/data deserialization ({tok.strip()})")
 
-    if not _SANITIZER_RE.search(raw):
-        for m in _XSS_HTML_RE.finditer(no_comments):
-            lineno = no_comments.count("\n", 0, m.start()) + 1
-            add("XSS-RAW-HTML", lineno, f"line:{lineno}", f"untrusted raw HTML injection ({m.group(0).strip()})")
-
     for m in _ELECTRON_INSEC_RE.finditer(masked):
         lineno = masked.count("\n", 0, m.start()) + 1
         add("ELECTRON-INSECURE-CONFIG", lineno, f"line:{lineno}", f"insecure Electron webPreferences ({m.group(0).strip()})")
 
-    if not _SEMAPHORE_RE.search(raw):
-        for m in _UNBOUNDED_CONC_RE.finditer(masked):
-            open_p = masked.find("(", m.start())
-            close_p = _pg._paren_end(masked, open_p) if open_p != -1 else -1
-            span = masked[open_p:close_p + 1] if close_p != -1 else masked[m.start():m.start() + 200]
-            if _HEAVY_EXEC_RE.search(span):
+    if legacy_file_scope:
+        if not _SANITIZER_RE.search(no_comments):
+            for m in _XSS_HTML_RE.finditer(masked):
                 lineno = masked.count("\n", 0, m.start()) + 1
-                add("UNBOUNDED-CONCURRENCY", lineno, f"line:{lineno}", "unbounded Promise.all/asyncio.gather spawning heavy process without semaphore")
+                add("XSS-RAW-HTML", lineno, f"line:{lineno}", f"untrusted raw HTML injection ({m.group(0).strip()})")
 
-    # Escopo intraprocedural por função e código top-level (WEAK-CRYPTO, PATH-TRAVERSAL, SSRF, JWT, IDOR)
+        if not _SEMAPHORE_RE.search(no_comments):
+            for m in _UNBOUNDED_CONC_RE.finditer(masked):
+                open_p = masked.find("(", m.start())
+                close_p = _pg._paren_end(masked, open_p) if open_p != -1 else -1
+                span = masked[open_p:close_p + 1] if close_p != -1 else masked[m.start():m.start() + 200]
+                if _HEAVY_EXEC_RE.search(span):
+                    lineno = masked.count("\n", 0, m.start()) + 1
+                    add("UNBOUNDED-CONCURRENCY", lineno, f"line:{lineno}", "unbounded Promise.all/asyncio.gather spawning heavy process without semaphore")
+
+    # Escopo intraprocedural por função e código top-level
+    nc_lines_full = no_comments.splitlines(keepends=True)
     if ext == ".py":
         fn_iter = []
         py_lines = masked.splitlines(keepends=True)
         top_level_lines = list(py_lines)
+        top_level_nc_lines = list(nc_lines_full)
         for m in re.finditer(r"(?m)^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(", masked):
             fn_name = m.group(2)
             s_line = masked.count("\n", 0, m.start()) + 1
@@ -458,27 +536,67 @@ def scan_file(path: Path, extra_exts: set | None = None,
                     break
                 e_line = l_idx + 1
             fn_body = "".join(py_lines[s_line - 1:e_line])
-            fn_iter.append((fn_name, s_line, e_line, fn_body))
+            fn_body_nc = "".join(nc_lines_full[s_line - 1:e_line])
+            fn_iter.append((fn_name, s_line, e_line, fn_body, fn_body_nc))
             for l_idx in range(s_line - 1, min(e_line, len(top_level_lines))):
-                top_level_lines[l_idx] = "\n" if py_lines[l_idx].endswith("\n") else ""
+                nl = "\n" if py_lines[l_idx].endswith("\n") else ""
+                top_level_lines[l_idx] = nl
+                if l_idx < len(top_level_nc_lines):
+                    top_level_nc_lines[l_idx] = nl
         top_level_body = "".join(top_level_lines)
-        if top_level_body.strip():
-            fn_iter.append(("<top-level>", 1, len(py_lines), top_level_body))
+        top_level_nc_body = "".join(top_level_nc_lines)
+        if top_level_body.strip() or top_level_nc_body.strip():
+            fn_iter.append(("<top-level>", 1, len(py_lines), top_level_body, top_level_nc_body))
     else:
         fn_raw_iter = list(_pg.find_functions(raw, ext))
         c_lines = masked.splitlines(keepends=True)
         fn_iter = []
         top_level_lines = list(c_lines)
+        top_level_nc_lines = list(nc_lines_full)
         for fn_name, sl, el, _ in fn_raw_iter:
             fn_body = "".join(c_lines[sl - 1:el])
-            fn_iter.append((fn_name, sl, el, fn_body))
+            fn_body_nc = "".join(nc_lines_full[sl - 1:el])
+            fn_iter.append((fn_name, sl, el, fn_body, fn_body_nc))
             for l_idx in range(max(0, sl - 1), min(el, len(top_level_lines))):
-                top_level_lines[l_idx] = "\n" if c_lines[l_idx].endswith("\n") else ""
+                nl = "\n" if c_lines[l_idx].endswith("\n") else ""
+                top_level_lines[l_idx] = nl
+                if l_idx < len(top_level_nc_lines):
+                    top_level_nc_lines[l_idx] = nl
         top_level_body = "".join(top_level_lines)
-        if top_level_body.strip():
-            fn_iter.append(("<top-level>", 1, len(c_lines), top_level_body))
+        top_level_nc_body = "".join(top_level_nc_lines)
+        if top_level_body.strip() or top_level_nc_body.strip():
+            fn_iter.append(("<top-level>", 1, len(c_lines), top_level_body, top_level_nc_body))
 
-    for fn_name, sl, _el, fn_body in fn_iter:
+    for fn_name, sl, _el, fn_body, fn_body_nc in fn_iter:
+        if not legacy_file_scope:
+            for m_xss in _XSS_HTML_RE.finditer(fn_body):
+                rel_line = fn_body.count("\n", 0, m_xss.start()) + 1
+                line_hit = sl + rel_line - 1
+                stmt_end = _stmt_end_offset(fn_body, m_xss.end())
+                fn_nc_upto = fn_body_nc[:stmt_end]
+                if not _SANITIZER_RE.search(fn_nc_upto):
+                    add("XSS-RAW-HTML", line_hit, fn_name, f"untrusted raw HTML injection ({m_xss.group(0).strip()})")
+
+            for m_uc in _UNBOUNDED_CONC_RE.finditer(fn_body):
+                open_p = fn_body.find("(", m_uc.start())
+                close_p = _pg._paren_end(fn_body, open_p) if open_p != -1 else -1
+                span = fn_body[open_p:close_p + 1] if close_p != -1 else fn_body[m_uc.start():m_uc.start() + 200]
+                if _HEAVY_EXEC_RE.search(span):
+                    rel_line = fn_body.count("\n", 0, m_uc.start()) + 1
+                    line_hit = sl + rel_line - 1
+                    stmt_end = close_p + 1 if close_p != -1 else _stmt_end_offset(fn_body, m_uc.end())
+                    fn_nc_upto = fn_body_nc[:stmt_end]
+                    has_sem = bool(_SEMAPHORE_RE.search(fn_nc_upto)) or (
+                        fn_name != "<top-level>" and bool(_SEMAPHORE_RE.search(top_level_nc_body))
+                    )
+                    if not has_sem:
+                        add("UNBOUNDED-CONCURRENCY", line_hit, fn_name, "unbounded Promise.all/asyncio.gather spawning heavy process without semaphore")
+
+            if not _IMDS_SAFE_RE.search(fn_body_nc):
+                for m_imds in _IMDS_HOST_RE.finditer(fn_body_nc):
+                    line_hit = sl + fn_body_nc.count("\n", 0, m_imds.start())
+                    add("IMDS-V1", line_hit, m_imds.group(0), "cloud metadata endpoint accessed without IMDSv2 token/Metadata-Flavor header")
+
         if _AUTH_TOKEN_WORDS_RE.search(fn_name + " " + fn_body):
             for m_wr in _WEAK_RAND_RE.finditer(fn_body):
                 line_hit = sl + fn_body.count("\n", 0, m_wr.start())
@@ -543,7 +661,9 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
     return out
 
 
-def scan_path(target: Path, dist_mode: bool = False) -> tuple[int, list[tuple[str, str, str, str]], int]:
+def scan_path(target: Path, dist_mode: bool = False,
+              legacy_file_scope: bool = False,
+              fixtures_manifest: Path | None = None) -> tuple[int, list[tuple[str, str, str, str]], int]:
     """Escaneia arquivo ou diretório. Retorna (files_scanned, findings, oversize_skipped).
     `dist_mode` amplia extensões para bundles compilados (.js/.mjs/.cjs/.map/.html/.json)
     e eleva o teto para 8MB por arquivo."""
@@ -551,7 +671,9 @@ def scan_path(target: Path, dist_mode: bool = False) -> tuple[int, list[tuple[st
         return 0, [], 0
     if target.is_file():
         sc, fnd, ov = scan_file(target, DIST_EXTS if dist_mode else None,
-                                DIST_MAX_FILE_BYTES if dist_mode else MAX_FILE_BYTES)
+                                DIST_MAX_FILE_BYTES if dist_mode else MAX_FILE_BYTES,
+                                legacy_file_scope=legacy_file_scope,
+                                fixtures_manifest=fixtures_manifest)
         return sc, fnd, (1 if ov else 0)
 
     total_scanned = 0
@@ -566,7 +688,9 @@ def scan_path(target: Path, dist_mode: bool = False) -> tuple[int, list[tuple[st
             if p.suffix.lower() not in SCAN_EXTS and not (dist_mode and p.suffix.lower() in DIST_EXTS) and not _is_config_file(p):
                 continue
             sc, fnd, ov = scan_file(p, DIST_EXTS if dist_mode else None,
-                                    DIST_MAX_FILE_BYTES if dist_mode else MAX_FILE_BYTES)
+                                    DIST_MAX_FILE_BYTES if dist_mode else MAX_FILE_BYTES,
+                                    legacy_file_scope=legacy_file_scope,
+                                    fixtures_manifest=fixtures_manifest)
             total_scanned += sc
             all_findings.extend(fnd)
             if ov:
@@ -578,7 +702,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Scanner poliglota de hazards de segurança e runtime.")
     ap.add_argument("paths", nargs="*", help="Arquivos ou diretórios a escanear")
     ap.add_argument("--dist", type=str, default=None,
-                        help="Re-escaneia diretório de build/bundle antes de PUBLISH (extensões de artefato, teto 8MB)")
+                    help="Re-escaneia diretório de build/bundle antes de PUBLISH (extensões de artefato, teto 8MB)")
+    ap.add_argument("--legacy-file-scope", action="store_true",
+                    help="Usa escopo legado de arquivo inteiro para XSS/UNBOUNDED-CONCURRENCY/IMDS")
+    ap.add_argument("--fixtures-manifest", type=Path, default=None,
+                    help="Caminho explícito para hazard_fixtures_manifest.json")
     ap.add_argument("--json", action="store_true", help="Emite saída em JSON")
     args = ap.parse_args()
 
@@ -598,7 +726,9 @@ def main() -> None:
         if not p.exists():
             print(f"ERRO: caminho inexistente: {raw_p}", file=sys.stderr)
             sys.exit(2)
-        sc, fnd, ov = scan_path(p, dist_mode=dist_mode)
+        sc, fnd, ov = scan_path(p, dist_mode=dist_mode,
+                                legacy_file_scope=args.legacy_file_scope,
+                                fixtures_manifest=args.fixtures_manifest)
         total_files += sc
         findings.extend(fnd)
         oversize += ov

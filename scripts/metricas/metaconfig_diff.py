@@ -4,8 +4,8 @@
 
 Portões auditam código-fonte, mas o pipeline real executa metaconfiguração:
 `package.json.scripts` (pretest/test/posttest/prepack/postinstall), manifests de
-dependências, `build.rs`, `conftest.py`, workflows e `.cargo/config`. Mutar esses
-arquivos entre a auditoria e o publish executa código nunca auditado.
+dependências, lockfiles, `build.rs`, `conftest.py`, workflows e `.cargo/config`.
+Mutar ou adicionar esses arquivos entre a auditoria e o publish executa código nunca auditado.
 
 Regra: qualquer mutação em metaconfiguração exige aprovação humana explícita —
 saída carrega `requires_human_auth: true`. Arquivo listado em `## 4. Escopo
@@ -48,23 +48,34 @@ _PKG_WATCHED_KEYS = (
 # Qualquer arquivo cujo diff inteiro é sensível (não há seção segura)
 _WHOLE_FILE_SENSITIVE = (
     "build.rs", "conftest.py", ".cargo/config", ".cargo/config.toml",
+    "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "poetry.lock", "uv.lock", "Cargo.lock", ".npmrc", "Makefile",
 )
+_WHOLE_FILE_BASENAMES = {
+    "build.rs", "conftest.py",
+    "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "poetry.lock", "uv.lock", "Cargo.lock",
+    ".npmrc", "Makefile", ".gitlab-ci.yml",
+}
 _WORKFLOW_DIR_RE = re.compile(r"(^|/|\\)\.github/workflows/[^/\\]+\.ya?ml$")
 
 
 def _is_protected(rel: str) -> str | None:
     """Classifica o path relativo; retorna o tipo de inspeção ou None."""
-    rel_n = rel.replace("\\", "/")
+    rel_n = rel.replace("\\", "/").lstrip("./")
     base = rel_n.rsplit("/", 1)[-1]
     if base == "package.json":
         return "package_json"
     if base in ("pyproject.toml", "Cargo.toml"):
         return "toml"
-    if rel_n in _WHOLE_FILE_SENSITIVE or base in ("build.rs", "conftest.py"):
+    if rel_n in _WHOLE_FILE_SENSITIVE or base in _WHOLE_FILE_BASENAMES:
         return "whole_file"
     if _WORKFLOW_DIR_RE.search(rel_n):
         return "whole_file"
     return None
+
+
+_is_metaconfig = _is_protected
 
 
 def _git(repo: Path, *args) -> subprocess.CompletedProcess:
@@ -75,21 +86,36 @@ def _git(repo: Path, *args) -> subprocess.CompletedProcess:
     )
 
 
-def _changed_protected_files(repo: Path, against: str) -> tuple[list[tuple[str, str]] | None, str | None]:
-    """Retorna [(status, rel)] para arquivos protegidos alterados, ou (None, erro)."""
+def _changed_protected_files(repo: Path, against: str) -> tuple[list[tuple[str, str, str]] | None, str | None]:
+    """Retorna [(status, rel, kind)] para arquivos protegidos alterados ou untracked, ou (None, erro)."""
     res = _git(repo, "diff", "--name-status", against, "--")
     if res.returncode != 0:
         return None, res.stderr.strip() or "git diff falhou"
-    changed = []
+    changed: list[tuple[str, str, str]] = []
+    seen_rels: set[str] = set()
     for line in res.stdout.splitlines():
         if not line.strip():
             continue
         parts = line.split("\t")
         status = parts[0].strip()
-        rel = parts[-1].strip()
+        rel = parts[-1].strip().strip('"').replace("\\", "/")
         kind = _is_protected(rel)
         if kind:
             changed.append((status, rel, kind))
+            seen_rels.add(rel)
+
+    # Captura arquivos untracked (??) como adições ('A')
+    res_untracked = _git(repo, "ls-files", "--others", "--exclude-standard")
+    if res_untracked.returncode == 0:
+        for line in res_untracked.stdout.splitlines():
+            rel = line.strip().strip('"').replace("\\", "/")
+            if not rel or rel in seen_rels:
+                continue
+            kind = _is_protected(rel)
+            if kind:
+                changed.append(("A", rel, kind))
+                seen_rels.add(rel)
+
     return changed, None
 
 
@@ -163,11 +189,12 @@ def _spec_declared(spec: Path | None) -> set[str]:
         return set()
 
 
-def check_metaconfig(repo: Path | str, against: str, spec: Path | str | None) -> tuple[list[str], bool]:
+def check_metaconfig(repo: Path | str, against: str, spec: Path | str | None = None) -> tuple[list[str], bool]:
     """Retorna (mutações_não_autorizadas, requires_human_auth)."""
     repo = Path(repo)
     spec_p = Path(spec) if spec else None
     declared = _spec_declared(spec_p)
+    declared_list = list(declared)
 
     changed, err = _changed_protected_files(repo, against)
     if changed is None:
@@ -176,13 +203,13 @@ def check_metaconfig(repo: Path | str, against: str, spec: Path | str | None) ->
     mutations: list[str] = []
     for status, rel, kind in changed:
         rel_n = rel.replace("\\", "/")
-        if rel_n in declared:
+        if rel_n in declared or (declared_list and _sd.is_path_in_scope(rel_n, declared_list)):
             continue
         if status.startswith("A"):
-            mutations.append(f"METACONFIG-MUTATION {rel_n}: arquivo protegido criado")
+            mutations.append(f"[A] {rel_n}: metaconfig alterado sem autorização na spec (METACONFIG-MUTATION)")
             continue
         if status.startswith("D"):
-            mutations.append(f"METACONFIG-MUTATION {rel_n}: arquivo protegido removido")
+            mutations.append(f"[D] {rel_n}: metaconfig removido sem autorização na spec (METACONFIG-MUTATION)")
             continue
         work = repo / rel
         new_text = work.read_text(encoding="utf-8", errors="replace") if work.is_file() else None
@@ -192,9 +219,9 @@ def check_metaconfig(repo: Path | str, against: str, spec: Path | str | None) ->
         elif kind == "toml":
             details = _diff_toml(old_text, new_text)
         else:
-            details = ["conteúdo alterado"]
+            details = ["metaconfig alterado sem autorização na spec"]
         for d in details:
-            mutations.append(f"METACONFIG-MUTATION {rel_n}: {d}")
+            mutations.append(f"METACONFIG-MUTATION [{status}] {rel_n}: {d}")
     return mutations, bool(mutations)
 
 

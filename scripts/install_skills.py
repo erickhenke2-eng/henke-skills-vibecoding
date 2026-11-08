@@ -23,6 +23,8 @@ def inventory(repo):
     editor debris are excluded so they never reach the user's machine.
     """
     files = [Path("PROTOCOLO.md")]
+    if (repo / "docs" / "designs" / "TEMPLATE.md").is_file():
+        files.append(Path("docs/designs/TEMPLATE.md"))
     for skill_dir in sorted(repo.glob("henke-*")):
         if not skill_dir.is_dir():
             continue
@@ -42,6 +44,8 @@ def inventory(repo):
         repo / "scripts" / "spec_drift.py",
         repo / "scripts" / "audit_ledger.py",
         repo / "scripts" / "henke_gate.py",
+        repo / "scripts" / "henke_cli.py",
+        repo / "scripts" / "run_state.py",
     ]
     for rel in sorted(repo.glob("scripts/metricas/*.py")) + root_gate_scripts:
         if rel.is_file():

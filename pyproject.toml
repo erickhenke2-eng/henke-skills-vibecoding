@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "henke-skills"
+version = "4.0.0"
+description = "Suíte Henke v4.0 — 58 Macro-Skills, Portões Mecânicos Determinísticos e CLI Global henke"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "PyYAML>=6.0.2",
+]
+
+[project.scripts]
+henke = "scripts.henke_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scripts*"]

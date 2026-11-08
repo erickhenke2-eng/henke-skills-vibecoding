@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Portão Mecânico de Spec Drift (PROTOCOLO v3.1.1, §3.1, §3.3 e §10).
+Portão Mecânico de Spec Drift (PROTOCOLO v4.0, §3.1, §3.3 e §10).
 Compara o diff real do Git contra o escopo declarado em docs/designs/<feature>.md
 e verifica a integridade do hash da especificação pós-aprovação.
 """
 import argparse
+import fnmatch
 import hashlib
-from pathlib import Path
+import json
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -15,6 +17,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
+
+_FORBIDDEN_WILDCARD_SCOPES = {"*", "**", "**/*", "./*", "./**", "/*", "/**"}
 
 
 def get_git_root(cwd: Path) -> Path:
@@ -45,23 +49,56 @@ def parse_declared_scope(spec_path: Path) -> list[str]:
 
     section_text = match.group(1)
     paths = []
-    # Encontra itens de lista: - `path/to/file` ou - path/to/file
+    # Encontra itens de lista: - `path/to/file`, `path/to/file::symbol` ou - path/to/file
     for line in section_text.splitlines():
         line = line.strip()
         if not line.startswith("-"):
             continue
         line_item = line.lstrip("-* ").strip()
-        # [HENKE-PATCH] múltiplos paths por bullet: - `a/x.py`, `b/y.py`, `c/z.py`
         code_matches = re.findall(r"`([^`]+)`", line_item)
-        candidates = ([c.split(":")[0].strip() for c in code_matches]
-                      if code_matches else [line_item.split(":")[0].strip()])
+        raw_items = code_matches if code_matches else [line_item]
+        candidates = [c.split("::")[0].split(":")[0].strip() for c in raw_items]
         for candidate in candidates:
             if candidate and not candidate.startswith("<!--"):
                 paths.append(candidate.replace("\\", "/"))
     return paths
 
 
-import json
+def parse_declared_symbols(spec_path: Path) -> list[tuple[str, str]]:
+    """Extrai pares (caminho, simbolo) para itens com '::' em '## 4. Escopo Declarado'."""
+    text = spec_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
+    if not match:
+        return []
+    symbols: list[tuple[str, str]] = []
+    for line in match.group(1).splitlines():
+        line = line.strip()
+        if not line.startswith("-"):
+            continue
+        line_item = line.lstrip("-* ").strip()
+        code_matches = re.findall(r"`([^`]+)`", line_item)
+        raw_items = code_matches if code_matches else [line_item]
+        for raw in raw_items:
+            if "::" in raw and not raw.strip().startswith("<!--"):
+                p_part, sym_part = raw.split("::", 1)
+                p_clean = p_part.strip().replace("\\", "/")
+                sym_clean = sym_part.split()[0].strip()
+                if p_clean and sym_clean:
+                    symbols.append((p_clean, sym_clean))
+    return symbols
+
+
+def discover_latest_spec(designs_dir: Path) -> Path | None:
+    """Descobre a spec mais recente em docs/designs/*.md ordenada por (mtime, name)."""
+    target_dir = designs_dir / "docs" / "designs" if (designs_dir / "docs" / "designs").is_dir() else designs_dir
+    if not target_dir.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in target_dir.glob("*.md") if p.is_file() and p.name != "TEMPLATE.md"),
+        key=lambda p: (p.stat().st_mtime, p.name),
+    )
+    return candidates[-1] if candidates else None
+
 
 def get_touched_files(git_root: Path, against: str | None = None, active_spec: Path | None = None) -> set[str]:
     """Obtém a lista de arquivos modificados e untracked no repositório."""
@@ -113,6 +150,7 @@ def get_touched_files(git_root: Path, against: str | None = None, active_spec: P
         ".henke/gate-baseline.json",
         ".henke/BASELINE.json",
         ".henke/LEDGER.json",
+        ".henke/exec_log.jsonl",
         ".henke/DIARIO.md",
         ".henke/DECISOES.md",
         ".henke/MAPA.md",
@@ -125,7 +163,9 @@ def get_touched_files(git_root: Path, against: str | None = None, active_spec: P
 
     clean_touched = set()
     for p in touched:
-        if p.startswith(".git/"):
+        if p.startswith(".git/") or p.startswith(".henke/runs/"):
+            continue
+        if p.startswith(".agents/") or p.startswith(".agents\\") or p == ".agents":
             continue
         if p in ignored_exact:
             continue
@@ -138,14 +178,22 @@ def is_path_in_scope(touched_file: str, declared_paths: list[str]) -> bool:
     norm_touched = touched_file.replace("\\", "/").strip("/")
     for decl in declared_paths:
         norm_decl = decl.replace("\\", "/").strip()
-        # Diretório declarado (termina em / ou /*): qualquer arquivo sob ele entra no escopo.
+        if norm_decl in _FORBIDDEN_WILDCARD_SCOPES:
+            continue
+        if norm_decl.endswith("/**"):
+            base = norm_decl[:-3].rstrip("/").strip("/")
+            if base and (norm_touched == base or norm_touched.startswith(base + "/")):
+                return True
+            continue
         if norm_decl.endswith("/*"):
-            base = norm_decl[:-2].rstrip("/")
-            if norm_touched == base or norm_touched.startswith(base + "/"):
+            base = norm_decl[:-2].rstrip("/").strip("/")
+            if base and (norm_touched == base or norm_touched.startswith(base + "/")):
                 return True
             continue
         norm_decl = norm_decl.strip("/")
         if norm_touched == norm_decl or norm_touched.startswith(norm_decl + "/"):
+            return True
+        if "*" in norm_decl and (fnmatch.fnmatch(norm_touched, norm_decl) or PurePosixPath(norm_touched).match(norm_decl)):
             return True
     return False
 
@@ -169,10 +217,15 @@ def check_spec_drift(
             f"Spec-hash alterado pós-aprovação! Esperado: {expected_hash}, Atual: {current_hash}. Aprovação invalidada."
         )
 
-    # 2. Parse do escopo declarado
+    # 2. Parse do escopo declarado e bloqueio de curinga irrestrito
     declared_scope = parse_declared_scope(spec_path)
     if not declared_scope:
         errors.append(f"Seção '## 4. Escopo Declarado' vazia ou ausente em '{spec_path.name}'.")
+    for decl in declared_scope:
+        if decl.strip() in _FORBIDDEN_WILDCARD_SCOPES:
+            errors.append(
+                f"WILDCARD-SCOPE-FORBIDDEN: escopo curinga irrestrito '{decl}' não é permitido na spec."
+            )
 
     if not git_root:
         git_root = get_git_root(spec_path.parent)
@@ -216,12 +269,9 @@ def main():
 
     spec_path = args.spec
     if not spec_path:
-        # Tenta auto-descobrir na pasta docs/designs
         designs_dir = git_root / "docs" / "designs"
-        candidates = sorted(p for p in designs_dir.glob("*.md") if p.is_file() and p.name != "TEMPLATE.md")
-        if candidates:
-            spec_path = candidates[-1]  # Mais recente
-        else:
+        spec_path = discover_latest_spec(designs_dir)
+        if not spec_path:
             sys.exit("ERRO: Nenhuma spec especificada via --spec e nenhuma encontrada em docs/designs/*.md")
 
     ok, errors = check_spec_drift(spec_path, expected_hash=args.expected_hash, against=args.against, git_root=git_root)

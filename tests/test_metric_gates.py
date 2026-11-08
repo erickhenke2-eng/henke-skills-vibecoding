@@ -19,6 +19,7 @@ SIGNALS = repo_root / "scripts" / "repo_signals.py"
 from evals.canaries_metricas import run_all_metric_canaries
 from scripts.repo_signals import complexity_py
 from scripts.henke_router import route_request
+from scripts.henke_cli import main as henke_cli_main
 import ast as _ast
 
 
@@ -238,6 +239,41 @@ class TestMetricGates(unittest.TestCase):
             self.assertTrue(ok, f"Fechamento deveria passar com comentário multiline: {errs}")
         finally:
             tf_p.unlink()
+
+    def test_wave5_spec_and_henke_cli_doctor(self):
+        spec_w5 = repo_root / "docs" / "designs" / "wave5-banca-consenso-v4.md"
+        code5, out5 = run(MET / "contract_closure.py", "--spec", spec_w5, "--repo", repo_root)
+        self.assertEqual(code5, 0, out5)
+        rc_doc = henke_cli_main(["doctor", "--repo", str(repo_root)])
+        self.assertEqual(rc_doc, 0)
+
+    def test_wave5_goldfish_cli_contracts(self):
+        import tempfile
+        from scripts.run_state import init_run, record_gate, main as run_state_main
+        from scripts.henke_gate import check_baseline, capture_baseline
+        from scripts.metricas.mutant_hunt import main as mutant_main
+        with tempfile.TemporaryDirectory() as tmp:
+            tp = Path(tmp)
+            rf = init_run(tp, "r-gf", mode="ANALISAR", archetype="SHERLOCK")
+            record_gate(rf, "hazard_scan", 0, "ok")
+            rc_ver = run_state_main(["verify", "--run", str(rf), "--json"])
+            self.assertEqual(rc_ver, 0)
+            mod = tp / "calc.py"
+            mod.write_text("def is_ok(x):\n    return x > 0\n", encoding="utf-8")
+            tst = tp / "t_calc.py"
+            tst.write_text(
+                f"import sys\nsys.path.insert(0, {str(tp)!r})\nfrom calc import is_ok\n"
+                "assert is_ok(1) is True\nassert is_ok(0) is False\nassert is_ok(-1) is False\n",
+                encoding="utf-8",
+            )
+            rc_mut = mutant_main([
+                "--target", str(mod), "--diff", "--min-kill-rate", "0.80",
+                "--test-cmd", f'"{sys.executable}" "{tst}"', "--json"
+            ])
+            self.assertEqual(rc_mut, 0)
+        base = capture_baseline(repo_root)
+        viols, _ = check_baseline(base, repo_root, ["*"], allow_commit=False)
+        self.assertTrue(any("WILDCARD-SCOPE-FORBIDDEN" in v for v in viols), viols)
 
 
 if __name__ == "__main__":

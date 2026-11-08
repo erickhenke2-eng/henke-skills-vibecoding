@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Portão mecânico de custódia de baseline (PROTOCOLO v3.1.1, §5 e §10).
+"""Portão mecânico de custódia de baseline (PROTOCOLO v4.0, §5 e §10).
 
 Uso:
   henke_gate.py baseline [--out CAMINHO]     — grava o baseline no início da tarefa
@@ -18,6 +18,13 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 from datetime import datetime, timezone
+
+for _s in (sys.stdout, sys.stderr, sys.stdin):
+    if hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 DEFAULT_BASELINE = ".henke/gate-baseline.json"
 
@@ -48,6 +55,8 @@ def dirty_state(cwd):
             continue
         status, raw = line[:2], line[3:]
         rel = raw.split(" -> ")[-1].strip('"')
+        if rel.startswith(".agents/") or rel.startswith(".agents\\") or rel == ".agents":
+            continue
         state[rel] = {"status": status, "hash": file_hash(Path(cwd) / rel)}
     return state
 
@@ -81,20 +90,35 @@ def capture_baseline(cwd):
 
 
 def in_scope(rel, patterns):
+    is_win = sys.platform.startswith("win")
     rel_norm = "/" + str(rel).replace("\\", "/").strip("/")
+    cmp_rel = rel_norm.lower() if is_win else rel_norm
     for pattern in patterns:
         pat_norm = "/" + str(pattern).replace("\\", "/").strip("/")
-        if PurePosixPath(rel_norm).match(pat_norm):
+        cmp_pat = pat_norm.lower() if is_win else pat_norm
+        if pat_norm.endswith("/**"):
+            parent = pat_norm[:-3]
+            cmp_parent = parent.lower() if is_win else parent
+            if cmp_rel == cmp_parent or cmp_rel.startswith(cmp_parent + "/"):
+                return True
+        if PurePosixPath(cmp_rel).match(cmp_pat):
             return True
         if pat_norm.endswith("/*"):
             parent = pat_norm[:-2]
-            if rel_norm.startswith(parent + "/") and "/" not in rel_norm[len(parent)+1:]:
+            cmp_parent = parent.lower() if is_win else parent
+            if cmp_rel.startswith(cmp_parent + "/") and "/" not in cmp_rel[len(cmp_parent) + 1:]:
                 return True
     return False
 
 
+_FORBIDDEN_WILDCARD_SCOPES = {"*", "**", "**/*", "./*", "./**", "/*", "/**"}
+
+
 def check_baseline(baseline, cwd, scope, allow_commit):
     violations, warnings = [], []
+    for pat in scope or []:
+        if str(pat).strip() in _FORBIDDEN_WILDCARD_SCOPES:
+            violations.append(f"WILDCARD-SCOPE-FORBIDDEN: escopo curinga proibido '{pat}'")
     top = git(cwd, "rev-parse", "--show-toplevel").stdout.strip()
     if Path(top).resolve() != Path(baseline["toplevel"]).resolve():
         violations.append(f"Worktree/toplevel diverge do baseline: '{top}' != '{baseline['toplevel']}'")
@@ -114,6 +138,8 @@ def check_baseline(baseline, cwd, scope, allow_commit):
         else:
             touched = git(cwd, "diff", "--name-only", baseline["head"], "HEAD").stdout.splitlines()
             for rel in touched:
+                if rel.startswith(".agents/") or rel.startswith(".agents\\") or rel == ".agents":
+                    continue
                 if rel != baseline_file_rel and not in_scope(rel, scope):
                     violations.append(f"Commit tocou arquivo fora do escopo declarado: {rel}")
 
@@ -150,6 +176,8 @@ def check_baseline(baseline, cwd, scope, allow_commit):
     for rel, now in current_dirty.items():
         if rel == baseline_file_rel:
             continue
+        if rel.startswith(".agents/") or rel.startswith(".agents\\") or rel == ".agents":
+            continue
         if rel not in baseline_dirty and not in_scope(rel, scope):
             violations.append(f"Mutação fora do escopo declarado: {rel} ('{now['status']}')")
     return violations, warnings
@@ -162,14 +190,16 @@ def main(argv=None):
     p_base.add_argument("--out", type=Path, default=None)
     p_base.add_argument("--force", action="store_true", help="Sobrescreve baseline existente")
     p_check = sub.add_parser("check", help="Compara o estado atual contra o baseline e o escopo")
+    p_check.add_argument("--repo", type=Path, default=Path("."), help="Raiz do repositório (default: .)")
     p_check.add_argument("--baseline", type=Path, default=None)
+    p_check.add_argument("--spec", type=Path, default=None, help="Spec de referência para escopo declarado")
     p_check.add_argument("--scope", nargs="*", default=[], metavar="GLOBO",
                          help="Padrões de path permitidos (ex.: 'scripts/*', 'tests/**', 'PROTOCOLO.md')")
     p_check.add_argument("--allow-commit", action="store_true",
                          help="Permite commits novos desde o baseline (descendentes, dentro do escopo)")
     args = parser.parse_args(argv)
 
-    cwd = Path.cwd()
+    cwd = Path(getattr(args, "repo", Path.cwd())).resolve()
     try:
         if args.command == "baseline":
             out = args.out or Path(git(cwd, "rev-parse", "--show-toplevel").stdout.strip()) / DEFAULT_BASELINE
@@ -188,7 +218,34 @@ def main(argv=None):
 
         baseline_path = args.baseline or Path(git(cwd, "rev-parse", "--show-toplevel").stdout.strip()) / DEFAULT_BASELINE
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
-        violations, warnings = check_baseline(baseline, cwd, args.scope, args.allow_commit)
+        scope = list(args.scope) if args.scope else []
+        spec_path = getattr(args, "spec", None)
+        if not scope and not spec_path:
+            try:
+                try:
+                    from scripts.spec_drift import discover_latest_spec
+                except ModuleNotFoundError:
+                    from spec_drift import discover_latest_spec
+                spec_path = discover_latest_spec(cwd)
+            except Exception:
+                spec_path = None
+        if spec_path and Path(spec_path).is_file():
+            try:
+                try:
+                    from scripts.spec_drift import parse_declared_scope
+                except ModuleNotFoundError:
+                    from spec_drift import parse_declared_scope
+                for pat in parse_declared_scope(Path(spec_path)):
+                    if pat not in scope:
+                        scope.append(pat)
+            except Exception:
+                pass
+        if ".henke/**" not in scope:
+            scope.append(".henke/**")
+        if ".agents/**" not in scope:
+            scope.append(".agents/**")
+
+        violations, warnings = check_baseline(baseline, cwd, scope, args.allow_commit)
         for warning in warnings:
             print(f"  [AVISO] {warning}")
         if violations:

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-henke_router.py — Roteador determinístico de catálogo da Suíte Henke (PROTOCOLO v3.4).
+henke_router.py — Roteador determinístico de catálogo da Suíte Henke (PROTOCOLO v4.0).
 
 Inspirado na disciplina do `nvidia-skill-finder` (NVIDIA/skills):
-- Lê os 53 `SKILL.md` como fonte única da verdade (`description`, `## 2. Ponto de Partida`
+- Lê os `SKILL.md` como fonte única da verdade (`description`, `## 2. Ponto de Partida`
   e `when_not` opcional no frontmatter).
 - Opera como veto de Modo (`ANALISAR` default sob ambiguidade/pergunta; `requires_human_auth`
   quando detecta vocabulário destrutivo ou `PUBLISH`).
@@ -38,6 +38,18 @@ def _norm(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
+def _has_signal(text: str, sig: str) -> bool:
+    """Verifica sinal com word-boundary para palavras simples, evitando colisões (check vs checklist)."""
+    sig_clean = sig.strip()
+    if not sig_clean:
+        return False
+    if re.fullmatch(r"[\w-]+", sig_clean):
+        return bool(re.search(r"\b" + re.escape(sig_clean) + r"\b", text))
+    prefix = r"\b" if sig_clean[0].isalnum() else ""
+    suffix = r"\b" if sig_clean[-1].isalnum() else ""
+    return bool(re.search(prefix + re.escape(sig_clean) + suffix, text))
+
+
 # Vocabulário destrutivo e PUBLISH (PROTOCOLO §1) — exige autorização humana explícita
 DESTRUCTIVE_SIGNALS = (
     "deleta", "deletar", "deleto", "deletamos", "delete", "exclui", "excluir",
@@ -47,11 +59,13 @@ DESTRUCTIVE_SIGNALS = (
     "force-push", "push --force", "force push", "push -f", "reset --hard",
     "hard reset", "rm -rf", "apaga o banco", "apagar o banco", "derruba",
 )
+_DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 
 PUBLISH_SIGNALS = (
     "deploy", "publica", "publicar", "producao", "production",
     "faxina", "limpa o repo", "apaga arquivos", "reversao", "reverte", "rollback",
 ) + DESTRUCTIVE_SIGNALS
+_PUBLISH_SIGNALS = PUBLISH_SIGNALS
 
 # Sinais interrogativos / somente-inspeção -> travam teto em ANALISAR
 INTERROGATIVE_PREFIXES = (
@@ -70,6 +84,7 @@ AUDIT_SIGNALS = (
     "audit", "review", "inspect", "check", "verify", "diagnose", "investigate",
     "find bug", "where is the error", "why is it failing", "vulnerability",
 )
+_AUDIT_SIGNALS = AUDIT_SIGNALS
 
 PLAN_SIGNALS = (
     "planeja", "plano", "spec", "mvp", "historias", "cartoes de tarefa",
@@ -78,16 +93,37 @@ PLAN_SIGNALS = (
     "plan", "roadmap", "user stories", "task cards", "user journey", "screen flow",
     "app idea", "market references", "folder architecture", "database model",
 )
+_PLAN_SIGNALS = PLAN_SIGNALS
 
 EXEC_SIGNALS = (
-    "implementa", "cria ", "construa", "corrige", "conserta", "edita",
-    "adiciona ", "refatora", "desmembra", "renomeia", "integra ", "protege ",
-    "prepara o projeto", "inicia o henke", "mudanca", "muda ", "alinha", "ajusta",
+    "implementa", "cria", "construa", "corrige", "conserta", "edita",
+    "adiciona", "refatora", "desmembra", "renomeia", "integra", "protege",
+    "prepara o projeto", "inicia o henke", "mudanca", "muda", "alinha", "ajusta",
     "atualiza", "aplica", "deleta", "deletar", "delete", "exclui", "excluir",
     "drop", "wipe", "truncate", "destroy", "purge",
     "implement", "create", "build", "fix", "patch", "edit", "add", "refactor",
     "split", "rename", "integrate", "protect", "update", "align", "adjust", "apply",
 )
+_EXEC_SIGNALS = EXEC_SIGNALS
+
+COMPOUND_FIX_VERBS = (
+    "corrige", "corrigir", "conserta", "consertar", "implementa", "implementar",
+    "fix", "patch", "refatora", "refatorar", "aplica", "aplicar",
+)
+
+UI_SIGNALS = (
+    "tela", "interface", "layout", "botao", "modal", "css", "tailwind",
+    "cores", "paleta", "tipografia", "fonte", "responsivo", "mobile",
+    "loading", "skeleton", "hover", "acessibilidade", "a11y", "contraste",
+)
+_UI_SIGNALS = UI_SIGNALS
+
+GENERIC_SINGLE_TRIGGERS = {
+    "audita", "auditar", "cria", "criar", "limpa", "limpar", "revisa", "revisar",
+    "testa", "testar", "arruma", "arrumar", "corrige", "corrigir", "ajusta", "ajustar",
+    "muda", "mudar", "adiciona", "adicionar", "verifica", "verificar", "checa", "checar",
+    "melhora", "melhorar", "organiza", "organizar", "explica", "explicar",
+}
 
 # Tabela declarativa de desambiguação negativa (padrão nvidia-skill-finder):
 # cada regra define um contexto léxico que NÃO deve acionar certas skills/domínios.
@@ -149,6 +185,21 @@ NEGATIVE_DISAMBIGUATION = (
         "when_matches": r"\b(\.env\b|variaveis de ambiente locais|dotenv|env\.example)\b",
         "exclude_skills": ("henke-arch-cloud",),
     },
+    {
+        "id": "mutation_testing_is_not_coverage_ledger",
+        "when_matches": r"\b(teste de mutacao|testes de mutacao|mutant_hunt|mutantes? sobreviventes?|kill rate|mata mutantes)\b",
+        "exclude_skills": ("henke-audit-cobertura", "henke-debug-sanidade"),
+    },
+    {
+        "id": "banca_multi_model_is_not_single_vibecode",
+        "when_matches": r"\b(banca adversarial|multi-modelo|consenso da banca|todos contra todos|quorum 2/3|juri de modelos)\b",
+        "exclude_skills": ("henke-audit-vibecode",),
+    },
+    {
+        "id": "perf_audit_is_not_sec_audit",
+        "when_matches": r"\b(queries n\+1|n\+1 query|io sincrono em async|bloqueio de event loop|latencia p99|audita a performance|gargalo de cpu)\b",
+        "exclude_skills": ("henke-audit-seguranca", "henke-ui-auditoria"),
+    },
 )
 
 # Mapa de palavras-chave de alto sinal por skill (complementa o frontmatter/seção 2)
@@ -157,10 +208,15 @@ DOMAIN_BOOSTS: dict[str, tuple[str, ...]] = {
     "henke-audit-seguranca": ("audita a seguranca", "vulnerabilidade", "vetor de ataque", "cve", "seguranca audit", "postura de seguranca"),
     "henke-audit-pentest": ("pentest", "red team", "teste de invasao", "idor", "bola", "race condition", "toctou", "mass assignment", "prototype pollution", "jwt none", "bypass de auth", "poc reproduzivel"),
     "henke-audit-cobertura": ("ledger de cobertura", "coverage_ledger", "auditoria completa com ledger", "90% de cobertura", "dossie de cobertura", "o que nao foi verificado"),
+    "henke-audit-banca": ("banca adversarial", "multi-modelo", "consenso da banca", "todos contra todos", "quorum 2/3", "goldfish multi-modelo", "auditoria em banca", "juri de modelos"),
+    "henke-test-mutantes": ("teste de mutacao", "testes de mutacao", "mutant_hunt", "mutantes sobreviventes", "kill rate", "mata mutantes", "mutacao de ast", "testes fracos"),
+    "henke-audit-perf": ("audita a performance", "diagnostico de performance", "queries n+1", "n+1 query", "hotspot crap", "gargalo de cpu", "bloqueio de event loop", "io sincrono em async", "latencia p99", "benchmark antes e depois"),
+    "henke-code-llm": ("integracao llm", "integra llm", "prompt injection", "structured output", "rag seguro", "agente de ia", "chamada de llm", "fallback de modelo", "orcamento de tokens", "tool calling"),
+    "henke-ops-observa": ("observabilidade", "logs estruturados", "correlacao de trace_id", "run_id nos logs", "telemetria", "metricas de producao", "catch cego", "rastreamento de erros", "opentelemetry"),
     "henke-arch-seguranca": ("deixa isso seguro", "chave exposta", "segredo vazado", "proteger antes de subir"),
     "henke-arch-cloud": ("arquitetura cloud", "multi-cloud", "google cloud", "na aws", "da aws", "no gcp", "cloudflare", "bucket s3", "iam policy", "least privilege", "menor privilegio", "oidc", "secrets manager", "terraform", "imdsv2", "anti-custo", "blinda a infra"),
     "henke-blindagem": ("3 gavetas", "idempotencia", "escrita atomica", "semaforo de gpu", "processo zumbi", "blindagem"),
-    "henke-code-cirurgico": ("mudanca cirurgica", "bisturi", "alteracao pontual", "muda so essa linha", "sem quebrar nada"),
+    "henke-code-cirurgico": ("mudanca cirurgico", "mudanca cirurgica", "bisturi", "alteracao pontual", "muda so essa linha", "sem quebrar nada"),
     "henke-code-ponte": ("contrato front e back", "tipos compartilhados", "ipc", "dados sumiram na tela", "campos vieram errados"),
     "henke-code-contratos": ("zod", "typebox", "pydantic", "openapi", "trpc", "json schema", "contrato formal", "schema compartilhado", "contrato de api", "fechamento de contrato", "contract_closure"),
     "henke-arch-banco": ("banco de dados", "modela o banco", "tabela", "database", "table", "schema", "migration", "migracao", "sqlite", "postgres", "sql"),
@@ -223,17 +279,18 @@ def _parse_skill_file(skill_md: Path) -> dict:
     for m_use in re.findall(r'"([^"]{4,})"', norm_desc):
         triggers.append(m_use)
 
-    for b in DOMAIN_BOOSTS.get(slug, ()):
-        triggers.append(_norm(b))
+    domain_boosts = [_norm(b) for b in DOMAIN_BOOSTS.get(slug, ())]
+    triggers.extend(domain_boosts)
 
     # Tokens distintivos do slug (ex: henke-audit-seguranca -> audit, seguranca)
-    slug_parts = [p for p in slug.split("-")[1:] if len(p) >= 3 and p not in ("skills", "code", "plan", "arch", "mem", "ops")]
+    slug_parts = [p for p in slug.split("-")[1:] if len(p) >= 3 and p not in ("skills", "code", "plan", "arch", "mem", "ops", "test")]
 
     return {
         "name": slug,
         "path": str(skill_md.resolve()).replace("\\", "/"),
         "description": desc,
         "triggers": sorted(set(t for t in triggers if t)),
+        "domain_boosts": set(domain_boosts),
         "slug_tokens": slug_parts,
         "when_not": [_norm(w) for w in when_not],
     }
@@ -288,26 +345,37 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             if rule.get("force_mode"):
                 forced_mode = rule["force_mode"]
 
-    requires_human_auth = any(sig in norm_p for sig in PUBLISH_SIGNALS) or any(sig in norm_p for sig in DESTRUCTIVE_SIGNALS)
+    requires_human_auth = (
+        any(_has_signal(norm_p, sig) for sig in PUBLISH_SIGNALS)
+        or any(_has_signal(norm_p, sig) for sig in DESTRUCTIVE_SIGNALS)
+    )
 
     # Determinação de Modo com Veto de Segurança (§1)
     is_question = norm_p.startswith(INTERROGATIVE_PREFIXES) or norm_p.endswith("?")
-    is_destructive_cmd = any(sig in norm_p for sig in DESTRUCTIVE_SIGNALS)
+    is_destructive_cmd = any(_has_signal(norm_p, sig) for sig in DESTRUCTIVE_SIGNALS)
+    has_audit = any(_has_signal(norm_p, s) for s in AUDIT_SIGNALS)
+    has_plan = any(_has_signal(norm_p, s) for s in PLAN_SIGNALS)
+    has_exec = any(_has_signal(norm_p, s) for s in EXEC_SIGNALS)
+    has_compound_fix = any(_has_signal(norm_p, v) for v in COMPOUND_FIX_VERBS)
+    is_compound_exec = (not is_question) and has_audit and has_compound_fix
 
     if forced_mode:
         mode = forced_mode
     elif is_question:
         mode = "ANALISAR"
-    elif is_destructive_cmd:
+    elif is_destructive_cmd or is_compound_exec:
         mode = "EXECUTAR"
-    elif any(s in norm_p for s in AUDIT_SIGNALS):
+    elif has_audit:
         mode = "ANALISAR"
-    elif any(s in norm_p for s in PLAN_SIGNALS) and not any(s in norm_p for s in EXEC_SIGNALS):
+    elif has_plan and not has_exec:
         mode = "PLANEJAR"
-    elif any(s in norm_p for s in EXEC_SIGNALS):
+    elif has_exec:
         mode = "EXECUTAR"
     else:
         mode = "ANALISAR"
+
+    scope_paths = _touched_files(repo_root)
+    has_ui_touched = any(p.lower().endswith((".tsx", ".jsx", ".css", ".vue", ".svelte")) for p in scope_paths)
 
     # Pontuação de cada skill contra o prompt
     scored = []
@@ -315,7 +383,7 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
         name = sk["name"]
         if name == "henke-skills" or name in excluded:
             continue
-        if any(wn and wn in norm_p for wn in sk["when_not"]):
+        if any(wn and _has_signal(norm_p, wn) for wn in sk["when_not"]):
             continue
 
         score = 0.0
@@ -324,11 +392,33 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             score += 8.0
             reasons.append(f"menção explícita a '{name}'")
 
-        for trig in sk["triggers"]:
-            if len(trig) >= 5 and trig in norm_p:
-                score += 4.5
-                reasons.append(f"gatilho '{trig}'")
-                break
+        desc_words = set(re.findall(r"[a-z0-9_]{4,}", _norm(sk["description"]))) - STOPWORDS
+        context_tokens = set(sk["slug_tokens"]) | desc_words
+        domain_boosts = sk.get("domain_boosts", set())
+
+        # Avalia primeiro gatilhos multi-palavra e domain_boosts; gatilhos curtos genéricos de 1 palavra exigem contexto
+        sorted_trigs = sorted(sk["triggers"], key=lambda t: (0 if (" " in t.strip() or t in domain_boosts) else 1, -len(t)))
+        for trig in sorted_trigs:
+            if len(trig) >= 4 and _has_signal(norm_p, trig):
+                is_single_generic = (
+                    trig in GENERIC_SINGLE_TRIGGERS
+                    or (" " not in trig.strip() and trig not in domain_boosts and not trig.startswith("henke-"))
+                )
+                if is_single_generic:
+                    has_ctx = any(
+                        tok in words or (len(tok) >= 5 and any(w.startswith(tok[:6]) for w in words))
+                        for tok in context_tokens if tok != trig
+                    )
+                    if has_ctx:
+                        score += 4.5
+                        reasons.append(f"gatilho '{trig}'")
+                        break
+                    else:
+                        score += 0.5
+                else:
+                    score += 4.5
+                    reasons.append(f"gatilho '{trig}'")
+                    break
 
         for tok in sk["slug_tokens"]:
             pref = tok[:6] if len(tok) >= 6 else tok
@@ -337,18 +427,22 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
                 reasons.append(f"domínio '{tok}'")
 
         # Match moderado por termos distintivos da descrição
-        desc_words = set(re.findall(r"[a-z0-9_]{4,}", _norm(sk["description"]))) - STOPWORDS
         overlap = words & desc_words
         if len(overlap) >= 2:
             score += min(2.5, 0.7 * len(overlap))
             reasons.append(f"termos ({', '.join(sorted(overlap)[:3])})")
 
+        # Afinidade por escopo de arquivos modificados no repositório (git status)
+        if has_ui_touched and name.startswith("henke-ui-") and score > 0:
+            score += 1.0
+            reasons.append("afinidade git UI")
+
         # Alinhamento de família com o modo
-        if mode == "ANALISAR" and name.startswith(("henke-audit-", "henke-debug-")):
+        if mode == "ANALISAR" and name.startswith(("henke-audit-", "henke-debug-", "henke-test-")):
             score *= 1.15
         elif mode == "PLANEJAR" and name.startswith(("henke-plan-", "henke-arch-")):
             score *= 1.15
-        elif mode == "EXECUTAR" and name.startswith(("henke-code-", "henke-ui-", "henke-refactor-")):
+        elif mode == "EXECUTAR" and name.startswith(("henke-code-", "henke-ui-", "henke-refactor-", "henke-ops-", "henke-test-")):
             score *= 1.15
 
         if score >= 1.8:
@@ -367,13 +461,25 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
         confidence = "low"
 
     # Se confiança for baixa e for pergunta trivial fora de engenharia, zera skills
-    if confidence == "low" and not any(s in norm_p for s in AUDIT_SIGNALS + PLAN_SIGNALS + EXEC_SIGNALS):
+    if confidence == "low" and not (has_audit or has_plan or has_exec):
         top = []
         confidence = "none"
 
     # Seleção do Arquétipo e Portões Mecânicos Obrigatórios
     lead_skill = top[0][1] if top else ""
-    if mode == "ANALISAR" or lead_skill.startswith(("henke-audit-", "henke-debug-")):
+    if is_compound_exec:
+        archetype = "CARPINTEIRO"
+        gates_required = [
+            "scripts/repo_signals.py",
+            "scripts/spec_drift.py",
+            "scripts/metricas/ratchet.py",
+            "scripts/metricas/hazard_scan.py",
+            "scripts/metricas/assertless_scan.py",
+            "scripts/metricas/fence_check.py",
+            "scripts/metricas/contract_closure.py",
+            "scripts/metricas/metaconfig_diff.py",
+        ]
+    elif mode == "ANALISAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-audit-", "henke-debug-"))):
         archetype = "SHERLOCK"
         gates_required = [
             "scripts/repo_signals.py",
@@ -381,7 +487,7 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             "scripts/metricas/assertless_scan.py",
             "scripts/metricas/coverage_ledger.py",
         ]
-    elif mode == "PLANEJAR" or lead_skill.startswith(("henke-plan-", "henke-arch-")):
+    elif mode == "PLANEJAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-plan-", "henke-arch-"))):
         archetype = "ESTADISTA"
         gates_required = [
             "scripts/spec_drift.py",
@@ -399,8 +505,6 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             "scripts/metricas/contract_closure.py",
             "scripts/metricas/metaconfig_diff.py",
         ]
-
-    scope_paths = _touched_files(repo_root)
 
     return {
         "mode": mode,
@@ -426,6 +530,7 @@ def main() -> None:
     ap.add_argument("--prompt", required=True, help="Pedido do usuário em linguagem natural")
     ap.add_argument("--repo", default=None, help="Diretório do repositório alvo (opcional)")
     ap.add_argument("--suite-root", default=None, help="Raiz da Suíte Henke (opcional)")
+    ap.add_argument("--compact", action="store_true", help="Emite saída JSON enxuta para economia de tokens")
     args = ap.parse_args()
 
     if not args.prompt or not args.prompt.strip():
@@ -444,7 +549,18 @@ def main() -> None:
 
     result = route_request(args.prompt, repo_root=repo_root, suite_root=suite_root)
     try:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.compact:
+            compact_out = {
+                "mode": result["mode"],
+                "archetype": result["archetype"],
+                "confidence": result["confidence"],
+                "requires_human_auth": result["requires_human_auth"],
+                "gates_required": result["gates_required"],
+                "skills": [{"name": s["name"], "score": s["score"]} for s in result["skills"]],
+            }
+            print(json.dumps(compact_out, ensure_ascii=False))
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         sys.stdout.flush()
     except BrokenPipeError:
         sys.exit(2)

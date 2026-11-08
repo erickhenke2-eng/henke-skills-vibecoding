@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Portão Mecânico de Auditoria do Ledger Executável (PROTOCOLO v3.1.1, §6 e §10).
+Portão Mecânico de Auditoria do Ledger Executável (PROTOCOLO v4.0, §6 e §10).
 Inspeciona comandos executados contra denylist de risco, verifica resolução
-de scripts efetivos e barra vitória por tautologia (0 testes descobertos).
+de scripts efetivos, valida evidência criptográfica (`exec_log.jsonl`) e
+barra vitória por tautologia (0 testes descobertos).
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -31,6 +33,15 @@ HAZARDOUS_PATTERNS = [
 # o pipeline executa pretest -> test -> posttest, e `npm run X` expande preX/X/postX.
 _NPM_CMD_RE = re.compile(r"^\s*(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)\s*$")
 _NPM_RUN_RE = re.compile(r"(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)")
+_TEST_CMD_RE = re.compile(
+    r"\b(?:pytest|jest|vitest|mocha|unittest|cargo\s+test|go\s+test|npm\s+test|npm\s+t\b|bun\s+test|pnpm\s+test|yarn\s+test)\b",
+    re.IGNORECASE,
+)
+
+
+def is_test_cmd(full_cmd: str) -> bool:
+    """Detecta comando de teste com word-boundary (não confunde 'echo contest' com teste)."""
+    return bool(_TEST_CMD_RE.search(full_cmd))
 
 
 def resolve_npm_lifecycle(cmd: str, pkg: dict) -> list[tuple[str, str]]:
@@ -62,8 +73,119 @@ def resolve_npm_lifecycle(cmd: str, pkg: dict) -> list[tuple[str, str]]:
     return chain
 
 
+def _full_command_str(entry: dict) -> str:
+    cmd = entry.get("cmd", "")
+    args_list = entry.get("args", [])
+    if isinstance(args_list, str) and args_list.strip():
+        return f"{cmd} {args_list}".strip()
+    if isinstance(args_list, list) and args_list:
+        return f"{cmd} {' '.join(str(a) for a in args_list)}".strip()
+    return str(cmd).strip()
+
+
+def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
+    """Verifica a cadeia de hashes de `.henke/exec_log.jsonl` e cruza cada comando
+    de teste do ledger contra os registros reais executados."""
+    errors: list[str] = []
+    log_p = Path(exec_log_path)
+    if not log_p.is_file():
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: arquivo de log '{log_p}' inexistente."]
+
+    try:
+        raw_lines = [ln.strip() for ln in log_p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except Exception as exc:
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: falha ao ler '{log_p}': {exc}"]
+
+    if not raw_lines:
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: '{log_p}' está vazio."]
+
+    verified_records: list[dict] = []
+    last_ehash: str | None = None
+    for idx, line in enumerate(raw_lines, 1):
+        try:
+            rec = json.loads(line)
+        except Exception:
+            errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: JSON malformado na linha {idx} de '{log_p.name}'.")
+            continue
+        if not isinstance(rec, dict):
+            errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: linha {idx} de '{log_p.name}' não é objeto JSON.")
+            continue
+
+        cmd_r = str(rec.get("cmd", "")).strip()
+        exit_r = rec.get("exit", rec.get("exit_code", 0))
+        tests_r = rec.get("testes_descobertos", 0)
+        sha_r = str(rec.get("stdout_sha256", "")).strip()
+        prev_r = str(rec.get("prev_hash", "")).strip()
+        ehash_r = str(rec.get("entry_hash", "")).strip()
+
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", sha_r):
+            errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: stdout_sha256 inválido na linha {idx} de '{log_p.name}'.")
+            continue
+
+        if idx > 1 and last_ehash and prev_r and prev_r != last_ehash:
+            errors.append(
+                f"UNVERIFIED_EXECUTION_EVIDENCE: quebra de encadeamento prev_hash na linha {idx} de '{log_p.name}'."
+            )
+            continue
+
+        if ehash_r:
+            cand_pipe = hashlib.sha256(
+                f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{sha_r}".encode("utf-8")
+            ).hexdigest()
+            body_no_ehash = {k: v for k, v in rec.items() if k != "entry_hash"}
+            cand_json1 = hashlib.sha256(
+                json.dumps(body_no_ehash, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()
+            cand_json2 = hashlib.sha256(
+                json.dumps(body_no_ehash, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            if ehash_r not in (cand_pipe, cand_json1, cand_json2):
+                errors.append(
+                    f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash adulterado na linha {idx} de '{log_p.name}'."
+                )
+                continue
+
+        last_ehash = ehash_r
+        verified_records.append({
+            "cmd": cmd_r,
+            "exit": exit_r,
+            "testes_descobertos": tests_r,
+            "stdout_sha256": sha_r,
+        })
+
+    for i, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict):
+            continue
+        full_cmd = _full_command_str(entry)
+        raw_cmd = str(entry.get("cmd", "")).strip()
+        if not (is_test_cmd(full_cmd) or "testes_descobertos" in entry or "stdout_sha256" in entry):
+            continue
+        e_exit = entry.get("exit", entry.get("exit_code"))
+        e_tests = entry.get("testes_descobertos")
+        e_sha = entry.get("stdout_sha256")
+
+        matched = False
+        for vrec in verified_records:
+            if vrec["cmd"] not in (full_cmd, raw_cmd):
+                continue
+            if vrec["exit"] != e_exit or vrec["testes_descobertos"] != e_tests:
+                continue
+            if e_sha is not None and vrec["stdout_sha256"] != str(e_sha).strip():
+                continue
+            matched = True
+            break
+        if not matched:
+            errors.append(
+                f"UNVERIFIED_EXECUTION_EVIDENCE: entrada #{i} ('{full_cmd}', testes_descobertos={e_tests}) "
+                f"sem registro correspondente íntegro em '{log_p.name}'."
+            )
+
+    return errors
+
+
 def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False,
-                         pkg: dict | None = None) -> tuple[bool, list[str], int]:
+                         pkg: dict | None = None, exec_log_path: Path | None = None,
+                         require_exec_log: bool = False) -> tuple[bool, list[str], int]:
     errors = []
     total_tests_discovered = 0
 
@@ -83,14 +205,7 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
             errors.append(f"Entrada #{i} sem comando ('cmd') especificado.")
             continue
 
-        # Monta a linha de comando completa combinando cmd e args (lista ou string)
-        args_list = entry.get("args", [])
-        if isinstance(args_list, str):
-            full_cmd = f"{cmd} {args_list}".strip()
-        elif isinstance(args_list, list) and args_list:
-            full_cmd = f"{cmd} {' '.join(str(a) for a in args_list)}".strip()
-        else:
-            full_cmd = str(cmd).strip()
+        full_cmd = _full_command_str(entry)
 
         # Strings a inspecionar contra denylist (inclui script resolvido e a forma
         # normalizada do executável sem extensão Windows: git.exe -> git)
@@ -119,6 +234,11 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
             if not re.match(r"^[0-9a-fA-F]{64}$", snap):
                 errors.append(f"Entrada #{i}: snapshot de commit/conteúdo inválido: '{snap}'. Esperado hash SHA-256 de 64 caracteres hex.")
 
+        if "stdout_sha256" in entry:
+            out_sha = str(entry["stdout_sha256"]).strip()
+            if not re.match(r"^[0-9a-fA-F]{64}$", out_sha):
+                errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: Entrada #{i} com stdout_sha256 inválido: '{out_sha}'.")
+
         # 3. Verificação de código de retorno
         exit_code = entry.get("exit", entry.get("exit_code"))
         if exit_code is None:
@@ -127,7 +247,7 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
             errors.append(f"Entrada #{i} falhou com código de saída não-zero: {exit_code} (comando: '{full_cmd}').")
 
         # 4. Barramento de vitória por tautologia e verificação estrita de testes
-        is_test_command = any(k in full_cmd.lower() for k in ("test", "pytest", "jest", "vitest", "cargo test", "npm t"))
+        is_test_command = is_test_cmd(full_cmd)
         has_tests_decl = "testes_descobertos" in entry
 
         if has_tests_decl or is_test_command:
@@ -160,7 +280,23 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
             "(nenhuma evidência de execução real de testes)."
         )
 
+    if require_exec_log or exec_log_path is not None:
+        target_log = exec_log_path if exec_log_path is not None else Path(".henke/exec_log.jsonl")
+        errors.extend(verify_exec_log(ledger_data, target_log))
+
     return len(errors) == 0, errors, total_tests_discovered
+
+
+def _discover_package_json(ledger_path: Path) -> Path | None:
+    candidates = [
+        ledger_path.parent.parent / "package.json" if ledger_path.parent.name == ".henke" else ledger_path.parent / "package.json",
+        ledger_path.parent / "package.json",
+        Path.cwd() / "package.json",
+    ]
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    return None
 
 
 def main():
@@ -169,6 +305,10 @@ def main():
     parser.add_argument("--allow-zero-tests", action="store_true", help="Permite comandos de teste com 0 testes (não recomendado)")
     parser.add_argument("--package-json", type=Path, default=None,
                         help="package.json para resolver lifecycle npm (pretest/test/posttest) — anti-TOCTOU")
+    parser.add_argument("--require-exec-log", action="store_true",
+                        help="Exige verificação de integridade contra .henke/exec_log.jsonl")
+    parser.add_argument("--exec-log", type=Path, default=None,
+                        help="Caminho explícito do exec_log.jsonl (default: .henke/exec_log.jsonl)")
     args = parser.parse_args()
 
     ledger_path = args.ledger.resolve()
@@ -180,14 +320,32 @@ def main():
     except Exception as e:
         sys.exit(f"ERRO: Falha ao parsear JSON do ledger: {e}")
 
+    pkg_path = args.package_json or _discover_package_json(ledger_path)
     pkg_data = None
-    if args.package_json:
+    if pkg_path and Path(pkg_path).is_file():
         try:
-            pkg_data = json.loads(args.package_json.read_text(encoding="utf-8"))
+            pkg_data = json.loads(Path(pkg_path).read_text(encoding="utf-8"))
         except Exception as e:
-            sys.exit(f"ERRO: Falha ao parsear package.json '{args.package_json}': {e}")
+            if args.package_json:
+                sys.exit(f"ERRO: Falha ao parsear package.json '{args.package_json}': {e}")
 
-    ok, errors, total_tests = audit_ledger_content(content, allow_zero_tests=args.allow_zero_tests, pkg=pkg_data)
+    has_sha_entries = isinstance(content, list) and any(
+        isinstance(x, dict) and "stdout_sha256" in x for x in content
+    )
+    exec_log_p = None
+    if args.exec_log:
+        exec_log_p = args.exec_log.resolve()
+    elif args.require_exec_log or has_sha_entries:
+        cand_log = ledger_path.parent / "exec_log.jsonl"
+        exec_log_p = cand_log if cand_log.is_file() else Path(".henke/exec_log.jsonl").resolve()
+
+    ok, errors, total_tests = audit_ledger_content(
+        content,
+        allow_zero_tests=args.allow_zero_tests,
+        pkg=pkg_data,
+        exec_log_path=exec_log_p,
+        require_exec_log=args.require_exec_log,
+    )
     if not ok:
         print(f"FALHA NA AUDITORIA DO LEDGER ({len(errors)} violações):", file=sys.stderr)
         for err in errors:

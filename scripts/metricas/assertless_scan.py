@@ -163,13 +163,15 @@ def scan_polyglot(path: Path, helpers):
         if ext in _pg.JS_EXTS:
             real_expect = mock_expect = 0
             for m in _JS_EXPECT.finditer(body):
-                # cadeia completa: do ')' que fecha expect(...) até o ';'
-                pe = _pg._paren_end(body, body.find("(", m.start()))
+                open_p = body.find("(", m.start())
+                pe = _pg._paren_end(body, open_p) if open_p != -1 else -1
                 chain = body[pe:pe + 400] if pe != -1 else ""
                 mm = _JS_MATCHER.search(chain)
                 if not mm:
                     continue  # expect(x) solto, sem matcher → não é asserção
-                if _JS_MOCK_ONLY.search(mm.group(0)):
+                matcher_call = chain[:mm.end()]
+                full_expr = body[m.start():pe] + matcher_call
+                if _JS_MOCK_ONLY.search(full_expr):
                     mock_expect += 1
                 else:
                     real_expect += 1
@@ -629,6 +631,20 @@ def can_propagate(body, helpers, b, scope):
     return False
 
 
+def is_constant_tautology(node):
+    """Verifica se a expressão de teste é uma tautologia constante óbvia (ex: assert True, assert 1 == 1, assert not False)."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.UnaryOp) and isinstance(node.operand, ast.Constant):
+        return True
+    if isinstance(node, ast.Compare):
+        if isinstance(node.left, ast.Constant) and all(isinstance(c, ast.Constant) for c in node.comparators):
+            return True
+    if isinstance(node, ast.BoolOp) and all(isinstance(v, ast.Constant) for v in node.values):
+        return True
+    return False
+
+
 def classify(fn, helpers, b, module_consts, class_consts):
     """Return (real_assertions, mock_assertions, swallow_reason_or_None)."""
     real = mock = 0
@@ -638,7 +654,9 @@ def classify(fn, helpers, b, module_consts, class_consts):
                   assigned_values(fn.body), class_consts)
     for node in own_scope(fn.body):
         if isinstance(node, ast.Assert):
-            if observes_only_mock([node.test], scope):
+            if is_constant_tautology(node.test):
+                pass
+            elif observes_only_mock([node.test], scope):
                 mock += 1
             else:
                 real += 1
@@ -655,6 +673,14 @@ def classify(fn, helpers, b, module_consts, class_consts):
                 if UNITTEST_ASSERT.match(f.attr) and base in SELF_NAMES:
                     if observes_only_mock(node.args + [k.value for k in node.keywords], scope):
                         mock += 1
+                    elif (
+                        f.attr in ("assertTrue", "assertFalse")
+                        and node.args
+                        and is_constant_tautology(node.args[0])
+                    ):
+                        pass
+                    elif call_cannot_fail(f.attr, node.args, scope):
+                        pass
                     else:
                         real += 1
                 elif f.attr in PYTEST_ASSERT and base in b.pytest_mods:

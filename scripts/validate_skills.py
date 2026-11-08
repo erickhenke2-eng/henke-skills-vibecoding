@@ -80,9 +80,9 @@ else:
         if marker not in proto_text:
             errors.append(f"PROTOCOLO.md sem estrutura canônica obrigatória: marcador ausente '{marker}'")
 
-# 2. Validação da contagem de skills (53 skills esperadas)
-if len(skills) != 53:
-    errors.append(f"Inventário divergente: esperadas 53 skills, encontradas {len(skills)}")
+# 2. Validação da contagem de skills (58 skills esperadas)
+if len(skills) != 58:
+    errors.append(f"Inventário divergente: esperadas 58 skills, encontradas {len(skills)}")
 
 names = set()
 for path in skills:

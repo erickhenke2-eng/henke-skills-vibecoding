@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "run_id": "wave5-banca-v4",
+  "mode": "EXECUTAR",
+  "archetype": "CARPINTEIRO",
+  "spec_path": "docs/designs/wave5-banca-consenso-v4.md",
+  "created_at": "2026-11-07T19:29:38.067553+00:00",
+  "updated_at": "2026-11-07T22:51:08.904944+00:00",
+  "requires_human_auth": false,
+  "review_status": "not_required",
+  "gates": {
+    "validate_skills": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.076854+00:00"
+    },
+    "hazard_scan": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.077903+00:00"
+    },
+    "assertless_scan": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.078952+00:00"
+    },
+    "a11y_scan": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.080540+00:00"
+    },
+    "spec_drift": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.082669+00:00"
+    },
+    "contract_closure": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.084409+00:00"
+    },
+    "metaconfig_diff": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.085471+00:00"
+    },
+    "henke_gate": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.085983+00:00"
+    },
+    "audit_ledger": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.087989+00:00"
+    },
+    "canaries": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.088984+00:00"
+    },
+    "canaries_metricas": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.090558+00:00"
+    },
+    "bench_corpus": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.092126+00:00"
+    },
+    "unittest": {
+      "exit_code": 0,
+      "summary": "pass",
+      "recorded_at": "2026-11-07T19:29:38.093755+00:00"
+    },
+    "mutant_hunt": {
+      "exit_code": 0,
+      "summary": "15/15 mutants killed 100%",
+      "recorded_at": "2026-11-07T22:51:08.904944+00:00"
+    }
+  },
+  "scope_amendments": [],
+  "outcome": "verified",
+  "reasons": []
+}
