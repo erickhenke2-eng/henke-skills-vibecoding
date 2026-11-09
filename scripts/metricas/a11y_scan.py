@@ -214,8 +214,9 @@ def scan_a11y_file(path: Path, root: Path | None = None) -> list[tuple[str, str,
     if not p.is_file() or p.suffix.lower() not in A11Y_EXTS:
         return []
     try:
-        raw = p.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+        # UTF-8 estrito: bytes inválidos → mojibake "escaneado" = falso-verde.
+        raw = p.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
         return None
     if root is not None:
         try:

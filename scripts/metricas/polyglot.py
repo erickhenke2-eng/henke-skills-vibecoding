@@ -24,8 +24,8 @@ class CommentSpan(NamedTuple):
     end_col: int     # 0-indexed
     text: str        # comment slice
 
-C_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx", ".rs", ".go"}
-JS_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx"}
+C_EXTS = {".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".rs", ".go"}
+JS_EXTS = {".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts", ".jsx"}
 TEST_RE = re.compile(
     r"(\.test\.|\.spec\.|_test\.go$|_test\.rs$|(?:^|/)test_[^/]*\.py$|_test\.py$|"
     r"(?:^|/)tests?/|__tests__)")
@@ -448,7 +448,9 @@ def _regex_ctx_ok(text: str, i: int) -> bool:
     if j < 0:
         return True  # início de arquivo = posição de expressão
     c = text[j]
-    if c in "(,=:[!&|?{};+-*/%^~<>\n":
+    # `\n` NÃO é contexto de regex: `a\n/eval(x)/g` é divisão legítima em
+    # JS/Rust — tratar newline como abertura de regex mascara sinks inteiros.
+    if c in "(,=:[!&|?{};+-*/%^~<>":
         return True
     if c == ")":
         # `if (x) /re/` — `)` de parêntese de keyword de controle abre statement:

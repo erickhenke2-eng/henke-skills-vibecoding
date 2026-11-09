@@ -15,6 +15,10 @@ import time
 MANIFEST = ".henke-manifest.json"
 INSTALL_LOCK = ".henke-install.lock"
 LOCK_TIMEOUT_SEC = 120.0
+
+# Teto por arquivo (banca v9 — M5): um blob gigante no inventário ia para
+# 4 destinos com 3+ leituras completas (copy + verify + manifest hash).
+MAX_FILE_SIZE = 64 * 1024 * 1024
 LOCK_RETRY_SEC = 0.1
 IGNORED_DIRS = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules"}
 IGNORED_FILES = {".DS_Store", "Thumbs.db"}
@@ -138,7 +142,31 @@ def inventory(repo):
     for wrapper in (repo / "bin" / "henke", repo / "bin" / "henke.cmd"):
         if wrapper.is_file():
             files.append(wrapper.relative_to(repo))
-    return files
+    # Contenção unificada (banca v9 — A9): TODA entrada do inventário — skill,
+    # script, bin/, arquivo raiz — resolve dentro do repo sem atravessar
+    # symlink/junction. resolve() segue junction do Windows (is_symlink() não
+    # pega junction); um `scripts/metricas -> C:\evil` instalaria portões
+    # arbitrários que a próxima run executa.
+    repo_resolved = repo.resolve()
+    confined: list[Path] = []
+    for rel in files:
+        src = repo / rel
+        try:
+            resolved = src.resolve()
+        except OSError:
+            continue
+        if resolved != repo_resolved and repo_resolved not in resolved.parents:
+            continue
+        if src.is_symlink():
+            continue
+        try:
+            if src.stat().st_size > MAX_FILE_SIZE:
+                print(f"Aviso: arquivo acima de {MAX_FILE_SIZE // (1024 * 1024)}MB ignorado: {rel}", file=sys.stderr)
+                continue
+        except OSError:
+            continue
+        confined.append(rel)
+    return confined
 
 
 def read_manifest(path):
@@ -164,7 +192,11 @@ def safe_member(target, rel):
     rel_path = PurePosixPath(normalized_rel)
     if rel_path.is_absolute() or ".." in rel_path.parts or rel == MANIFEST:
         raise ValueError(f"Entrada de manifesto insegura: {rel}")
-    victim = target.joinpath(*rel_path.parts).resolve()
+    # Resolve só os PAIS — resolver o componente final transformava symlink
+    # legítimo em seu alvo: ou abortava a instalação inteira, ou deletava o
+    # arquivo resolvido deixando o link zumbi (banca v9 — M6).
+    parent = target.joinpath(*rel_path.parts[:-1]).resolve()
+    victim = parent / rel_path.parts[-1]
     target_resolved = target.resolve()
     if not victim.is_relative_to(target_resolved):
         raise ValueError(f"Caminho de manifesto escapa do destino: {rel}")
@@ -297,7 +329,10 @@ def _publish(repo, targets, files):
                 "version": 2,
                 "files": sorted(new_set),
                 "hashes": {
-                    str(rel).replace("\\", "/"): hashlib.sha256(_resolve_source(repo, rel).read_bytes()).hexdigest()
+                    # Hash dos bytes INSTALADOS (destino), não da fonte re-lida —
+                    # mutação entre cópia e manifesto criava zumbi permanente
+                    # (banca v9 — M5).
+                    str(rel).replace("\\", "/"): hashlib.sha256((target / rel).read_bytes()).hexdigest()
                     for rel in files
                 }
             }

@@ -59,7 +59,8 @@ if str(_HERE) not in sys.path:
 import polyglot as _pg  # noqa: E402
 
 MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB cap (evita bundles/minified)
-SCAN_EXTS = {".py", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".rs", ".go", ".vue", ".svelte"}
+SCAN_EXTS = {".py", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts",
+             ".jsx", ".rs", ".go", ".vue", ".svelte"}
 CONFIG_PATTERNS = (
     "*.tf", "*.tfvars", "Dockerfile*", "docker-compose*.yml", "docker-compose*.yaml",
     "serverless.yml", "serverless.yaml", "wrangler.toml", "cloudbuild.yml", "cloudbuild.yaml",
@@ -154,6 +155,10 @@ _JS_SHELL_OBJ_RE = re.compile(
     r"|(?<![.\w$])eval\s*\(|\.eval\s*\("
 )
 _RS_SHELL_RE = re.compile(r'Command::new\s*\(\s*\)\s*|\bCommand::new\s*\([^)]*\)\s*\.\s*arg\s*\(\s*"(?:-c|/c)"')
+# Go não tinha nenhuma regra de execução (banca v9 A3): os/exec + syscall.Exec
+# + plugin.Open são os sinks equivalentes a exec.Command("sh","-c",user).
+_GO_SHELL_RE = re.compile(
+    r'(?<![.\w])(?:exec\.Command(?:Context)?|syscall\.Exec|plugin\.Open)\s*\(')
 _WEAK_RAND_RE = re.compile(r"\b(?:Math\.random|random\.random|random\.randint|rand::random)\s*\(")
 _AUTH_TOKEN_WORDS_RE = re.compile(r"(?i)(?:token|secret|password|senha|session_?id|nonce|api_?key|jwt|csrf|auth_?code)")
 _FILE_SINK_RE = re.compile(
@@ -477,7 +482,8 @@ _AST_DANGER_ATTRS = {
     "system", "popen", "getoutput", "getstatusoutput", "spawn",
     "load", "loads", "eval", "exec", "run", "Popen", "call",
 }
-_AST_DANGER_MODS = {"os", "subprocess", "pickle", "dill", "commands", "pty", "sys"}
+_AST_DANGER_MODS = {"os", "subprocess", "pickle", "dill", "commands", "pty", "sys",
+                    "builtins", "__builtins__"}
 _AST_YAML_LOAD = {"yaml.load", "yaml.load_all"}
 # unsafe_load/full_load nunca são seguras — nem com kwarg (A7-banca)
 _AST_YAML_ALWAYS_UNSAFE = {"yaml.unsafe_load", "yaml.full_load"}
@@ -666,7 +672,9 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
                     out.append(("UNSAFE-DESERIALIZE", line, scope,
                                 f"getattr(..., {node.args[1].value!r}) — acesso ofuscado a sink (AST)"))
             continue
-        if name in _AST_EXEC_BUILTINS:
+        # `builtins.eval(x)` resolve para "builtins.eval" — o sufixo é o sink
+        # (e `obj.eval(` oferecido à força é direção segura, fail-red).
+        if name in _AST_EXEC_BUILTINS or name.rsplit(".", 1)[-1] in _AST_EXEC_BUILTINS:
             out.append(("UNSAFE-DESERIALIZE", line, scope, f"dynamic code execution via {name}() (AST)"))
     return out
 
@@ -794,6 +802,11 @@ def scan_file(path: Path, extra_exts: set | None = None,
             if ".arg" in m.group(0):
                 lineno = no_comments.count("\n", 0, m.start()) + 1
                 add("SHELL-INJECTION", lineno, f"line:{lineno}", "shell invocation via Command::arg(\"-c\"|\"/c\")")
+    elif ext == ".go":
+        for m in _GO_SHELL_RE.finditer(no_comments):
+            lineno = no_comments.count("\n", 0, m.start()) + 1
+            add("SHELL-INJECTION", lineno, f"line:{lineno}",
+                f"execução de processo/código dinâmico ({m.group(0).strip()})")
     else:
         for m in _JS_EXEC_RE.finditer(masked):
             lineno = masked.count("\n", 0, m.start()) + 1

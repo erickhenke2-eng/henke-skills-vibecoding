@@ -310,7 +310,11 @@ def main(argv=None):
     ap.add_argument("--current", required=True, help="TSV of the touched files as they stand now")
     ap.add_argument("--ceiling", type=float, default=6.0, help="absolute CRAP ceiling for new files (from crap-gate)")
     ap.add_argument("--budget", type=float, default=5.0, help="percent of project files allowed over the ceiling")
-    args = ap.parse_args(argv)
+    try:
+        args = ap.parse_args(argv)
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
     # A closed fd 1 leaves sys.stdout as None, and print() to None is a silent
     # no-op: the gate would return a verdict nobody could read. Refuse instead.
     if sys.stdout is None:

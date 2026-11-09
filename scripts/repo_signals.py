@@ -95,8 +95,24 @@ def iter_functions(path: Path):
     """yield (nome, lineno, complexidade) em qualquer linguagem suportada."""
     ext = path.suffix.lower()
     if ext == ".py":
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError) as e:
+            print(f"SKIP-PARSE: {path}: {e} (pulado)", file=sys.stderr)
+            return
         for fn in funcs_in_py(path):
             yield fn.name, fn.lineno, complexity_py(fn)
+        # A5 (banca v9): decisões FORA de função (top-level do módulo ou corpo
+        # de classe) contam — inlining do corpo de uma função no módulo não
+        # pode zerar a métrica para enganar o ratchet.
+        for stmt in tree.body:
+            subs = stmt.body if isinstance(stmt, ast.ClassDef) else [stmt]
+            for sub in subs:
+                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                c = complexity_py(sub)
+                if c > 1:
+                    yield "<top-level>", sub.lineno, c
     elif ext in pg.C_EXTS:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -104,8 +120,17 @@ def iter_functions(path: Path):
             print(f"SKIP-PARSE: {path}: {e} (pulado)", file=sys.stderr)
             return
         lang = ".rs" if ext == ".rs" else ".go" if ext == ".go" else ext
-        for name, sl, el, body in pg.find_functions(text, ext):
-            yield name, sl, pg.complexity_masked(body, ext)
+        func_rows = list(pg.find_functions(text, ext))
+        fsum = 0
+        for name, sl, el, body in func_rows:
+            c = pg.complexity_masked(body, ext)
+            fsum += c - 1
+            yield name, sl, c
+        # Mesmo princípio: decisões fora de função em C-like não podem ser
+        # invisíveis (aproximação: decisões totais − decisões das funções).
+        top_dec = max(0, (pg.complexity_masked(text, ext) - 1) - fsum)
+        if top_dec > 0:
+            yield "<top-level>", 1, top_dec + 1
 
 
 def cmd_churn(args):

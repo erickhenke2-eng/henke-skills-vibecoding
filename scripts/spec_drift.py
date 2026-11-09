@@ -108,7 +108,10 @@ def get_git_root(cwd: Path) -> Path:
         )
         return Path(res.stdout.strip()).resolve()
     except Exception as e:
-        sys.exit(f"ERRO: Não foi possível determinar a raiz do repositório Git: {e}")
+        # Infra (sem git root) ≠ veredito-vermelho — exit 2, não 1.
+        print(f"ERRO: Não foi possível determinar a raiz do repositório Git: {e}",
+              file=sys.stderr)
+        sys.exit(2)
 
 
 def discover_latest_spec(designs_dir: Path) -> Path | None:
@@ -399,7 +402,9 @@ def main():
         designs_dir = git_root / "docs" / "designs"
         spec_path = discover_latest_spec(designs_dir)
         if not spec_path:
-            sys.exit("ERRO: Nenhuma spec especificada via --spec e nenhuma encontrada em docs/designs/*.md")
+            print("ERRO: Nenhuma spec especificada via --spec e nenhuma encontrada em docs/designs/*.md",
+                  file=sys.stderr)
+            sys.exit(2)
 
     ok, errors = check_spec_drift(spec_path, expected_hash=args.expected_hash, against=args.against, git_root=git_root)
     if not ok:

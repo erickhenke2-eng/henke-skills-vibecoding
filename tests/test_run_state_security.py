@@ -21,8 +21,8 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from scripts.run_state import (
-    _append_evidence_manifest, derive_run_outcome, verify_run_file,
-    write_anchor_sidecar,
+    _append_evidence_manifest, _evidence_manifest_path, derive_run_outcome,
+    verify_run_file, write_anchor_sidecar,
 )
 
 
@@ -39,8 +39,8 @@ def _evidence(tmp: Path, name: str, content: str = "ok\n") -> tuple[str, str]:
 def _triad(tmp: Path, gate: str, exit_code: int = 0) -> dict:
     ev, sha = _evidence(tmp, f"{gate}.out")
     # Tríade só verifica com manifesto local (custódia v6): simula o que
-    # record_gate escreve fora do repo.
-    _append_evidence_manifest("r", gate, ev, sha, f"gate {gate}")
+    # record_gate escreve fora do repo — incluindo o veredito (banca v9 C1).
+    _append_evidence_manifest("r", gate, ev, sha, f"gate {gate}", exit_code, False)
     return {
         "exit_code": exit_code,
         "command": f"gate {gate}",
@@ -68,6 +68,10 @@ class ForgedRunTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.t = Path(self.tmp.name)
+        # O manifesto de evidência vive no config dir chaveado por run_id —
+        # compartilhado ENTRE testes: entradas gravadas por fixtures anteriores
+        # viram órfãs (EVIDENCE-ORPHANED) nas runs seguintes.
+        _evidence_manifest_path("r").unlink(missing_ok=True)
 
     def test_bare_exit_zero_json_does_not_verify(self):
         """exit_code:0 escrito à mão é atestação implícita — não conta."""
@@ -189,7 +193,7 @@ class ForgedRunTests(unittest.TestCase):
         sha = hashlib.sha256(repo_file.read_bytes()).hexdigest()
         # Manifesto forjado apontando para o mesmo arquivo fora do confinamento —
         # passa a checagem de manifesto e testa o confinamento isoladamente.
-        _append_evidence_manifest("r", "hazard_scan", str(repo_file), sha, "x")
+        _append_evidence_manifest("r", "hazard_scan", str(repo_file), sha, "x", 0, False)
         p = _run(self.t, {"hazard_scan": {
             "exit_code": 0, "command": "x",
             "evidence_file": str(repo_file), "evidence_sha256": sha,
@@ -203,7 +207,7 @@ class ForgedRunTests(unittest.TestCase):
         outside = self.t.parent / "fora.txt"
         outside.write_text("x\n", encoding="utf-8")
         sha = hashlib.sha256(outside.read_bytes()).hexdigest()
-        _append_evidence_manifest("r", "hazard_scan", str(outside), sha, "x")
+        _append_evidence_manifest("r", "hazard_scan", str(outside), sha, "x", 0, False)
         p = _run(self.t, {"hazard_scan": {
             "exit_code": 0, "command": "x",
             "evidence_file": str(outside), "evidence_sha256": sha,

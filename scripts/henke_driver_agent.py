@@ -22,6 +22,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+# CWD-poisoning (banca v9 — A8): which()/exec não podem resolver binário
+# plantado no diretório corrente do repo alvo no Windows.
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
+
+# `model` entra em argv de shim .cmd — \" escapado pelo list2cmdline não é
+# compreendido pelo cmd.exe e & vira separador de comando (banca v9 A7).
+_MODEL_RE = re.compile(r"[\w./:@+-]+")
+
 _DEFAULT_MODELS = {
     "opencode": "opencode/deepseek-v4.1-flash-free",
 }
@@ -75,6 +83,9 @@ def main() -> int:
             "notes": f"cli '{cli}' sem preset. Disponíveis: {', '.join(sorted(PRESETS))}",
         }))
         return 2  # preset inválido = erro de uso (nunca verde)
+    if model and not _MODEL_RE.fullmatch(model):
+        print(json.dumps({"files_changed": [], "notes": f"modelo inválido: {model!r}"}))
+        return 2
 
     try:
         envelope = json.load(sys.stdin)
@@ -83,14 +94,19 @@ def main() -> int:
         return 2  # envelope ilegível = erro de uso (nunca verde)
 
     repo = str(envelope.get("repo_root") or ".")
+    if not Path(repo).is_dir():
+        print(json.dumps({"files_changed": [], "notes": f"repo_root inexistente: {repo!r}"}))
+        return 2
+    # Envelope no TEMP do sistema — dentro do repo ele aparecia no git status
+    # da própria run e sobrevivia a SIGKILL com o prompt inteiro (banca v9 M7).
     env_file = tempfile.NamedTemporaryFile(
         "w", suffix=".envelope.json", prefix="henke-", delete=False,
-        dir=repo, encoding="utf-8",
+        encoding="utf-8",
     )
     try:
         json.dump(envelope, env_file, ensure_ascii=False)
         env_file.close()
-        env_name = Path(env_file.name).name
+        env_name = env_file.name
         prompt = _INSTR.format(env_name=env_name)
         argv = [
             a.format(prompt=prompt, env=env_file.name, model=model) if "{" in a else a

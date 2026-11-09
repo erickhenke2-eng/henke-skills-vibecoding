@@ -429,7 +429,11 @@ def main() -> None:
     p_ren = sub.add_parser("render-gaps", help="Gera a seção Markdown 'O que NÃO foi verificado'")
     p_ren.add_argument("ledger", help="Caminho do arquivo ledger.json")
 
-    args = ap.parse_args()
+    try:
+        args = ap.parse_args()
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
     try:
         if args.cmd == "init":
             root = Path(args.root)

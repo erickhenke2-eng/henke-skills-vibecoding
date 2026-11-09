@@ -24,11 +24,20 @@ from __future__ import annotations
 import argparse
 from functools import lru_cache
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import unicodedata
+
+try:
+    from scripts._paths import suite_root as _suite_root
+except ImportError:  # execução standalone (python scripts/henke_router.py)
+    try:
+        from _paths import suite_root as _suite_root  # type: ignore[no-redef]
+    except ImportError:
+        _suite_root = lambda: Path(__file__).resolve().parents[1]  # type: ignore[assignment]
 
 for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
@@ -38,18 +47,42 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
             pass
 
 
+# Homoglifos cross-script que sobrevivem ao NFKD como Ll — "dеlеta" com
+# е cirílico (U+0435) não casa \bdeleta\b (banca v9 — A2). Dobramos os
+# confusáveis comuns para Latin ANTES do NFKD; a direção é fail-safe
+# (só aumenta matching, nunca reduz).
+_HOMOGLYPHS = str.maketrans({
+    "а": "a", "е": "e", "ё": "e", "о": "o", "р": "p", "с": "c", "х": "x",
+    "у": "y", "і": "i", "ї": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ԛ": "q",
+    "һ": "h", "к": "k", "м": "m", "н": "n", "т": "t", "в": "b", "г": "r",
+    "п": "n", "э": "e", "з": "3", "ҝ": "k", "օ": "o", "ո": "n", "ս": "u",
+    "ɡ": "g", "ɩ": "i", "ο": "o", "α": "a", "β": "b", "γ": "y", "δ": "d",
+    "ε": "e", "ζ": "z", "η": "n", "ι": "i", "κ": "k", "μ": "u", "ν": "v",
+    "ρ": "p", "τ": "t", "υ": "u", "χ": "x", "ω": "w", "ϲ": "c", "ϳ": "j",
+    "А": "a", "В": "b", "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
+    "Р": "p", "С": "c", "Т": "t", "Х": "x", "І": "i",
+})
+
+
 def _norm(text: str) -> str:
-    nfkd = unicodedata.normalize("NFKD", text.lower())
+    # Whitespace exótico (NBSP U+00A0, U+2000–U+200A, U+202F, U+3000, tab,
+    # espaço duplo) quebra sinais multi-palavra ("git\u00A0push --force" evade
+    # "git push" — banca v9 A3): todo Zs vira espaço e \s+ colapsa para um.
+    folded = text.translate(_HOMOGLYPHS)
+    nfkd = unicodedata.normalize("NFKD", folded.lower())
     # Além de marcas combinantes: caracteres de FORMATO/controle invisíveis
     # (Cf/Cc/Cs/Co/Cn — ZWSP U+200B, ZWJ, WJ, BOM, soft-hyphen) quebram o \b
     # do _has_signal sem mudar a aparência para o humano — "dele​ta" evade
     # DESTRUCTIVE_VERBS (banca v7 — F-04).
-    return "".join(
-        c for c in nfkd
-        if not unicodedata.combining(c)
-        and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn",
-                                           "Mn", "Mc", "Me")
+    stripped = "".join(
+        " " if c.isspace() or unicodedata.category(c) == "Zs" else c
+        for c in nfkd
+        if c.isspace()
+        or (not unicodedata.combining(c)
+            and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn",
+                                               "Mn", "Mc", "Me"))
     )
+    return re.sub(r"\s+", " ", stripped)
 
 
 def _has_signal(text: str, sig: str) -> bool:
@@ -152,13 +185,31 @@ def _has_flex_signal(text: str, sig: str) -> bool:
 # Vocabulário destrutivo e PUBLISH (PROTOCOLO §1) — exige autorização humana explícita
 DESTRUCTIVE_SIGNALS = (
     "deleta", "deletar", "deleto", "deletamos", "delete", "exclui", "excluir",
-    "excluo", "excluímos", "apago", "apaga", "apagar", "apague", "apagamos",
+    "excluo", "excluimos", "apago", "apaga", "apagar", "apague", "apagamos",
     "remove", "remover", "removo", "remova", "removendo", "erase", "erases",
     "drop", "drop table", "truncate", "wipe", "wipe database",
-    "destroi", "destruo", "destruir", "destruímos", "destroy", "purge",
+    "destroi", "destruo", "destruir", "destruimos", "destroy", "purge",
     "force-push", "push --force", "force push", "push -f", "reset --hard",
     "hard reset", "rm -rf", "rm -r", "git clean", "clean -fd", "clean -fdx",
     "apaga o banco", "apagar o banco", "derruba", "zera", "zerar",
+    # Gerúndios/imperativos/plurais/passado — flexões que o \b não pega
+    # (banca v9 — A1): "estou deletando" e "deletem tudo" antes passavam.
+    "deletando", "deletem", "deletou", "apagando", "apaguem", "apagou",
+    "excluindo", "excluam", "excluiu", "removam", "removeu", "destruindo",
+    "destruam", "truncando", "limpando", "limpem", "zerando", "zerem",
+    "eliminando", "eliminem", "resetando", "resetem", "desinstalando",
+    "derrubando", "derrubem", "deleting", "deletes", "removing", "removes",
+    "wiping", "wipes", "dropping", "drops", "truncating", "truncates",
+    "erasing", "purging", "purges", "destroying", "destroys", "resetting",
+    # Comandos destrutivos nativos Windows/Unix ausentes (banca v9 — A4):
+    "del /", "del/", "del *", "del.", "rmdir", "rd /", "rd/", "erase /",
+    "format c:", "format d:", "formata o disco", "format disk", "mkfs",
+    "dd if", "shred", "sdelete", "cipher /w", "remove-item", "clear-item",
+    "format-volume", "dism /",
+    # Paráfrases indiretas PT (banca v9 — A6):
+    "esvazia", "esvaziar", "esvazie", "some com", "suma com", "varre",
+    "varrer", "limpa o banco", "limpa tudo", "tira tudo", "tirar tudo",
+    "esvazia o banco", "limpa o repo", "apaga tudo",
 )
 _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 
@@ -497,6 +548,7 @@ def _touched_files(repo_root: Path | None) -> list[str]:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "status", "--porcelain", "-z"],
             cwd=str(repo_root), capture_output=True, timeout=5,
+            env={**os.environ, "NoDefaultCurrentDirectoryInExePath": "1"},
         )
         if res.returncode != 0:
             return []
@@ -514,7 +566,10 @@ def _touched_files(repo_root: Path | None) -> list[str]:
 
 def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path | None = None) -> dict:
     if suite_root is None:
-        suite_root = Path(__file__).resolve().parents[1]
+        # suite_root() resolve o layout wheel/pipx (<prefix>/henke_data) —
+        # parents[1] pelado caía em site-packages e o catálogo vinha VAZIO
+        # silenciosamente (banca v9 — M2).
+        suite_root = _suite_root()
     catalog, unrouted = load_catalog(suite_root)
     norm_p = _norm(prompt.strip())
     words = set(re.findall(r"[a-z0-9_]{3,}", norm_p)) - STOPWORDS
@@ -715,7 +770,7 @@ def main() -> None:
         print(f"ERRO: diretório --repo inexistente: {repo_root}", file=sys.stderr)
         sys.exit(2)
 
-    suite_root = Path(args.suite_root).resolve() if args.suite_root else Path(__file__).resolve().parents[1]
+    suite_root = Path(args.suite_root).resolve() if args.suite_root else _suite_root()
     if not suite_root.is_dir():
         print(f"ERRO: diretório --suite-root inválido: {suite_root}", file=sys.stderr)
         sys.exit(2)

@@ -264,6 +264,18 @@ def check_baseline(baseline, cwd, scope, allow_commit):
         now_ign = _ignored_fingerprint(cwd)
         if now_ign and (now_ign["count"] != base_ign["count"] or now_ign["sha256"] != base_ign["sha256"]):
             warnings.append(f"Conjunto de arquivos ignorados mudou desde o baseline ({base_ign['count']} -> {now_ign['count']} arquivos)")
+    # A10 (banca v9): assume-unchanged/skip-worktree deixa mutação invisível
+    # ao status/diff — mesma trava do spec_drift (fail-closed).
+    lv = git(cwd, "ls-files", "-v", "-z", check=False)
+    if lv.returncode == 0:
+        blind = sorted(
+            e[2:] for e in lv.stdout.split("\0")
+            if e[:1] and (e[:1].islower() or e[:1] == "S")
+        )
+        if blind:
+            violations.append(
+                "GIT-BLIND-FILES: assume-unchanged/skip-worktree deixa arquivos "
+                "invisíveis ao status — " + ", ".join(blind[:10]))
     return violations, warnings
 
 

@@ -195,8 +195,12 @@ def main(argv=None) -> int:
     # Checked before argparse so --help is covered by the same rule.
     if sys.stdout is None:
         die("stdout is closed — no channel to deliver the verdict")
-    # argparse exits 2 on bad flags, which is this tool's usage code already.
-    args = build_parser().parse_args(argv)
+    # argparse exits 2 on bad flags, which is this tool's usage code already;
+    # --help sai 0 — um portão sem veredito nunca é verde (banca v9 A15).
+    try:
+        args = build_parser().parse_args(argv)
+    except SystemExit:
+        sys.exit(2)
     if args.window < 1 or args.baseline < 1:
         die("--window and --baseline must be >= 1")
     if not positive_finite(args.climb) or not positive_finite(args.ceiling):

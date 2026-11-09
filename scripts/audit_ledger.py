@@ -93,21 +93,25 @@ def _full_command_str(entry: dict) -> str:
     return str(cmd).strip()
 
 
-def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
-    """Verifica a cadeia de hashes de `.henke/exec_log.jsonl` e cruza cada comando
-    de teste do ledger contra os registros reais executados."""
+def verify_log_chain(log_p: Path) -> tuple[list[str], str | None]:
+    """Verifica a cadeia de hashes do exec_log e a âncora local da ponta.
+
+    Retorna (erros, último entry_hash válido). Usado por verify_exec_log e por
+    `henke exec` ANTES de fazer append — encadear sobre um log plantado
+    lavaria a âncora da ponta com uma execução legítima (banca v9 — A1).
+    """
     errors: list[str] = []
-    log_p = Path(exec_log_path)
+    log_p = Path(log_p)
     if not log_p.is_file():
-        return [f"UNVERIFIED_EXECUTION_EVIDENCE: arquivo de log '{log_p}' inexistente."]
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: arquivo de log '{log_p}' inexistente."], None
 
     try:
         raw_lines = [ln.strip() for ln in log_p.read_text(encoding="utf-8").splitlines() if ln.strip()]
     except Exception as exc:
-        return [f"UNVERIFIED_EXECUTION_EVIDENCE: falha ao ler '{log_p}': {exc}"]
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: falha ao ler '{log_p}': {exc}"], None
 
     if not raw_lines:
-        return [f"UNVERIFIED_EXECUTION_EVIDENCE: '{log_p}' está vazio."]
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: '{log_p}' está vazio."], None
 
     verified_records: list[dict] = []
     last_ehash: str | None = None
@@ -214,6 +218,34 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
                     f"UNVERIFIED_EXECUTION_EVIDENCE: ponta do exec_log diverge da "
                     f"âncora local — cadeia reescrita/truncada."
                 )
+
+    return errors, last_ehash
+
+
+def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
+    """Verifica a cadeia de hashes de `.henke/exec_log.jsonl` e cruza cada comando
+    de teste do ledger contra os registros reais executados."""
+    errors, _last = verify_log_chain(exec_log_path)
+    log_p = Path(exec_log_path)
+    if errors and not log_p.is_file():
+        return errors
+    try:
+        raw_lines = [ln.strip() for ln in log_p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except Exception:
+        raw_lines = []
+    verified_records: list[dict] = []
+    for line in raw_lines:
+        try:
+            rec = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(rec, dict):
+            verified_records.append({
+                "cmd": str(rec.get("cmd", "")).strip(),
+                "exit": rec.get("exit", rec.get("exit_code", 0)),
+                "testes_descobertos": rec.get("testes_descobertos", 0),
+                "stdout_sha256": str(rec.get("stdout_sha256", "")).strip(),
+            })
 
     for i, entry in enumerate(entries, 1):
         if not isinstance(entry, dict):

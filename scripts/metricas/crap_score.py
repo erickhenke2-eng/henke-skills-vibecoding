@@ -111,7 +111,11 @@ def main() -> int:
                    help="breach when score > threshold (default 6, the agent regime)")
     p.add_argument("tsv", nargs="?",
                    help="TSV file (default stdin): function<TAB>complexity<TAB>coverage_pct")
-    args = p.parse_args()
+    try:
+        args = p.parse_args()
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
 
     # A gate whose report goes nowhere has not reported. CPython hands us sys.stdout is
     # None when fd 1 was closed before exec, and print() then discards every row in

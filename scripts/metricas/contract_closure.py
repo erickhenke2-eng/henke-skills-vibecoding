@@ -161,7 +161,32 @@ def _strip_comments_keep_strings(raw: str, ext: str) -> str:
 
 def _code_only(raw: str, ext: str) -> str:
     if ext == ".py":
-        return _hs._strip_py_comments(raw)
+        # Python: mascara literais de string via AST — um `from x import y`
+        # dentro de docstring não pode fechar ponte (banca v9 A8).
+        no_c = _hs._strip_py_comments(raw)
+        try:
+            tree = ast.parse(no_c)
+        except (SyntaxError, ValueError):
+            return no_c
+        spans = [
+            (n.lineno, n.col_offset, n.end_lineno, n.end_col_offset)
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and n.end_lineno is not None
+        ]
+        if not spans:
+            return no_c
+        lines = no_c.split("\n")
+        for i, ln in enumerate(lines, start=1):
+            chars = list(ln)
+            for sl, sc, el, ec in spans:
+                if sl <= i <= el:
+                    a = sc if i == sl else 0
+                    b = ec if i == el else len(chars)
+                    for j in range(a, min(b, len(chars))):
+                        chars[j] = " "
+            lines[i - 1] = "".join(chars)
+        return "\n".join(lines)
     return _pg.mask_c_like(raw, ext)
 
 
@@ -271,22 +296,33 @@ def _is_top_level_symbol(src_raw: str, src_code: str, ext: str, sym: str) -> boo
     return True
 
 
-def _has_valid_import(dst_nc: str, src_rel: str, src_stem: str, sym: str) -> bool:
+def _has_valid_import(dst_nc: str, dst_code: str, src_rel: str, src_stem: str, sym: str) -> bool:
     esc_stem = re.escape(src_stem)
     esc_sym = re.escape(sym)
     esc_name = re.escape(Path(src_rel).name)
     target_pat = rf"(?:\b{esc_stem}\b|\b{esc_sym}\b|{esc_name})"
 
+    # A8 (banca v9): keyword de import só conta fora de strings — o conjunto
+    # de linhas legítimas vem do texto com strings mascaradas; `from` dentro
+    # de docstring/template-literal é descartado.
+    imp_lineno_ok = {
+        i for i, ln in enumerate(dst_code.split("\n"))
+        if re.match(r"[ \t]*(?:from|import|export\s+.*?\bfrom|use|pub\s*use|mod)\b", ln)
+    }
+
     # Linhas de import que nomeiam o módulo-alvo (stem/nome de arquivo —
     # target_pat completo incluiria o símbolo e deixaria `import {sym} from
     # "outro-modulo"` satisfazer a ponte pelo módulo errado).
+    # `[ \t]*` e não `\s*`: `\s` come newlines e faria o match começar em
+    # linhas vazias anteriores, desalinhando o filtro de linha legítima.
     imp_lines = [
         m.group(0)
         for m in re.finditer(
-            r"(?m)^\s*(?:from|import|export\s+.*?\bfrom|use|pub\s+use|mod)\b[^\n;]*",
+            r"(?m)^[ \t]*(?:from|import|export\s+.*?\bfrom|use|pub\s*use|mod)\b[^\n;]*",
             dst_nc,
         )
         if re.search(rf"(?:\b{esc_stem}\b|{esc_name})", m.group(0))
+        and dst_nc.count("\n", 0, m.start()) in imp_lineno_ok
     ]
     has_dyn = re.search(
         rf"\b(?:require|import|spec_from_file_location|load_module|run|run_gate|subprocess\.run)\s*\([^)]*{target_pat}",
@@ -298,12 +334,31 @@ def _has_valid_import(dst_nc: str, src_rel: str, src_stem: str, sym: str) -> boo
     # C6 (banca v7): import de side-effect (`use "x"`, `mod x;`) não fecha o
     # contrato — o símbolo precisa aparecer nomeado na cláusula de import ou
     # ser referenciado no corpo do arquivo.
+    # Uso no corpo avaliado sobre dst_code (strings mascaradas) — símbolo ou
+    # `mod.sym` dentro de literal não é referência real.
     non_imp = re.sub(
-        r"(?m)^\s*(?:from|import|export|use|pub\s+use|mod)\b[^\n;]*", "", dst_nc
+        r"(?m)^[ \t]*(?:from|import|export|use|pub\s*use|mod)\b[^\n;]*", "", dst_code
     )
-    if re.search(rf"\b{esc_sym}\b", non_imp):
+    # Vínculo símbolo↔módulo (banca v9 A7): `import auth` + `def verificaToken`
+    # local fechava a ponte sem dependência real. Bare-import exige referência
+    # qualificada — inclusive via ALIAS (`import polyglot as _pg; _pg.sym`).
+    qualifiers = {esc_stem, esc_name}
+    for ln in imp_lines:
+        for al in re.findall(r"\bas\s+([A-Za-z_]\w*)\b", ln):
+            qualifiers.add(re.escape(al))
+        for bare in re.findall(r"(?m)^[ \t]*(?:import|use|mod)\s+([\w.]+)\s*;?\s*$", ln):
+            if bare not in (src_stem,):
+                qualifiers.add(re.escape(bare.rsplit(".", 1)[-1]))
+    qual_pat = "|".join(sorted(qualifiers, key=len, reverse=True))
+    if re.search(rf"(?:{qual_pat})\s*\.\s*{esc_sym}\b", non_imp):
         return True
-    return any(re.search(rf"\b{esc_sym}\b", ln) for ln in imp_lines)
+    if any(re.search(rf"\b{esc_sym}\b", ln) for ln in imp_lines):
+        return True
+    # require()/import() dinâmico resolve o módulo fora da sintaxe de import:
+    # o símbolo bare no corpo segue sendo a evidência disponível.
+    if has_dyn and re.search(rf"\b{esc_sym}\b", non_imp):
+        return True
+    return False
 
 
 def check_contract_closure(
@@ -400,6 +455,12 @@ def check_contract_closure(
                     "não é argumento direto de callsite (plantação de literal morta)")
             if not pat.search(dst_nc):
                 errors.append(f"BROKEN-BRIDGE-STRING-DST: literal {sym} não consumido no destino '{dst_rel}'")
+            # A9 (banca v9): com callsites IPC no destino, o literal precisa
+            # alimentar um deles — `const UNUSED = "canal"` não fecha ponte.
+            elif _CALLSITES_IPC_RE.search(dst_nc) and not _is_callsite_arg(literal, dst_nc):
+                errors.append(
+                    f"CHANNEL-LITERAL-DEAD: literal {sym} existe no destino '{dst_rel}' mas "
+                    "não é argumento direto de callsite (plantação de literal morta)")
             # v2: par (canal, ação) — cada ação declarada precisa estar viva no destino
             for act in actions:
                 pat_act = re.compile(r"""['"`]""" + re.escape(act) + r"""['"`]""")
@@ -423,7 +484,7 @@ def check_contract_closure(
 
             if not pat.search(dst_code):
                 errors.append(f"BROKEN-BRIDGE-SYMBOL-DST: símbolo '{sym}' não referenciado no destino '{dst_rel}'")
-            elif not _has_valid_import(dst_nc, src_rel, src_path.stem, sym):
+            elif not _has_valid_import(dst_nc, dst_code, src_rel, src_path.stem, sym):
                 errors.append(f"BROKEN-BRIDGE-IMPORT: destino '{dst_rel}' referencia '{sym}' mas não importa '{src_rel}'")
 
     return len(errors) == 0, errors

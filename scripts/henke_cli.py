@@ -423,10 +423,39 @@ def _cmd_exec(
     # Lê prev_hash + append da entrada + LEDGER.json sob o MESMO lock
     # (read-modify-write atômico — concorrência não pode ver estado intermediário).
     from scripts import run_state as _rs
+    # B9 (banca v9): a âncora local da ponta é chaveada por REPO — um
+    # --exec-log fora de .henke/exec_log.jsonl não pode ancorar o tip do repo
+    # (ancoraria a ponta de outro arquivo, corrompendo a custódia canônica).
+    _canonical_log = (repo_root / ".henke" / "exec_log.jsonl").resolve()
+    _is_canonical = exec_log_path.resolve() == _canonical_log
     try:
         with _rs._file_lock(exec_log_path):
             prev_hash = "0" * 64
             if exec_log_path.is_file():
+                # A1 (banca v9): ANTES de encadear, a cadeia existente tem que
+                # verificar — append sobre um log plantado lavaria a âncora da
+                # ponta com uma execução legítima e tornaria a história
+                # fabricada "ancorada" para sempre. Log fora do caminho
+                # canônico não tem âncora: verifica-se só a cadeia interna.
+                try:
+                    from scripts.audit_ledger import verify_log_chain as _vlc
+                except ImportError:
+                    try:
+                        from audit_ledger import verify_log_chain as _vlc  # type: ignore
+                    except ImportError:
+                        _vlc = None  # type: ignore[assignment]
+                if _vlc is not None and _is_canonical:
+                    _chain_errors, _last = _vlc(exec_log_path)
+                    if _chain_errors:
+                        for _e in _chain_errors[:5]:
+                            print(f"ERRO: {_e}", file=sys.stderr)
+                        print(
+                            "ERRO: exec_log existente falhou a verificação de "
+                            "integridade — append recusado (remova o log "
+                            "corrompido explicitamente se for recomeçar).",
+                            file=sys.stderr,
+                        )
+                        return 2
                 try:
                     lines = [
                         ln.strip()
@@ -487,12 +516,14 @@ def _cmd_exec(
             # Âncora LOCAL da ponta da cadeia (F-13): a cadeia prova só
             # consistência interna — truncar/reescrever o rabinho do jsonl
             # produzia cadeia "válida". Com a ponta fora do repo, qualquer
-            # reescrita diverge do tip gravado nesta máquina.
-            try:
-                _rs.record_exec_tip(repo_root, entry_hash)
-            except OSError as exc:
-                print(f"ERRO: falha ao ancorar ponta do exec_log localmente: {exc}", file=sys.stderr)
-                return 2
+            # reescrita diverge do tip gravado nesta máquina. Só o caminho
+            # canônico ancora (B9).
+            if _is_canonical:
+                try:
+                    _rs.record_exec_tip(repo_root, entry_hash)
+                except OSError as exc:
+                    print(f"ERRO: falha ao ancorar ponta do exec_log localmente: {exc}", file=sys.stderr)
+                    return 2
     except TimeoutError as exc:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 2

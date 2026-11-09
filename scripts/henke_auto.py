@@ -119,6 +119,20 @@ DESTRUCTIVE_VERBS = (
     # paráfrases coloquiais de evasão (MÉDIO-10 banca v6)
     "remove", "remover", "elimina", "eliminar", "eliminate", "joga fora",
     "jogar fora", "tira do ar", "tirar do ar", "get rid of", "get rid",
+    # Gerúndios/imperativos/plurais/passado (banca v9 — A1)
+    "deletando", "deletem", "deletou", "apagando", "apaguem", "apagou",
+    "excluindo", "excluam", "excluiu", "removam", "removeu", "destruindo",
+    "destruam", "truncando", "limpando", "limpem", "zerando", "zerem",
+    "eliminando", "eliminem", "resetando", "desinstalando", "derrubando",
+    "derrubem", "deleting", "deletes", "removing", "removes", "wiping",
+    "dropping", "truncating", "erasing", "purging", "destroying",
+    # Comandos nativos Windows/Unix (banca v9 — A4)
+    "del /", "del/", "del *", "rmdir", "rd /", "rd/", "mkfs", "dd if",
+    "shred", "sdelete", "cipher /w", "remove-item", "format-volume",
+    "format c:", "dism /",
+    # Paráfrases indiretas PT (banca v9 — A6)
+    "esvazia", "esvaziar", "some com", "varre", "varrer", "tira tudo",
+    "tirar tudo", "limpa tudo", "apaga tudo",
 )
 METACONFIG_SIGNALS = (
     "package.json", "package-lock", "lockfile", "requirements", "pyproject",
@@ -138,16 +152,37 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Homoglifos cross-script (cirílico/grego sobrevivem ao NFKD como Ll) —
+# mesma tabela do henke_router; manter as duas sincronizadas (banca v9 — A2).
+_HOMOGLYPHS = str.maketrans({
+    "а": "a", "е": "e", "ё": "e", "о": "o", "р": "p", "с": "c", "х": "x",
+    "у": "y", "і": "i", "ї": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ԛ": "q",
+    "һ": "h", "к": "k", "м": "m", "н": "n", "т": "t", "в": "b", "г": "r",
+    "п": "n", "э": "e", "з": "3", "ҝ": "k", "օ": "o", "ո": "n", "ս": "u",
+    "ɡ": "g", "ɩ": "i", "ο": "o", "α": "a", "β": "b", "γ": "y", "δ": "d",
+    "ε": "e", "ζ": "z", "η": "n", "ι": "i", "κ": "k", "μ": "u", "ν": "v",
+    "ρ": "p", "τ": "t", "υ": "u", "χ": "x", "ω": "w", "ϲ": "c", "ϳ": "j",
+    "А": "a", "В": "b", "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
+    "Р": "p", "С": "c", "Т": "t", "Х": "x", "І": "i",
+})
+
+
 def _norm(text: str) -> str:
-    """Normalização idêntica à do henke_router (NFKD, minúsculas, sem acentos,
-    sem caracteres de formato/controle — ZWSP & cia não podem quebrar o \b
-    de _has_signal, banca v7 — F-04)."""
-    nfkd = unicodedata.normalize("NFKD", text.lower())
-    return "".join(
-        c for c in nfkd
-        if not unicodedata.combining(c)
-        and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn")
+    """Normalização idêntica à do henke_router: NFKD, minúsculas, sem acentos,
+    sem formato/controle/marcas (ZWSP & cia — banca v7 F-04; Mn/Mc/Me —
+    banca v9 A5), homoglifos dobrados (A2) e whitespace exótico colapsado
+    (NBSP/tab/espaço duplo — A3). Manter as duas implementações iguais."""
+    folded = text.translate(_HOMOGLYPHS)
+    nfkd = unicodedata.normalize("NFKD", folded.lower())
+    stripped = "".join(
+        " " if c.isspace() or unicodedata.category(c) == "Zs" else c
+        for c in nfkd
+        if c.isspace()
+        or (not unicodedata.combining(c)
+            and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn",
+                                               "Mn", "Mc", "Me"))
     )
+    return re.sub(r"\s+", " ", stripped)
 
 
 def _has_signal(text: str, sig: str) -> bool:
@@ -523,15 +558,29 @@ def _redact_secrets(text: str) -> tuple[str, int]:
 
 
 def _approval_fingerprint(prompt: str, route_snapshot: dict | None,
-                          driver: str | None = None) -> str:
+                          driver: str | None = None,
+                          extra: dict | None = None) -> str:
     """sha256 do escopo aprovado (prompt + route_snapshot + driver — trocar o
-    driver entre approve/resume invalida a aprovação: outro driver = outro risco)."""
+    driver entre approve/resume invalida a aprovação: outro driver = outro risco).
+    `extra` ancora test_cmd+política efetiva (banca v9 — M3): editar
+    PROJECT.json/POLICY.json entre approve e resume executaria outro comando
+    sob o selo da aprovação."""
     payload = json.dumps(
         {"prompt": prompt, "route_snapshot": route_snapshot or {},
-         "driver": driver or ""},
+         "driver": driver or "", "extra": extra or {}},
         sort_keys=True, ensure_ascii=False, default=str,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _approval_extra(project: dict | None, policy_efetiva: dict | None) -> dict:
+    """Campos de execução vinculados à aprovação: o comando de teste real e a
+    política efetiva — não o arquivo (o usuário pode editar entre approve e
+    resume; divergência = re-aprovação, que é o comportamento correto)."""
+    return {
+        "test_cmd": (project or {}).get("test_cmd"),
+        "policy": policy_efetiva or {},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1139,6 +1188,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             fp_now = _approval_fingerprint(
                 str(resumed.get("prompt") or ""), snap if isinstance(snap, dict) else None,
                 str(driver or resumed.get("driver") or "") or None,
+                extra=_approval_extra(project, policy_efetiva),
             )
             if fp_now != binding.get("scope_sha256"):
                 stale.append("escopo/prompt da run divergiu do snapshot aprovado")
@@ -1224,7 +1274,9 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         # Vínculo da aprovação (--resume): HEAD + sha256(prompt+route_snapshot).
         run_patch["approval_binding"] = {
             "head": _git_head(repo_root),
-            "scope_sha256": _approval_fingerprint(prompt, route_snapshot, driver),
+            "scope_sha256": _approval_fingerprint(
+                prompt, route_snapshot, driver,
+                extra=_approval_extra(project, policy_efetiva)),
             "driver": driver,
             "run_id": run_id,
             "repo": str(repo_root.resolve()),
@@ -1236,14 +1288,30 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     # o próprio trabalho do diff — run_gates prefere esta cópia intocável.
     try:
         _run_now = json.loads(run_path.read_text(encoding="utf-8"))
-        write_anchor_sidecar(
-            str(_run_now.get("run_id") or run_id),
-            _run_now.get("spec_path"),
-            _run_now.get("spec_sha256"),
-            _run_now.get("head_start"),
-            repo_root=repo_root,
-            fields=_run_now,
-        )
+        if resumed is None:
+            write_anchor_sidecar(
+                str(_run_now.get("run_id") or run_id),
+                _run_now.get("spec_path"),
+                _run_now.get("spec_sha256"),
+                _run_now.get("head_start"),
+                repo_root=repo_root,
+                fields=_run_now,
+            )
+        else:
+            # A2 (banca v9): resume NUNCA regrava o sidecar a partir do JSON
+            # adulterável — regravar lavaria head_start/spec_sha256 movidos
+            # pelo atacante entre a criação e o approve. Divergência = falha.
+            from scripts.run_state import load_anchor_sidecar as _las
+            _sc = _las(str(_run_now.get("run_id") or run_id), repo_root=repo_root)
+            _drift = ["sidecar ausente"] if not isinstance(_sc, dict) else [
+                f for f in ("spec_path", "spec_sha256", "head_start")
+                if _sc.get(f) != _run_now.get(f)
+            ]
+            if _drift:
+                raise RuntimeError(
+                    "ANCHOR-DRIFT: âncoras da run divergem do sidecar local "
+                    f"({', '.join(_drift)}) — retomada recusada"
+                )
     except (OSError, ValueError):
         pass
     _record_stage(

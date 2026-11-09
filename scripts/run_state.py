@@ -217,14 +217,19 @@ def _evidence_manifest_path(run_id: str) -> Path:
     return _config_dir() / "evidence-manifest" / f"{safe}.json"
 
 
-def _append_evidence_manifest(run_id: str, gate: str, evidence_file: str,
-                              evidence_sha256: str, command: str) -> None:
-    """Acrescenta a tríade ao manifesto LOCAL (~/.config/henke/evidence-manifest/).
+def _append_evidence_manifest(run_id: str, gate: str,
+                              evidence_file: str | None,
+                              evidence_sha256: str | None, command: str | None,
+                              exit_code: int, manual: bool,
+                              external: bool = False) -> None:
+    """Acrescenta o veredito ao manifesto LOCAL (~/.config/henke/evidence-manifest/).
 
     A tríade gravada na run prova "existiu um arquivo com este sha"; o manifesto
-    prova "foi `record_gate` DESTA máquina que registrou". Uma run plantada por
-    clone (evidência + JSON fabricados no worktree) não tem manifesto local —
-    `verify_run_file` reprova cada tríade sem manifesto (EVIDENCE-UNMANIFESTED).
+    prova "foi `record_gate` DESTA máquina que registrou" — e agora ancora
+    também o `exit_code` (banca v9 — C1: o bit que decide o veredito era
+    texto livre no JSON mutável) e cobre TODA gravação, inclusive manual
+    (C2: deletar um portão vermelho do JSON era indetectável — o manifesto
+    passa a exigir manifest ⊆ run.gates com campos iguais).
     """
     p = _evidence_manifest_path(run_id)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -238,12 +243,17 @@ def _append_evidence_manifest(run_id: str, gate: str, evidence_file: str,
     if not isinstance(entries, dict):
         entries = {}
         data["entries"] = entries
-    entries[gate] = {
-        "evidence_file": evidence_file,
-        "evidence_sha256": evidence_sha256,
-        "command": command,
+    entry: dict = {
+        "exit_code": int(exit_code),
+        "manual": bool(manual),
+        "external": bool(external),
         "recorded_at": _now_iso(),
     }
+    if not manual:
+        entry["evidence_file"] = evidence_file
+        entry["evidence_sha256"] = evidence_sha256
+        entry["command"] = command
+    entries[gate] = entry
     _atomic_write_json(p, data)
 
 
@@ -467,6 +477,13 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
         ]
 
     # 2b. Verifica portões obrigatórios declarados na run (ou gates_required)
+    # Portões externos (script fora da suíte — opt-in --gates) executam e
+    # reportam, mas NUNCA satisfazem cobertura obrigatória (banca v9 — A4:
+    # `--gates C:\evil\hazard_scan.py` mintava stem de mandatory).
+    coverage_gates = {
+        g: i for g, i in physical_gates.items()
+        if isinstance(i, dict) and not i.get("external")
+    }
     mandatory_gates = run_data.get("mandatory_gates") or run_data.get("gates_required")
     if mandatory_gates is not None and not isinstance(mandatory_gates, list):
         return "blocked", [
@@ -484,7 +501,7 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
                 (g_name == g or Path(g_name).stem == g)
                 and isinstance(g_info, dict)
                 and g_info.get("exit_code") == 0
-                for g_name, g_info in physical_gates.items()
+                for g_name, g_info in coverage_gates.items()
             )
         ]
         if not executed_core:
@@ -500,7 +517,7 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
                     (g_name == req or Path(g_name).stem == req)
                     and isinstance(g_info, dict)
                     and g_info.get("exit_code") == 0
-                    for g_name, g_info in physical_gates.items()
+                    for g_name, g_info in coverage_gates.items()
                 )
             ]
             if missing_spec:
@@ -520,7 +537,7 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
                 (g_name == req or Path(g_name).stem == req_stem)
                 and isinstance(g_info, dict)
                 and g_info.get("exit_code") in (0, 3)
-                for g_name, g_info in physical_gates.items()
+                for g_name, g_info in coverage_gates.items()
             )
             if not found:
                 missing_mandatory.append(
@@ -628,22 +645,72 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     # Confinamento a evidence/<run_id>/: evidência de OUTRA run não prova esta
     # (reuso cross-run), e o mesmo arquivo não pode ser saída de dois portões.
     evidence_root = (p.parent.parent / "evidence" / run_id).resolve()
-    # Manifesto LOCAL de tríades: prova que `record_gate` DESTA máquina
-    # registrou a entrada — run plantada por clone não tem manifesto.
+    # Manifesto LOCAL de vereditos: prova que `record_gate` DESTA máquina
+    # registrou CADA entrada — run plantada por clone não tem manifesto.
+    # Bidirecional (banca v9 — C1/C2): exit_code e flag manual ancorados,
+    # e órfãos no manifesto = veredito deletado da run.
     manifest = _load_evidence_manifest(run_id)
     m_entries = (manifest or {}).get("entries") or {}
+    run_gates = {
+        k: v for k, v in (data.get("gates") or {}).items()
+        if isinstance(v, dict)
+    }
+    for g_name in sorted(set(m_entries) - set(run_gates)):
+        tampered.append(
+            f"EVIDENCE-ORPHANED: {g_name} — gravação consta no manifesto "
+            "local mas o portão foi apagado da run (veredito deletado "
+            "não é invisível)"
+        )
     seen_evidence: dict[str, str] = {}
-    for g_name, g_info in (data.get("gates") or {}).items():
-        if not isinstance(g_info, dict):
+    for g_name, g_info in run_gates.items():
+        m = m_entries.get(g_name)
+        if not isinstance(m, dict):
+            tampered.append(
+                f"GATE-UNMANIFESTED: {g_name} — veredito não consta no "
+                "manifesto local (plantado ou gravado fora de record_gate)"
+            )
+            continue
+        try:
+            m_exit = int(m.get("exit_code"))
+            r_exit = int(g_info.get("exit_code"))
+        except (TypeError, ValueError):
+            m_exit, r_exit = -1, -2
+        if m_exit != r_exit:
+            tampered.append(
+                f"GATE-VERDICT-TAMPERED: {g_name} — exit_code na run "
+                f"({g_info.get('exit_code')}) diverge do manifesto local "
+                f"({m.get('exit_code')})"
+            )
+            continue
+        if bool(m.get("manual")) != bool(g_info.get("manual")):
+            tampered.append(
+                f"GATE-MANUAL-FLIPPED: {g_name} — flag 'manual' diverge "
+                "do manifesto local (físico↔manual não é flippável)"
+            )
+            continue
+        if bool(m.get("external")) != bool(g_info.get("external")):
+            tampered.append(
+                f"GATE-EXTERNAL-FLIPPED: {g_name} — flag 'external' diverge "
+                "do manifesto local (removê-la mintaria portão obrigatório)"
+            )
             continue
         ev = g_info.get("evidence_file")
         sha = g_info.get("evidence_sha256")
-        if not ev or not sha:
+        if m.get("manual"):
+            if ev or sha:
+                tampered.append(
+                    f"EVIDENCE-IN-MANUAL: {g_name} — tríade em entrada "
+                    "atestada manual (tríade física é domínio da pipeline)"
+                )
             continue
-        m = m_entries.get(g_name)
+        if not ev or not sha:
+            tampered.append(
+                f"EVIDENCE-MISSING: {g_name} — entrada física sem tríade "
+                "na run (evidence_file/evidence_sha256 apagados)"
+            )
+            continue
         if (
-            not isinstance(m, dict)
-            or m.get("evidence_sha256") != sha
+            m.get("evidence_sha256") != sha
             or str(m.get("evidence_file") or "") != str(ev)
         ):
             tampered.append(
@@ -799,6 +866,7 @@ def record_gate(
     command: str | None = None,
     evidence_file: str | Path | None = None,
     manual: bool = False,
+    external: bool = False,
 ) -> dict:
     """Registra o veredito de um portão na run e recalcula o outcome derivado.
 
@@ -876,24 +944,16 @@ def record_gate(
             "summary": summary,
             "recorded_at": _now_iso(),
         }
+        if external:
+            # A4 (banca v9): script fora da suíte/pacote (opt-in --gates)
+            # executa, mas seu veredito NUNCA satisfaz portão obrigatório —
+            # o flag é ancorado no manifesto (removê-lo do JSON = mismatch).
+            entry["external"] = True
         if evidence_sha is not None:
             entry["command"] = str(command)
             entry["evidence_file"] = str(evidence_path)
             entry["evidence_sha256"] = evidence_sha
             entry["evidence_source"] = str(source_resolved)
-            if not manual:
-                # Manifesto LOCAL: a tríade só é verificável se constar aqui —
-                # uma run plantada não tem manifesto na máquina da vítima.
-                # Registros manuais (CLI) NUNCA entram no manifesto: senão o
-                # CLI mintava tríade + manifesto e bastava apagar "manual" do
-                # JSON para forjar portão físico (F-03 banca v8).
-                try:
-                    _append_evidence_manifest(
-                        run_id, gate_name, str(evidence_path), evidence_sha, str(command))
-                except OSError as exc:
-                    raise ValueError(
-                        f"falha ao gravar manifesto de evidência local: {exc}"
-                    ) from exc
         if manual:
             # manual=True marca atestação MESMO com tríade presente — sem isso
             # a superfície CLI emitiria evidência "física" verificável (F-01).
@@ -907,6 +967,22 @@ def record_gate(
                     f"portão '{gate_name}' já possui tríade física — "
                     "registro manual não pode sobrescrevê-la"
                 )
+        # Manifesto LOCAL cobre TODA gravação (C1+C2 banca v9): entradas
+        # físicas trazem a tríade; manuais trazem só exit_code+manual — o
+        # veredito deixa de ser texto livre e deletar um portão do JSON
+        # deixa órfão detectável no manifesto (EVIDENCE-ORPHANED).
+        try:
+            _append_evidence_manifest(
+                run_path.stem, gate_name,
+                str(evidence_path) if evidence_sha is not None else None,
+                evidence_sha,
+                str(command) if evidence_sha is not None else None,
+                int(exit_code), manual, external,
+            )
+        except OSError as exc:
+            raise ValueError(
+                f"falha ao gravar manifesto de evidência local: {exc}"
+            ) from exc
         gates[gate_name] = entry
         derived, reasons = derive_run_outcome(data)
         data["outcome"] = derived
@@ -1040,23 +1116,20 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 2
-            has_cmd = bool(args.command and str(args.command).strip())
-            has_ev = args.evidence_file is not None
-            if has_cmd != has_ev:
+            if args.command or args.evidence_file is not None:
+                # F-01+M2: a superfície CLI NUNCA carrega tríade — atestação
+                # manual com evidence_* envenenava a run permanentemente
+                # (EVIDENCE-UNMANIFESTED sem caminho de reparo). Evidência
+                # física é domínio exclusivo da pipeline (record_gate via API).
                 print(
-                    "ERRO: evidência incompleta — informe --command E --evidence-file juntos. "
-                    "Sem ambos, o veredito vira atestação manual (manual: true) e não conta "
-                    "como portão físico.",
+                    "ERRO: --command/--evidence-file não são aceitos no CLI — "
+                    "atestação manual não carrega tríade; evidência física só "
+                    "a pipeline emite (record_gate via API).",
                     file=sys.stderr,
                 )
                 return 2
-            # F-01: a superfície CLI NUNCA emite tríade física — evidência
-            # física é domínio da pipeline (record_gate via API dentro de
-            # run_gates/_run_auto_inner). Um forjador local produziria aqui
-            # exatamente o artefato que verify valida.
             data = record_gate(
                 args.run_file, args.gate, args.exit_code, args.summary,
-                command=args.command, evidence_file=args.evidence_file,
                 manual=True,
             )
             print(f"OK: Gate '{args.gate}' (exit {args.exit_code}) registrado "
@@ -1086,6 +1159,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  scope_paths     : {_prev.get('scope_paths')}")
             print(f"  mandatory_gates : {_prev.get('mandatory_gates')}")
             print(f"  requires_human  : {_prev.get('requires_human_auth')}")
+            # A2 (banca v9): âncoras do diff também entram no resumo — o
+            # humano precisa ver contra qual HEAD/spec a aprovação se vincula.
+            print(f"  head_start      : {_prev.get('head_start')}")
+            print(f"  spec_sha256     : {str(_prev.get('spec_sha256'))[:16]}…")
+            print(f"  spec_path       : {_prev.get('spec_path')}")
             if not args.yes:
                 if not sys.stdin.isatty():
                     print(

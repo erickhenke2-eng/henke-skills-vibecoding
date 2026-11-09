@@ -103,7 +103,7 @@ TEST_FUNC = re.compile(r"^test[A-Za-z0-9_]*$")
 # with a non-ASCII name that pytest itself collects and runs - the scan reported clean
 # over tests it never read.
 TEST_FILE = re.compile(
-    r"^(?:test_\w*|\w+_test)\.py$|.*\.(?:test|spec)\.(?:ts|tsx|js|mjs|jsx)$|.*_test\.(?:go|rs)$",
+    r"^(?:test_\w*|\w+_test)\.py$|.*\.(?:test|spec)\.(?:ts|tsx|js|mjs|cjs|mts|cts|jsx)$|.*_test\.(?:go|rs)$",
     re.IGNORECASE)
 UNITTEST_ASSERT = re.compile(r"^(?:assert[A-Z][A-Za-z0-9]*|fail)$")
 MOCK_ASSERT = re.compile(r"^assert_[a-z0-9_]+$")
@@ -678,15 +678,25 @@ def call_cannot_fail(name, args, scope):
     """
     if name in ("assertTrue", "assertFalse") and args:
         return const_truth(args[0], scope) is (name == "assertTrue")
-    if name in ("assertEqual", "assertEquals", "assertNotEqual") and len(args) >= 2:
-        left, right = (literal_value(a, scope.consts) for a in args[:2])
-        if left is _UNKNOWN or right is _UNKNOWN:
-            return False
-        try:
-            same = bool(left == right)
-        except Exception:
-            return False
-        return same if name != "assertNotEqual" else not same
+    _EQ_POS = {"assertEqual", "assertEquals", "assertIs", "assertDictEqual",
+               "assertListEqual", "assertTupleEqual", "assertSetEqual",
+               "assertMultiLineEqual", "assertSequenceEqual", "assertCountEqual",
+               "assertAlmostEqual"}
+    _EQ_NEG = {"assertNotEqual", "assertIsNot", "assertNotAlmostEqual"}
+    if name in _EQ_POS | _EQ_NEG and len(args) >= 2:
+        # assertEqual(x, x) / assertIs(obj, obj) — tautologia por identidade,
+        # sem literal nenhum: mesma expressão dos dois lados nunca falha.
+        if ast.dump(args[0]) == ast.dump(args[1]):
+            return name in _EQ_POS
+        if name in ("assertEqual", "assertEquals", "assertNotEqual"):
+            left, right = (literal_value(a, scope.consts) for a in args[:2])
+            if left is _UNKNOWN or right is _UNKNOWN:
+                return False
+            try:
+                same = bool(left == right)
+            except Exception:
+                return False
+            return same if name != "assertNotEqual" else not same
     return False
 
 

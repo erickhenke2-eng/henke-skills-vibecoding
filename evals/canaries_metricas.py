@@ -1142,7 +1142,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         m78_ev = t / ".henke" / "evidence" / "r2" / "hazard_scan.out"
         m78_ev.write_text("scan limpo\n", encoding="utf-8")
         m78_sha = hashlib.sha256(m78_ev.read_bytes()).hexdigest()
-        _append_evidence_manifest("r2", "hazard_scan", str(m78_ev), m78_sha, "hazard_scan .")
+        _append_evidence_manifest("r2", "hazard_scan", str(m78_ev), m78_sha, "hazard_scan .", 0, False)
         m78_ok = t / ".henke" / "runs" / "r2.json"
         m78_ok.write_text(json.dumps({
             "run_id": "r2",

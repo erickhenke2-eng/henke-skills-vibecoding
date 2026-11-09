@@ -18,7 +18,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+# CWD-poisoning (banca v9 — A8): which()/exec não podem resolver binário
+# plantado no diretório corrente do repo alvo no Windows.
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
+
 DEFAULT_MODEL = "opencode/deepseek-v4.1-flash-free"
+# `model` vai para argv de shim .cmd → list2cmdline escapa " como \" que o
+# cmd.exe NÃO entende — dessincroniza aspas e & vira separador (banca v9 A7).
+_MODEL_RE = re.compile(r"[\w./:@+-]+")
 
 
 def _resolve_cli(name: str) -> str | None:
@@ -59,7 +66,7 @@ def _last_result_json(text: str) -> dict | None:
 
 def main() -> int:
     model = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
-    if model.startswith("-"):
+    if not _MODEL_RE.fullmatch(model):
         print(json.dumps({"files_changed": [], "notes": f"modelo inválido: {model!r}"}))
         return 1
     try:
@@ -69,14 +76,19 @@ def main() -> int:
         return 1
 
     repo = str(envelope.get("repo_root") or ".")
+    if not Path(repo).is_dir():
+        print(json.dumps({"files_changed": [], "notes": f"repo_root inexistente: {repo!r}"}))
+        return 2
+    # Envelope no TEMP do sistema — dentro do repo ele aparecia no git status
+    # da própria run e sobrevivia a SIGKILL com o prompt inteiro (banca v9 M7).
     env_file = tempfile.NamedTemporaryFile(
         "w", suffix=".envelope.json", prefix="henke-", delete=False,
-        dir=repo, encoding="utf-8",
+        encoding="utf-8",
     )
     try:
         json.dump(envelope, env_file, ensure_ascii=False)
         env_file.close()
-        prompt = f"{_INSTR}\n\nEnvelope anexo: {Path(env_file.name).name}"
+        prompt = f"{_INSTR}\n\nEnvelope anexo: {env_file.name}"
         exe = _resolve_cli("opencode")
         if exe is None:
             print(json.dumps({"files_changed": [], "notes": "opencode não encontrado no PATH"}))

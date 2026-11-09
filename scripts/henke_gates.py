@@ -99,6 +99,11 @@ def _safe_run_id(run_id: str) -> str:
     return "".join(c for c in str(run_id) if c.isalnum() or c in ("-", "_")).strip()
 
 
+# Tree vazio universal do git — âncora honesta para diffs quando a run nasce
+# num repo sem commits (banca v9 — A3): HEAD vivo é mutável pelo driver.
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
 def _looks_like_path(token: str) -> bool:
     return "/" in token or "\\" in token or token.lower().endswith(".py")
 
@@ -109,6 +114,7 @@ def _git_has_head(repo_root: Path) -> bool:
             ["git", "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "rev-parse", "--verify", "HEAD"], cwd=str(repo_root),
             capture_output=True, timeout=10,
+            env={**os.environ, "NoDefaultCurrentDirectoryInExePath": "1"},
         ).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -194,8 +200,10 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
                   test_cmd: str | None = None, spec_hash: str | None = None,
                   head_start: str | None = None,
                   allow_external: bool = False) -> tuple[str, list[str] | None] | None:
-    """Resolve um item de `gates` para (gate_id_canônico, cmd_ou_None).
-    None = desconhecido; cmd=None = conhecido mas não autoexecutável aqui."""
+    """Resolve um item de `gates` para (gate_id_canônico, cmd_ou_None, external).
+    None = desconhecido; cmd=None = conhecido mas não autoexecutável aqui.
+    external=True = script fora da suíte/pacote (opt-in --gates): executa mas
+    NUNCA satisfaz portões obrigatórios (banca v9 — A4)."""
     if not token:
         return None
     if token in GATE_MAP:
@@ -204,10 +212,10 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
             return None
         args = _default_gate_args(token, repo_root, spec_path, test_cmd, spec_hash, head_start)
         if args is None:
-            return script.stem, None
+            return script.stem, None, False
         if script.stem in _PIPELINE_GATES:
-            return script.stem, [sys.executable, str(_PIPELINE_SCRIPT), *args]
-        return script.stem, [sys.executable, str(script), *args]
+            return script.stem, [sys.executable, str(_PIPELINE_SCRIPT), *args], False
+        return script.stem, [sys.executable, str(script), *args], False
     if not _looks_like_path(token):
         return None
     cand = Path(token)
@@ -228,19 +236,23 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
     # `--gates` explícito do CLI (escolha do usuário); --from-route/pipeline
     # são plantáveis e ficam confinados.
     _suite_res = SUITE_ROOT.resolve()
-    _pkg_res = _PKG_ROOT.resolve()
-    if not allow_external and not (
-            resolved == _suite_res or _suite_res in resolved.parents
-            or resolved == _pkg_res or _pkg_res in resolved.parents):
+    # M1 (banca v9): em wheel, _PKG_ROOT = site-packages INTEIRO — confinar a
+    # ele admitia "requests/models.py" como portão. O sandbox real é scripts/
+    # do pacote, não o prefixo.
+    _pkg_res = (_PKG_ROOT / "scripts").resolve()
+    _external = not (
+        resolved == _suite_res or _suite_res in resolved.parents
+        or resolved == _pkg_res or _pkg_res in resolved.parents)
+    if _external and not allow_external:
         return None
     path_to_name = {os.path.normcase(str(Path(p).resolve())): n for n, p in GATE_MAP.items()}
     name = path_to_name.get(os.path.normcase(str(resolved)))
     args = _default_gate_args(name, repo_root, spec_path, test_cmd, spec_hash, head_start) if name else [str(repo_root)]
     if args is None:
-        return resolved.stem, None
+        return resolved.stem, None, _external
     if name in _PIPELINE_GATES:
-        return resolved.stem, [sys.executable, str(_PIPELINE_SCRIPT), *args]
-    return resolved.stem, [sys.executable, str(resolved), *args]
+        return resolved.stem, [sys.executable, str(_PIPELINE_SCRIPT), *args], _external
+    return resolved.stem, [sys.executable, str(resolved), *args], _external
 
 
 def _gate_id_of(token: str) -> str:
@@ -266,6 +278,7 @@ def _record_gate_verdict(
     command: str | None = None,
     evidence_file: str | Path | None = None,
     manual: bool = False,
+    external: bool = False,
 ) -> None:
     """Grava o veredito na run. Levanta FileNotFoundError se a run não existe."""
     if not run_path.is_file():
@@ -275,6 +288,7 @@ def _record_gate_verdict(
         _rs_record_gate(
             run_path, gate_id, int(exit_code), summary,
             command=command, evidence_file=evidence_file, manual=manual,
+            external=external,
         )
         return
     res = subprocess.run(  # fallback subprocess (mesma CLI real de run_state.py)
@@ -362,6 +376,13 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
             # Âncoras de nascimento: vencem qualquer estado vivo do repo.
             spec_hash = anchor.get("spec_sha256") or None
             head_start = anchor.get("head_start") or None
+            if run_path is not None and not head_start:
+                # A3 (banca v9): sob custódia, âncora ausente (repo sem
+                # commits) NUNCA cai para HEAD vivo nem para
+                # gate-baseline.json mutável — a empty-tree do git é a
+                # âncora honesta (diff mostra TUDO; portões que exigem
+                # commit falham fechado).
+                head_start = _EMPTY_TREE
         except (OSError, ValueError, TypeError):
             spec_path = None
 
@@ -371,6 +392,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
         token = str(raw).strip()
         resolved = _resolve_gate(token, root, spec_path, test_cmd, spec_hash, head_start,
                                  allow_external=allow_external_gates)
+        external = False
         if resolved is None:
             gate_id = _gate_id_of(token)
             cmd_str = ""
@@ -381,7 +403,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
                             "reason": _SKIP_REASONS.get(gate_id, "sem args autoexecutáveis neste contexto")})
             continue
         else:
-            gate_id, cmd = resolved
+            gate_id, cmd, external = resolved
             cmd_str = shlex.join(cmd)
             t0 = time.monotonic()
             # Popen + árvore: timeout mata o processo E seus filhos (pipeline
@@ -448,6 +470,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
                 _record_gate_verdict(
                     run_path, gate_id, exit_code, sha, ms,
                     command=cmd_str or f"gate-token:{token}", evidence_file=evidence_file,
+                    external=external,
                 )
         verdicts.append({
             "gate": gate_id,
