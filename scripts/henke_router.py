@@ -47,7 +47,8 @@ def _norm(text: str) -> str:
     return "".join(
         c for c in nfkd
         if not unicodedata.combining(c)
-        and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn")
+        and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn",
+                                           "Mn", "Mc", "Me")
     )
 
 

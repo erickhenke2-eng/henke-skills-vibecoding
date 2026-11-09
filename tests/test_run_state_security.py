@@ -22,6 +22,7 @@ if str(repo_root) not in sys.path:
 
 from scripts.run_state import (
     _append_evidence_manifest, derive_run_outcome, verify_run_file,
+    write_anchor_sidecar,
 )
 
 
@@ -56,6 +57,9 @@ def _run(tmp: Path, gates: dict, **extra) -> Path:
     runs.mkdir(parents=True, exist_ok=True)
     p = runs / "r.json"
     p.write_text(json.dumps(data), encoding="utf-8")
+    # Custódia como init_run faria: sidecar de âncoras fora do repo (banca v8
+    # F-06 — verify falha fechado sem ele).
+    write_anchor_sidecar("r", None, None, None, repo_root=tmp, fields=data)
     return p
 
 

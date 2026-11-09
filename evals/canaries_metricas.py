@@ -1116,7 +1116,12 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                and fnds_a11y_good == [], str(a11y_rules))
 
         # M78: run_state reprova outcome=verified forjado quando portão falhou (STATE-DERIVED-CONFLICT) e aprova run íntegra
-        m78_bad = t / "run_bad.json"
+        # Run "ruim" precisa de custódia válida (nome=run_id, em .henke/runs/,
+        # sidecar local) para alcançar a derivação — senão cai nas travas
+        # anteriores (banca v8 F-06/F-16) sem exercitar o CONFLICT.
+        from scripts.run_state import write_anchor_sidecar as _m78_anchor
+        (t / ".henke" / "runs").mkdir(parents=True, exist_ok=True)
+        m78_bad = t / ".henke" / "runs" / "r1.json"
         m78_bad.write_text(json.dumps({
             "run_id": "r1",
             "mode": "EXECUTAR",
@@ -1124,6 +1129,8 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
             "outcome": "verified",
             "gates": {"hazard_scan": {"exit_code": 1}}
         }), encoding="utf-8")
+        _m78_anchor("r1", None, None, None, repo_root=t,
+                    fields={"mode": "EXECUTAR"})
         ok_r_bad, errs_r_bad = verify_run_file(m78_bad)
         # Run íntegra = tríade de evidência física de verdade (exit_code:0 cru é
         # atestação — depois do endurecimento banca v5, não verifica mais) E a
@@ -1131,12 +1138,12 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         # E a tríade no manifesto local fora do repo (custódia v6).
         from scripts.run_state import _append_evidence_manifest
         (t / ".henke" / "evidence" / "r2").mkdir(parents=True)
-        (t / ".henke" / "runs").mkdir(parents=True)
+        (t / ".henke" / "runs").mkdir(parents=True, exist_ok=True)
         m78_ev = t / ".henke" / "evidence" / "r2" / "hazard_scan.out"
         m78_ev.write_text("scan limpo\n", encoding="utf-8")
         m78_sha = hashlib.sha256(m78_ev.read_bytes()).hexdigest()
         _append_evidence_manifest("r2", "hazard_scan", str(m78_ev), m78_sha, "hazard_scan .")
-        m78_ok = t / ".henke" / "runs" / "run_ok.json"
+        m78_ok = t / ".henke" / "runs" / "r2.json"
         m78_ok.write_text(json.dumps({
             "run_id": "r2",
             "mode": "EXECUTAR",
@@ -1149,6 +1156,11 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                 "evidence_sha256": m78_sha,
             }}
         }), encoding="utf-8")
+        # Custódia como init_run: sidecar de âncoras fora do repo (banca v8
+        # F-06) — verify falha fechado sem ele.
+        from scripts.run_state import write_anchor_sidecar
+        write_anchor_sidecar("r2", None, None, None, repo_root=t,
+                             fields={"mode": "EXECUTAR"})
         ok_r_ok, errs_r_ok = verify_run_file(m78_ok)
         expect("Canário M78: run_state bloqueia outcome=verified forjado com STATE-DERIVED-CONFLICT e aprova run íntegra",
                not ok_r_bad and any("STATE-DERIVED-CONFLICT" in e for e in errs_r_bad) and ok_r_ok and errs_r_ok == [])
@@ -1264,10 +1276,12 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         RS_SCRIPT = repo_root / "scripts" / "run_state.py"
         c84, o84 = run(RS_SCRIPT, "record-gate", str(m84_run),
                        "--gate", "stage_dispatch", "--exit-code", "0")
-        # Custódia v6: evidência plantada sem manifesto local → UNMANIFESTED
-        # (rejeição primária; fora-do-confinamento seria a segunda linha).
+        # Custódia v6+v8: evidência plantada é rejeitada — ANCHOR-SIDECAR-
+        # MISSING (runs2/ não-canônico não acha âncora) ou UNMANIFESTED ou
+        # OUTSIDE-SCOPE — qualquer uma prova falha-fechada contra planta.
         expect("Canário M84: verify bloqueia evidência fora do confinamento e record-gate rejeita nome reservado",
-               not ok84 and any("EVIDENCE-UNMANIFESTED" in e or "EVIDENCE-OUTSIDE-SCOPE" in e for e in errs84) and c84 == 2,
+               not ok84 and any("EVIDENCE-UNMANIFESTED" in e or "EVIDENCE-OUTSIDE-SCOPE" in e
+                                or "ANCHOR-SIDECAR-MISSING" in e for e in errs84) and c84 == 2,
                f"verify={errs84} cli={c84}:{o84[-120:]}")
 
     return passed, total, reports

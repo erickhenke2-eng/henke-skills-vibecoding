@@ -192,7 +192,8 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
 
 def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
                   test_cmd: str | None = None, spec_hash: str | None = None,
-                  head_start: str | None = None) -> tuple[str, list[str] | None] | None:
+                  head_start: str | None = None,
+                  allow_external: bool = False) -> tuple[str, list[str] | None] | None:
     """Resolve um item de `gates` para (gate_id_canônico, cmd_ou_None).
     None = desconhecido; cmd=None = conhecido mas não autoexecutável aqui."""
     if not token:
@@ -221,6 +222,17 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
     if not cand.is_file():
         return None
     resolved = cand.resolve()
+    # F-04 (banca v8): o resolvido TEM que viver sob a suíte ou o pacote —
+    # `../../evil.py` ou path absoluto escapavam da resolução suite/pkg e
+    # executavam script arbitrário "como portão". `allow_external` só vem do
+    # `--gates` explícito do CLI (escolha do usuário); --from-route/pipeline
+    # são plantáveis e ficam confinados.
+    _suite_res = SUITE_ROOT.resolve()
+    _pkg_res = _PKG_ROOT.resolve()
+    if not allow_external and not (
+            resolved == _suite_res or _suite_res in resolved.parents
+            or resolved == _pkg_res or _pkg_res in resolved.parents):
+        return None
     path_to_name = {os.path.normcase(str(Path(p).resolve())): n for n, p in GATE_MAP.items()}
     name = path_to_name.get(os.path.normcase(str(resolved)))
     args = _default_gate_args(name, repo_root, spec_path, test_cmd, spec_hash, head_start) if name else [str(repo_root)]
@@ -281,7 +293,8 @@ def _record_gate_verdict(
 
 def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
               record: bool = True, timeout_sec: float = 180.0,
-              test_cmd: str | None = None) -> dict:
+              test_cmd: str | None = None,
+              allow_external_gates: bool = False) -> dict:
     """Executa `gates` em ordem e devolve o relatório mecânico.
 
     Retorna {"verdicts": [{"gate", "cmd", "exit", "duration_ms", "stdout_sha256",
@@ -356,7 +369,8 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     skipped: list[dict] = []
     for raw in gates:
         token = str(raw).strip()
-        resolved = _resolve_gate(token, root, spec_path, test_cmd, spec_hash, head_start)
+        resolved = _resolve_gate(token, root, spec_path, test_cmd, spec_hash, head_start,
+                                 allow_external=allow_external_gates)
         if resolved is None:
             gate_id = _gate_id_of(token)
             cmd_str = ""
@@ -528,6 +542,9 @@ def main(argv: list[str] | None = None) -> int:
         result = run_gates(
             args.repo.resolve(), gates,
             run_id=args.run_id, record=bool(args.run_id), timeout_sec=args.timeout,
+            # `--gates` é escolha explícita do usuário (scripts fora da suíte
+            # permitidos); `--from-route` é plantável e fica confinado.
+            allow_external_gates=args.from_route is None,
         )
     except (FileNotFoundError, ValueError, OSError, RuntimeError, json.JSONDecodeError) as exc:
         print(f"ERRO: {exc}", file=sys.stderr)

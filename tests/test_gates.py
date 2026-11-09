@@ -63,7 +63,7 @@ class GatesRunnerTests(unittest.TestCase):
     # ---------- núcleo: vereditos ----------
 
     def test_verdicts_exit_sha_e_stderr_tail(self):
-        res = run_gates(str(self.repo), [str(self.ok_script), str(self.fail_script)], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=[str(self.ok_script), str(self.fail_script)], record=False)
         self.assertEqual(res["ran"], 2)
         self.assertFalse(res["all_green"])
         v_ok, v_fail = res["verdicts"]
@@ -85,17 +85,18 @@ class GatesRunnerTests(unittest.TestCase):
             str(self.repo),
             [str(self.fail_script), str(self.ok_script), str(self.fail_script)],
             record=False,
+            allow_external_gates=True,
         )
         self.assertEqual([v["exit"] for v in res["verdicts"]], [1, 0, 1])
         self.assertEqual(res["ran"], 3)
         self.assertFalse(res["all_green"])
 
     def test_todos_verdes(self):
-        res = run_gates(str(self.repo), [str(self.ok_script)], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=[str(self.ok_script)], record=False)
         self.assertTrue(res["all_green"])
 
     def test_portao_desconhecido_exit2_sem_excecao(self):
-        res = run_gates(str(self.repo), ["nao-existe", "scripts/tambem_nao.py"], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=["nao-existe", "scripts/tambem_nao.py"], record=False)
         self.assertEqual([v["exit"] for v in res["verdicts"]], [2, 2])
         self.assertFalse(res["all_green"])
         self.assertEqual(res["verdicts"][0]["gate"], "nao-existe")
@@ -106,7 +107,7 @@ class GatesRunnerTests(unittest.TestCase):
     def test_despacho_por_nome_via_gate_map(self):
         # patch.dict injeta nome fake na tabela real (restaurada ao sair do with)
         with mock.patch.dict(henke_gates.GATE_MAP, {"fakeok": self.ok_script}):
-            res = run_gates(str(self.repo), ["fakeok"], record=False)
+            res = run_gates(str(self.repo), allow_external_gates=True, gates=["fakeok"], record=False)
         v = res["verdicts"][0]
         self.assertEqual(v["exit"], 0)
         self.assertEqual(v["gate"], "fake_ok")
@@ -118,7 +119,7 @@ class GatesRunnerTests(unittest.TestCase):
         (self.repo / "tests" / "test_x.py").write_text(
             "def test_x():\n    assert True\n", encoding="utf-8"
         )
-        res = run_gates(str(self.repo), ["scripts/metricas/assertless_scan.py"], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=["scripts/metricas/assertless_scan.py"], record=False)
         v = res["verdicts"][0]
         self.assertEqual(v["gate"], "assertless_scan")
         self.assertIn(str(self.repo / "tests"), v["cmd"])
@@ -132,7 +133,7 @@ class GatesRunnerTests(unittest.TestCase):
     def test_na_nao_reprova_quando_ha_verde_real(self):
         na_script = self.repo / "fake_na.py"
         na_script.write_text(GATE_NA_SRC, encoding="utf-8")
-        res = run_gates(str(self.repo), [str(self.ok_script), str(na_script)], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=[str(self.ok_script), str(na_script)], record=False)
         self.assertTrue(res["all_green"])
         self.assertEqual([v["exit"] for v in res["verdicts"]], [0, 3])
         self.assertFalse(res["verdicts"][0]["na"])
@@ -141,7 +142,7 @@ class GatesRunnerTests(unittest.TestCase):
     def test_na_sozinho_nunca_e_verde(self):
         na_script = self.repo / "fake_na.py"
         na_script.write_text(GATE_NA_SRC, encoding="utf-8")
-        res = run_gates(str(self.repo), [str(na_script), str(na_script)], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=[str(na_script), str(na_script)], record=False)
         self.assertEqual(res["ran"], 2)
         self.assertTrue(all(v["na"] for v in res["verdicts"]))
         self.assertFalse(res["all_green"])
@@ -187,7 +188,7 @@ class GatesRunnerTests(unittest.TestCase):
         self.assertTrue(any("ratchet" in r for r in reasons), reasons)
 
     def test_shape_do_resultado(self):
-        res = run_gates(str(self.repo), [], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=[], record=False)
         self.assertEqual(set(res), {"verdicts", "all_green", "ran", "skipped"})
         self.assertEqual(res["ran"], 0)
         self.assertFalse(res["all_green"])  # ran=0 é NÃO-VEREDITO, não verde
@@ -208,7 +209,9 @@ class GatesRunnerTests(unittest.TestCase):
             rc = gates_main(["--repo", str(self.repo), "--from-route", str(route), "--json"])
         self.assertEqual(rc, 1)
         payload = json.loads(buf.getvalue())
-        self.assertEqual([v["exit"] for v in payload["verdicts"]], [0, 1])
+        # Route é plantável (vive no repo) — paths fora da suíte são recusados
+        # com exit 2 (banca v8 F-04); só --gates explícito aceita externos.
+        self.assertEqual([v["exit"] for v in payload["verdicts"]], [2, 2])
         self.assertFalse(payload["all_green"])
 
     def test_from_route_invalido_exit2(self):
@@ -223,14 +226,14 @@ class GatesRunnerTests(unittest.TestCase):
 
     def test_record_grava_vereditos_na_run(self):
         init_run(self.repo, "t-run", mode="ANALISAR", archetype="SHERLOCK")
-        res = run_gates(str(self.repo), [str(self.ok_script)], run_id="t-run", record=True)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=[str(self.ok_script)], run_id="t-run", record=True)
         self.assertTrue(res["all_green"])
         data = json.loads((self.repo / ".henke" / "runs" / "t-run.json").read_text(encoding="utf-8"))
         self.assertIn("fake_ok", data["gates"])
         self.assertEqual(data["gates"]["fake_ok"]["exit_code"], 0)
         self.assertEqual(data["outcome"], "verified")
         # portão vermelho também é gravado e derruba a run
-        res2 = run_gates(str(self.repo), [str(self.fail_script)], run_id="t-run", record=True)
+        res2 = run_gates(str(self.repo), allow_external_gates=True, gates=[str(self.fail_script)], run_id="t-run", record=True)
         self.assertFalse(res2["all_green"])
         data2 = json.loads((self.repo / ".henke" / "runs" / "t-run.json").read_text(encoding="utf-8"))
         self.assertEqual(data2["gates"]["fake_fail"]["exit_code"], 1)
@@ -238,7 +241,7 @@ class GatesRunnerTests(unittest.TestCase):
 
     def test_record_aborta_quando_run_inexistente(self):
         with self.assertRaises(FileNotFoundError):
-            run_gates(str(self.repo), [str(self.ok_script)], run_id="ghost", record=True)
+            run_gates(str(self.repo), allow_external_gates=True, gates=[str(self.ok_script)], run_id="ghost", record=True)
         # CLI converte em exit 2
         buf = io.StringIO()
         with contextlib.redirect_stderr(buf):
@@ -249,7 +252,7 @@ class GatesRunnerTests(unittest.TestCase):
         self.assertIn("run", buf.getvalue().lower())
 
     def test_sem_run_id_nao_grava(self):
-        res = run_gates(str(self.repo), [str(self.ok_script)], record=True)  # run_id=None
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=[str(self.ok_script)], record=True)  # run_id=None
         self.assertTrue(res["all_green"])
         self.assertFalse((self.repo / ".henke" / "runs").exists())
 
@@ -288,16 +291,16 @@ class GatesRunnerKimiAuditTests(unittest.TestCase):
         self.ok_script.write_text(GATE_OK_SRC, encoding="utf-8")
 
     def test_all_green_false_em_zero_verdicts(self):
-        res = run_gates(str(self.repo), ["nao-existe"], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=["nao-existe"], record=False)
         # gate desconhecido → verdict exit 2 — mas zero verde também reprova com ran>0
         self.assertFalse(res["all_green"])
-        res_empty = run_gates(str(self.repo), [], record=False)
+        res_empty = run_gates(str(self.repo), allow_external_gates=True, gates=[], record=False)
         self.assertFalse(res_empty["all_green"], "ran=0 deve ser não-veredito")
         self.assertEqual(res_empty["ran"], 0)
 
     def test_skipped_gate_nao_conta_como_verde(self):
         # 'ratchet' é portão conhecido sem args autoexecutáveis → skipped (não verdict)
-        res = run_gates(str(self.repo), ["ratchet"], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=["ratchet"], record=False)
         self.assertEqual(res["ran"], 0)
         self.assertEqual(len(res["skipped"]), 1)
         self.assertEqual(res["skipped"][0]["gate"], "ratchet")
@@ -305,7 +308,7 @@ class GatesRunnerKimiAuditTests(unittest.TestCase):
 
     def test_evidence_file_criado_e_sha_registrado(self):
         init_run(self.repo, "ev-run", mode="ANALISAR", archetype="SHERLOCK")
-        res = run_gates(str(self.repo), [str(self.ok_script)], run_id="ev-run", record=True)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=[str(self.ok_script)], run_id="ev-run", record=True)
         ev_dir = self.repo / ".henke" / "evidence" / "ev-run"
         evs = list(ev_dir.glob("*.out"))
         self.assertTrue(evs, "saída física do portão deve ser persistida")

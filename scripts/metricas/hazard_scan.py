@@ -165,7 +165,12 @@ _FILE_SINK_RE = re.compile(
     r"|\.(?:read_text|read_bytes|write_text|write_bytes)\s*\(\s*\)"
     r"|Path\s*\(\s*([A-Za-z_$][\w$.]*)\s*\)"
 )
-_EXT_SOURCE_RE = re.compile(r"\b(?:req|request|params|query|userPath|inputPath|filePathFromUser)\b")
+_EXT_SOURCE_RE = re.compile(
+    # Nomes web genéricos só são fonte externa com member-access (req.x /
+    # req[...]) — um bare `for req in ...`/`req = f()` não é entrada HTTP
+    # (dogfooding banca v8 — F1). Nomes explicitamente tainted contam bare.
+    r"\b(?:req|request|params|query)\s*[.\[]|\b(?:userPath|inputPath|filePathFromUser)\b"
+)
 # Decoy-token: `let resolve;` não pode apagar o check — só conta se CHAMADO
 # (banca v7 — A8).
 _PATH_SAFE_RE = re.compile(r"\b(?:resolve|normalize|basename|relpath|is_relative_to|safe_join|safe_member)\s*\(")

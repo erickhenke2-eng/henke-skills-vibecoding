@@ -264,7 +264,7 @@ def _load_evidence_manifest(run_id: str) -> dict | None:
 # para lavar o próprio veredito (banca v7 — F-03): o sidecar guarda o valor
 # de nascimento e verify_run_file re-ancora antes de confiar.
 _ANCHORED_FIELDS = ("mode", "mandatory_gates", "requires_human_auth",
-                    "gates_required")
+                    "gates_required", "driver", "spec_path")
 
 
 def write_anchor_sidecar(run_id: str, spec_path: str | None,
@@ -535,6 +535,16 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     _sc_run_id = _safe_run_id(str(data.get("run_id") or p.stem))
     _sc = load_anchor_sidecar(_sc_run_id, repo_root=p.parent.parent.parent)
     _sc_fields = (_sc or {}).get("fields")
+    if not (isinstance(_sc_fields, dict) and _sc_fields):
+        if any(k in data for k in _ANCHORED_FIELDS):
+            # F-06 (banca v8): sidecar ausente/corrompido/de outro repo não
+            # pode silenciar a re-âncora — campos de decisão presentes sem
+            # âncora local são falha fechada (o sidecar é escrito no init).
+            return False, [
+                "ANCHOR-SIDECAR-MISSING: run declara campos de decisão "
+                "(mode/mandatory_gates/requires_human_auth) mas o sidecar "
+                "local de âncoras está ausente — campos não-verificáveis"
+            ]
     if isinstance(_sc_fields, dict) and _sc_fields:
         _tampered_fields = [
             k for k, v in _sc_fields.items() if data.get(k) != v
@@ -578,6 +588,14 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
             f"RUN-ID-INVALID: run_id '{raw_run_id}' contém caracteres "
             "que violam a forma segura ([A-Za-z0-9_-]) — confinamento de "
             "evidência não pode ser estabelecido"
+        ]
+    if run_id != p.stem:
+        # F-16 (banca v8): run_id declarado divergente do nome do arquivo
+        # deixava a.json reivindicar evidência/manifesto da run b —
+        # sabotagem cross-run e replay de token de aprovação.
+        return False, [
+            f"RUN-ID-MISMATCH: run_id declarado '{run_id}' diverge do "
+            f"arquivo '{p.stem}' — custódia é chaveada pelo nome do arquivo"
         ]
     # Confinamento a evidence/<run_id>/: evidência de OUTRA run não prova esta
     # (reuso cross-run), e o mesmo arquivo não pode ser saída de dois portões.
@@ -655,6 +673,13 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     # forward-binding de --resume e não pode exigir token por si.
     if (data.get("review_status") == "approved"
             or data.get("approved_head") or data.get("approved_at")):
+        if not isinstance(data.get("approval_binding"), dict):
+            # F-01 (banca v8): aprovação declarada SEM binding é vacuosa —
+            # `henke approve` sempre grava binding; aprovação sem ele é forja.
+            return False, [
+                "APPROVAL-BINDING-MISSING: run declara aprovação sem "
+                "approval_binding — `henke approve` nunca rodou nesta máquina"
+            ]
         ok_tok, tok_msg = verify_approval_token(data)
         if not ok_tok:
             return False, [tok_msg]
@@ -785,7 +810,9 @@ def record_gate(
             # ela é COPIADA para .henke/evidence/<run_id>/<gate>__<nome> — depois
             # de gravada, nem o driver nem ninguém a altera sem invalidar o
             # sha256 (a verificação re-hasheia o arquivo confinado).
-            run_id = str(data.get("run_id") or run_path.stem)
+            # Custódia chaveada pelo NOME DO ARQUIVO — data["run_id"] editável
+            # não pode redirecionar evidência/manifesto para outra run (F-16).
+            run_id = run_path.stem
             ev_root = (run_path.parent.parent / "evidence" / run_id).resolve()
             try:
                 resolved = evidence_path.resolve()
@@ -825,19 +852,32 @@ def record_gate(
             entry["evidence_file"] = str(evidence_path)
             entry["evidence_sha256"] = evidence_sha
             entry["evidence_source"] = str(source_resolved)
-            # Manifesto LOCAL: a tríade só é verificável se constar aqui — uma
-            # run plantada não tem manifesto na máquina da vítima.
-            try:
-                _append_evidence_manifest(
-                    run_id, gate_name, str(evidence_path), evidence_sha, str(command))
-            except OSError as exc:
-                raise ValueError(
-                    f"falha ao gravar manifesto de evidência local: {exc}"
-                ) from exc
+            if not manual:
+                # Manifesto LOCAL: a tríade só é verificável se constar aqui —
+                # uma run plantada não tem manifesto na máquina da vítima.
+                # Registros manuais (CLI) NUNCA entram no manifesto: senão o
+                # CLI mintava tríade + manifesto e bastava apagar "manual" do
+                # JSON para forjar portão físico (F-03 banca v8).
+                try:
+                    _append_evidence_manifest(
+                        run_id, gate_name, str(evidence_path), evidence_sha, str(command))
+                except OSError as exc:
+                    raise ValueError(
+                        f"falha ao gravar manifesto de evidência local: {exc}"
+                    ) from exc
         if manual:
             # manual=True marca atestação MESMO com tríade presente — sem isso
             # a superfície CLI emitiria evidência "física" verificável (F-01).
             entry["manual"] = True
+            existing = gates.get(gate_name)
+            if isinstance(existing, dict) and existing.get("evidence_sha256"):
+                # F-02 (banca v8): veredito físico existente não pode ser
+                # apagado/regravado via CLI — record-gate manual sobre tríade
+                # física apagaria um portão VERMELHO do cômputo derivado.
+                raise ValueError(
+                    f"portão '{gate_name}' já possui tríade física — "
+                    "registro manual não pode sobrescrevê-la"
+                )
         gates[gate_name] = entry
         derived, reasons = derive_run_outcome(data)
         data["outcome"] = derived

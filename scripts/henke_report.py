@@ -97,7 +97,15 @@ def _resolve_run_path(repo_root: Path, run_ref: str) -> Path:
             )
         return resolved
     name = run_ref if run_ref.endswith(".json") else f"{run_ref}.json"
-    path = runs_dir / name
+    path = (runs_dir / name).resolve()
+    try:
+        path.relative_to(runs_dir)
+    except ValueError:
+        # F-08 (banca v8): `henke report "../../x"` resolvia para fora de
+        # .henke/runs/ e lia qualquer .json do disco como se fosse run.
+        raise FileNotFoundError(
+            f"run fora de .henke/runs/ recusada: {run_ref}"
+        )
     if path.is_file():
         return path
     raise FileNotFoundError(f"run '{run_ref}' não encontrada em {runs_dir}")

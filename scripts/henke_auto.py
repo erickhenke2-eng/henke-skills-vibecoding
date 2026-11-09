@@ -177,6 +177,10 @@ def _child_env() -> dict:
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    # F-07 (banca v8): CreateProcess/`shutil.which` procuram no CWD no
+    # Windows — um `git.exe`/`npm.cmd` plantado no repo seria executado por
+    # driver `cmd:`/agent:/test_cmd. Remove o CWD do path de busca.
+    env["NoDefaultCurrentDirectoryInExePath"] = "1"
     return env
 
 

@@ -386,6 +386,10 @@ def _cmd_exec(
     child_env = os.environ.copy()
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
+    # F-07 (banca v8): CWD poisoning — binário plantado no worktree não pode
+    # ser resolvido como o comando pedido (`henke exec -- npm` num repo com
+    # npm.cmd forjado executaria o plantado).
+    child_env["NoDefaultCurrentDirectoryInExePath"] = "1"
     timeout_sec = _resolve_exec_timeout(repo_root, cli_timeout)
 
     try:
