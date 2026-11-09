@@ -85,6 +85,9 @@ def _is_ci_workflow(path: Path) -> bool:
 
 def _is_config_file(path: Path) -> bool:
     name_low = path.name.lower()
+    # F30 (banca v11): esses JSONs NÃO são config IaC (o '*' de dependência
+    # não é wildcard de IAM — canário M47) — mas ganham varredura restrita
+    # de segredos/hooks em _scan_excluded_json.
     if name_low in _EXCLUDED_JSON_NAMES:
         return False
     if _is_ci_workflow(path):
@@ -188,6 +191,10 @@ _SEMAPHORE_RE = re.compile(r"\b(?:pLimit|Semaphore|BoundedSemaphore|Bottleneck|r
 _UNSAFE_DESER_RE = re.compile(
     r"(?<![.\w$])eval\s*\(|\bnew\s+Function\s*\(|\bpickle\.loads?\s*\("
     r"|\byaml\.(?:load|load_all|unsafe_load|full_load)\s*\("
+    # F6 (banca v11): família eval indireta — (0,eval), globalThis["eval"],
+    # Function() sem new, eval?.(, eval.call( — nenhuma casava antes.
+    r"|\(\s*0\s*,\s*eval\s*\)|globalThis\s*\[\s*['\"]eval['\"]\s*\]"
+    r"|(?<![.\w$'\"`])Function\s*\(|eval\s*\?\.\s*\(|eval\.(?:call|apply)\s*\("
 )
 _XSS_HTML_RE = re.compile(
     r"\bdangerouslySetInnerHTML\b|\.innerHTML\s*\+?=(?!=)|\.outerHTML\s*\+?=(?!=)"
@@ -701,6 +708,45 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
     return out
 
 
+_NPM_LIFECYCLE_RE = re.compile(
+    r'"(?:preinstall|postinstall|prepare|prepublish(?:Only)?|prepack|postpack)"'
+    r'\s*:\s*"([^"]*)"')
+
+
+def _scan_excluded_json(path: Path, max_bytes: int
+                        ) -> tuple[int, list[tuple[str, str, str, str]], bool]:
+    """Varredura restrita para JSONs excluídos do scan IaC (F30 banca v11):
+    segredos, credenciais em URL, pipe-to-shell e lifecycle hooks perigosos.
+    Retorna (1 se escaneado, findings, skipped_oversize)."""
+    try:
+        if path.stat().st_size > max_bytes:
+            return 0, [], True
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return 0, [], True
+    out: list[tuple[str, str, str, str]] = []
+    for label, pat in _SECRET_PATTERNS:
+        for m in pat.finditer(raw):
+            if m.group(0) in _DOCUMENTED_EXAMPLE_KEYS or "EXAMPLE" in m.group(0):
+                continue
+            out.append(("HARDCODED-SECRET", f"{path}:{raw.count(chr(10), 0, m.start()) + 1}",
+                        label, f"hardcoded credential/key pattern ({label})"))
+    for m in _URL_CRED_RE.finditer(raw):
+        host = m.group(3)
+        if host.lower() not in ("localhost", "127.0.0.1", "example.com"):
+            out.append(("URL-CRED", f"{path}:{raw.count(chr(10), 0, m.start()) + 1}",
+                        "url", "credenciais embutidas em URL"))
+    for m in _CI_CURL_PIPE_RE.finditer(raw):
+        out.append(("CURL-PIPE-SH", f"{path}:{raw.count(chr(10), 0, m.start()) + 1}",
+                    "pkg", "pipe download->shell em JSON de pacote"))
+    for m in _NPM_LIFECYCLE_RE.finditer(raw):
+        if re.search(r"curl|wget|\bsh\b|bash|node\s+-e|eval", m.group(1)):
+            out.append(("NPM-LIFECYCLE-RISK",
+                        f"{path}:{raw.count(chr(10), 0, m.start()) + 1}",
+                        "pkg", f"lifecycle hook com comando perigoso: {m.group(1)[:60]}"))
+    return 1, out, False
+
+
 def scan_file(path: Path, extra_exts: set | None = None,
               max_bytes: int = MAX_FILE_BYTES,
               legacy_file_scope: bool = False,
@@ -710,6 +756,10 @@ def scan_file(path: Path, extra_exts: set | None = None,
     is_cfg = _is_config_file(path)
     allowed = SCAN_EXTS | (extra_exts or set())
     if ext not in allowed and not is_cfg:
+        # F30 (banca v11): package.json & cia não são IaC, mas segredos,
+        # URL-CRED e lifecycle hooks perigosos não podem sair sem varredura.
+        if path.name.lower() in _EXCLUDED_JSON_NAMES and ext == ".json":
+            return _scan_excluded_json(path, max_bytes)
         return 0, [], False
     try:
         size = path.stat().st_size
@@ -729,7 +779,18 @@ def scan_file(path: Path, extra_exts: set | None = None,
         # BOM ou densidade de NUL no head ⇒ decodifica como UTF-16 de verdade.
         _head = _b[:2048]
         _nul_ratio = _head.count(b"\x00") / max(len(_head), 1)
-        if _b.startswith((b"\xff\xfe", b"\xfe\xff")) or _nul_ratio > 0.15:
+        # F15 (banca v11): UTF-32LE BOM (FF FE 00 00) casava com o prefixo
+        # FF FE → decodificava como UTF-16 e gerava mojibake 'e\x00v\x00…'
+        # que nenhuma regra casa. UTF-32 verificado ANTES de UTF-16.
+        if _b.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+            try:
+                raw = _b.decode("utf-32")
+            except (UnicodeDecodeError, ValueError):
+                return 1, [("SUSPICIOUS-ENCODING",
+                            f"{path}:1", "file",
+                            "arquivo UTF-32 não decodificável — "
+                            "conteúdo não auditável (fail-closed)")], False
+        elif _b.startswith((b"\xff\xfe", b"\xfe\xff")) or _nul_ratio > 0.15:
             try:
                 raw = _b.decode("utf-16")
             except (UnicodeDecodeError, ValueError):
@@ -771,7 +832,13 @@ def scan_file(path: Path, extra_exts: set | None = None,
 
     for m in _URL_CRED_RE.finditer(no_comments):
         user, pwd, host = m.group(1), m.group(2), m.group(3)
-        if user.lower() in ("user", "username", "admin", "test", "foo") and pwd.lower() in ("pass", "password", "secret", "bar", "1234"):
+        # F19 (banca v11): 'admin:password@prod.internal' era isento — cred
+        # "placeholder" só vale em host claramente de exemplo/localhost.
+        if (user.lower() in ("user", "username", "test", "foo")
+                and pwd.lower() in ("pass", "password", "secret", "bar", "1234")
+                and host.lower().split(":")[0] in (
+                    "localhost", "127.0.0.1", "example.com", "example.org",
+                    "example.net", "host", "hostname", "127.0.1.1")):
             continue
         if host.lower() in ("localhost", "127.0.0.1", "example.com"):
             continue

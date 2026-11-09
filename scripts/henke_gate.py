@@ -358,8 +358,13 @@ def main(argv=None):
                         scope.append(pat)
             except Exception:
                 pass
-        if ".henke/**" not in scope:
-            scope.append(".henke/**")
+        # F11 (banca v11): '.henke/**' inteiro era auto-escopado — driver
+        # regravava fence/coverage/policy sem disparar fora-de-escopo.
+        # Só o estado mutável da máquina é auto-escopado.
+        for _hs in (".henke/runs/**", ".henke/evidence/**",
+                    ".henke/exec_log.jsonl", ".henke/config.json"):
+            if _hs not in scope:
+                scope.append(_hs)
         if ".agents/**" not in scope:
             scope.append(".agents/**")
 
@@ -373,7 +378,9 @@ def main(argv=None):
             return 1
         print("PORTÃO APROVADO: baseline do usuário preservado; mutações restritas ao escopo declarado.")
         return 0
-    except (OSError, ValueError, RuntimeError) as error:
+    # F36 (banca v11): baseline malformado (KeyError/TypeError) escapava
+    # como traceback exit 1 — crash veste código de veredito-vermelho.
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
         print(f"Portão falhou: {error}", file=sys.stderr)
         return 2
 

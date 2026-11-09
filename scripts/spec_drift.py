@@ -141,16 +141,22 @@ def discover_latest_spec(designs_dir: Path) -> Path | None:
 def _git_paths_z(git_root: Path, *args: str) -> list[str]:
     """Paths de um comando git com saída `-z` (NUL-safe): nomes com \\n/aspas/
     espaços-nas-pontas não forjam nem se quebram em pseudo-paths."""
-    res = subprocess.run(
-        ["git", "-c", "core.quotePath=false",
-         # Repo hostil pode configurar core.fsmonitor=<cmd> (executado pelo
-         # status/diff) e diff.external/textconv (executado em diffs com
-         # patch) — neutralizado para TODA enumeração (banca v7 — F-02).
-         "-c", "core.fsmonitor=false", "-c", "diff.external=",
-         *args],
-        cwd=str(git_root), capture_output=True, check=True, timeout=60,
-        env=_GIT_ENV,
-    )
+    try:
+        res = subprocess.run(
+            ["git", "-c", "core.quotePath=false",
+             # Repo hostil pode configurar core.fsmonitor=<cmd> (executado pelo
+             # status/diff) e diff.external/textconv (executado em diffs com
+             # patch) — neutralizado para TODA enumeração (banca v7 — F-02).
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             *args],
+            cwd=str(git_root), capture_output=True, check=True, timeout=60,
+            env=_GIT_ENV,
+        )
+    # F36 (banca v11): CalledProcessError escapava como traceback exit 1 —
+    # crash veste código de veredito-vermelho. RuntimeError → exit 2.
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"git {' '.join(args)} falhou (rc={exc.returncode})") from exc
     return [p for p in res.stdout.decode("utf-8", errors="replace").split("\0") if p]
 
 

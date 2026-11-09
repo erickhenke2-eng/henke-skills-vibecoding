@@ -97,11 +97,19 @@ def mask_c_like(text: str, lang: str = "") -> str:
                 i = j
             elif lang not in ("rs", "go"):
                 j = text.find("-->", i + 4)
-                j = n - 3 if j == -1 else j
-                for k in range(i, j + 3):
-                    if out[k] != "\n":
+                if j == -1:
+                    # F2 (banca v11): '<!--' não fechado mascarava até EOF —
+                    # igual ao caso '/*': só a linha corrente some.
+                    j = text.find("\n", i)
+                    j = n if j == -1 else j
+                    for k in range(i, j):
                         out[k] = " "
-                i = j + 3
+                    i = j
+                else:
+                    for k in range(i, j + 3):
+                        if out[k] != "\n":
+                            out[k] = " "
+                    i = j + 3
             else:
                 if not c.isspace():
                     prev = c
@@ -119,7 +127,7 @@ def mask_c_like(text: str, lang: str = "") -> str:
             i = j
         elif c == "`":
             i = _mask_template(text, out, i)
-        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs") and _regex_ctx_ok(text, i):
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts") and _regex_ctx_ok(text, i):
             j = _regex_end(text, i)
             for k in range(i, j):
                 if out[k] != "\n":
@@ -264,14 +272,21 @@ def mask_comments_only(text: str, lang: str = "") -> str:
                 i = j
             elif lang not in ("rs", "go"):
                 j = text.find("-->", i + 4)
-                j = n - 3 if j == -1 else j
-                for k in range(i, j + 3):
-                    if out[k] != "\n":
+                if j == -1:
+                    # F2 (banca v11): '<!--' não fechado mascarava até EOF.
+                    j = text.find("\n", i)
+                    j = n if j == -1 else j
+                    for k in range(i, j):
                         out[k] = " "
-                i = j + 3
+                    i = j
+                else:
+                    for k in range(i, j + 3):
+                        if out[k] != "\n":
+                            out[k] = " "
+                    i = j + 3
             else:
                 i += 1
-        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs") and _regex_ctx_ok(text, i):
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts") and _regex_ctx_ok(text, i):
             # Regex literal: pula sem mascarar — `/*` dentro não pode abrir
             # comentário (A2: antes, máscara comia até EOF).
             i = _regex_end(text, i)
@@ -376,7 +391,7 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
                 i += 1
                 continue
             i = _template_end(text, i) if c == "`" else _string_end(text, i, c)
-        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"):
             # Regex literal JS: `/a\/*/` contém `/*` que, lido como comentário,
             # engole o resto da linha — inclusive um marker de supressão forjado
             # logo depois (A15/A11/F1-banca). Char anterior operador → regex;
@@ -468,6 +483,16 @@ def _regex_ctx_ok(text: str, i: int) -> bool:
     c = text[j]
     # `\n` NÃO é contexto de regex: `a\n/eval(x)/g` é divisão legítima em
     # JS/Rust — tratar newline como abertura de regex mascara sinks inteiros.
+    if c == "<" and i >= 1 and text[i - 1] == "<":
+        # F3 (banca v11): `</` em posição de tag de fechamento JSX
+        # (`<div></a>{eval(x)}</div>`) não é início de regex — o "regex"
+        # engolia o sink até a próxima '/'. Char antes do '<' em posição de
+        # elemento (`>`,`{`,`(`,`=`, operadores) fecha a heurística.
+        m = i - 2
+        while m >= 0 and text[m] in " \t":
+            m -= 1
+        if m >= 0 and text[m] in ">{([=,:!&|?;":
+            return False
     if c in "(,=:[!&|?{};+-*/%^~<>":
         return True
     if c == ")":

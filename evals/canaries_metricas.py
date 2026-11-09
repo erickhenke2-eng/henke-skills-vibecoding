@@ -514,8 +514,8 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         wrangler_clean.write_text('# Action = "*" em comentario\nname = "meu-worker"\nmain = "src/index.ts"\n', encoding="utf-8")
         sc_pkg, fnds_pkg, _ = scan_path(pkg_clean)
         sc_wrg, fnds_wrg, _ = scan_path(wrangler_clean)
-        expect("Canário M47: hazard_scan ignora package.json com '*' e aprova wrangler.toml limpo",
-               sc_pkg == 0 and fnds_pkg == [] and sc_wrg == 1 and fnds_wrg == [])
+        expect("Canário M47: hazard_scan varre package.json com '*' sem falso-positivo e aprova wrangler.toml limpo",
+               sc_pkg == 1 and fnds_pkg == [] and sc_wrg == 1 and fnds_wrg == [])
 
         pentest_bad = t / "pentest_bad.ts"
         pentest_bad.write_text(

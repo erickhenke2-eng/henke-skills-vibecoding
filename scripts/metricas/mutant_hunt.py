@@ -33,6 +33,7 @@ import ast
 import copy
 import json
 import os
+import secrets
 os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 from pathlib import Path
 import re
@@ -199,6 +200,22 @@ from pathlib import Path as _P
 _MUTANT_FILES = {mapping!r}
 
 
+class {cls}(object):
+    def find_spec(self, fullname, path=None, target=None):
+        ent = _MUTANT_FILES.get(fullname)
+        if ent is None:
+            return None
+        src, orig, is_pkg, pkg_dir = ent
+        loader = _MutantLoader(src)
+        spec = _ilu.spec_from_loader(fullname, loader, origin=orig, is_package=is_pkg)
+        if is_pkg:
+            # submodule_search_locations aponta para o pacote ORIGINAL — sem
+            # isso 'pkg' vira módulo comum e 'import pkg.mod' quebra a suíte
+            # inteira → todo mutante contado como morto (C3-banca: falso-verde).
+            spec.submodule_search_locations = [pkg_dir]
+        return spec
+
+
 class _MutantLoader(_ia.Loader):
     \"\"\"Executa o código do MUTANTE mas reporta __file__/__package__ do ORIGINAL:
     sem isso, recursos relativos a __file__ (assets ao lado do módulo) quebram
@@ -216,24 +233,8 @@ class _MutantLoader(_ia.Loader):
         exec(code, module.__dict__)
 
 
-class _MutantFinder(object):
-    def find_spec(self, fullname, path=None, target=None):
-        ent = _MUTANT_FILES.get(fullname)
-        if ent is None:
-            return None
-        src, orig, is_pkg, pkg_dir = ent
-        loader = _MutantLoader(src)
-        spec = _ilu.spec_from_loader(fullname, loader, origin=orig, is_package=is_pkg)
-        if is_pkg:
-            # submodule_search_locations aponta para o pacote ORIGINAL — sem
-            # isso 'pkg' vira módulo comum e 'import pkg.mod' quebra a suíte
-            # inteira → todo mutante contado como morto (C3-banca: falso-verde).
-            spec.submodule_search_locations = [pkg_dir]
-        return spec
-
-
-if not any(isinstance(_f, _MutantFinder) for _f in _sys.meta_path):
-    _sys.meta_path.insert(0, _MutantFinder())
+if not any(isinstance(_f, {cls}) for _f in _sys.meta_path):
+    _sys.meta_path.insert(0, {cls}())
 """
 
 
@@ -315,7 +316,11 @@ def run_mutant_hunt(
     survivors: list[dict] = []
     inconclusive: list[dict] = []
 
-    with tempfile.TemporaryDirectory(prefix="mutant_hunt_") as td:
+    # F4 (banca v11): prefixo "mutant_hunt_" + nome fixo _MutantFinder deixavam
+    # a suíte hostil DETECTAR o harness (PYTHONPATH/meta_path) e fingir kill.
+    # Prefixo genérico + nome de classe aleatório por execução.
+    _cls = "_I" + secrets.token_hex(8)
+    with tempfile.TemporaryDirectory() as td:
         stage = Path(td)
         mutant_path = stage / t.name
         is_pkg = t.stem == "__init__"
@@ -327,7 +332,7 @@ def run_mutant_hunt(
             for name in _import_module_names(t)
         }
         (stage / "sitecustomize.py").write_text(
-            _SITE_HOOK_TEMPLATE.format(mapping=mapping), encoding="utf-8")
+            _SITE_HOOK_TEMPLATE.format(mapping=mapping, cls=_cls), encoding="utf-8")
 
         staged_env = os.environ.copy()
         old_pp = staged_env.get("PYTHONPATH", "")
@@ -556,6 +561,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.min_kill_rate is None:
         print("ERRO: --min-kill-rate é obrigatória — portão sem critério de "
               "abate é verde tautológico.", file=sys.stderr)
+        return 2
+    # F29 (banca v11): <=0 também é tautológico — kill_rate >= 0 sempre vale.
+    if args.min_kill_rate <= 0:
+        print("ERRO: --min-kill-rate deve ser > 0 — critério <= 0 é verde "
+              "tautológico.", file=sys.stderr)
         return 2
 
     if args.auto_diff:

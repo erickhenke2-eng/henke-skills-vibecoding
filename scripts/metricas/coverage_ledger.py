@@ -210,6 +210,11 @@ def verify_ledger(
     unenforced_assumptions = 0
 
     for u in units:
+        if not isinstance(u, dict):
+            # F35 (banca v11): entrada não-dict explodia com traceback exit 1
+            # — crash veste código de veredito-vermelho; erro validado é 2.
+            errors.append(f"INVALID-UNIT: entrada não-objeto {u!r:.60}")
+            continue
         uid = u.get("unit_id", "<sem-id>")
         rel = u.get("path", "")
         status = u.get("status", "")
@@ -251,6 +256,15 @@ def verify_ledger(
                             errors.append(f"INVALID-ASSUMPTION [{uid}]: cada assumption exige 'text' e status in {VALID_ASSUMPTION_STATUS}")
                         elif a.get("status") == "unenforced":
                             unenforced_assumptions += 1
+        elif status in ("finding_confirmed", "needs_validation"):
+            # F5 (banca v11): status que contam como "auditados" não podem
+            # ser inventados sem evidência — exigem checks[] como 'covered'.
+            checks = u.get("checks", [])
+            if not isinstance(checks, list) or not checks:
+                errors.append(
+                    f"EMPTY-CHECKS [{uid}]: unidade '{status}' exige pelo menos "
+                    "1 check em 'checks[]' — status auditado sem evidência é "
+                    "verde fabricado")
 
     for disk_rel in sorted(set(disk_files.keys()) - mapped_paths):
         errors.append(f"UNMAPPED-FILE: arquivo in-scope '{disk_rel}' não pertence a nenhuma unidade do ledger")
@@ -340,15 +354,24 @@ def verify_ledger(
         res_added = subprocess.run(
             ["git", "-c", "core.quotePath=false",
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
-             "diff", "--name-status", against, "--"],
+             "diff", "--name-status", "-z", against, "--"],
             cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=_GIT_ENV,
         )
         if res_added.returncode == 0:
-            added_files = {
-                ln.split("\t")[-1].strip().replace("\\", "/")
-                for ln in res_added.stdout.splitlines() if ln.startswith("A\t")
-            }
+            # F28 (banca v11): -z — nomes com tab/newline não quebram o parse.
+            toks = res_added.stdout.split("\0")
+            added_files: set[str] = set()
+            i_tok = 0
+            while i_tok < len(toks) - 1:
+                st = toks[i_tok]
+                if st in ("A", "R", "C"):
+                    # R/C ocupam 2 campos de path (origem + destino)
+                    i_tok += 2 if st == "A" else 3
+                    if st == "A":
+                        added_files.add(toks[i_tok - 1].strip().replace("\\", "/"))
+                else:
+                    i_tok += 1
             for u in units:
                 rel_u = u.get("path", "").replace("\\", "/")
                 if u.get("status") == "out_of_scope" and rel_u in added_files:
@@ -399,7 +422,7 @@ def render_gaps_markdown(ledger_path: Path) -> str:
     gaps: list[str] = []
     for u in data.get("units", []):
         st = u.get("status")
-        if st in ("deferred", "out_of_scope", "pending"):
+        if st in ("deferred", "out_of_scope", "pending", "needs_validation"):
             rsn = (u.get("reason") or "sem justificativa registrada").strip()
             gaps.append(f"- `{u.get('path')}` (`{st}`): {rsn}")
     for f in data.get("findings", []):
