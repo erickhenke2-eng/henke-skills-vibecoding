@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install validated files with staging, rollback and manifest-based zombie cleanup."""
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -9,11 +10,66 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 MANIFEST = ".henke-manifest.json"
+INSTALL_LOCK = ".henke-install.lock"
+LOCK_TIMEOUT_SEC = 120.0
+LOCK_RETRY_SEC = 0.1
 IGNORED_DIRS = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules"}
 IGNORED_FILES = {".DS_Store", "Thumbs.db"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
+
+
+@contextlib.contextmanager
+def _install_lock(user_root, timeout=LOCK_TIMEOUT_SEC):
+    """Lock exclusivo por destino cobrindo stage→publish→manifest.
+
+    Sem o lock, dois instaladores no mesmo user_root liam o manifesto de uma
+    versão enquanto o outro publicava outra — misturando artefatos. O arquivo
+    `.lock` nasce com O_CREAT|O_EXCL (criação atômica em POSIX e Windows) e
+    carrega o PID para diagnóstico de lock estale.
+    """
+    user_root.mkdir(parents=True, exist_ok=True)
+    lock_path = user_root / INSTALL_LOCK
+    deadline = time.monotonic() + timeout
+    fd = None
+    while fd is None:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "Lock de instalação retido por outro processo: "
+                    f"{lock_path}. Se o instalador anterior morreu, remova o "
+                    "arquivo e tente novamente.")
+            time.sleep(LOCK_RETRY_SEC)
+    try:
+        os.write(fd, f"pid={os.getpid()}\n".encode("ascii"))
+        yield
+    finally:
+        os.close(fd)
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
+def _resolve_source(repo, rel):
+    """Resolve o caminho físico de um arquivo do inventário.
+
+    Num checkout é `repo/rel`; numa instalação via wheel, `repo` aponta para
+    `<prefix>/henke_data` (skills e docs) enquanto `scripts/*` vivem no pacote
+    em site-packages — o fallback cobre esse layout.
+    """
+    src = repo / rel
+    if src.is_file():
+        return src
+    pkg_root = Path(__file__).resolve().parents[1]
+    alt = pkg_root / rel
+    if alt.is_file():
+        return alt
+    return src
 
 
 def inventory(repo):
@@ -97,13 +153,24 @@ def safe_member(target, rel):
     return victim
 
 
-def install(repo, user_root, dry_run=False):
-    subprocess.run([sys.executable, str(repo / "scripts/validate_skills.py")], check=True)
+def install(repo, user_root, dry_run=False, lock_timeout=LOCK_TIMEOUT_SEC):
+    subprocess.run(
+        [sys.executable, str(_resolve_source(repo, Path("scripts/validate_skills.py")))],
+        check=True,
+    )
     files = inventory(repo)
     targets = [user_root / p for p in (".agents/skills", ".gemini/config/skills", ".gemini/skills", ".claude/skills")]
     if dry_run:
         print("[DRY-RUN] " + "\n".join(map(str, targets)))
         return
+    # Lock exclusivo por destino: cobre TODA a transação stage→publish→manifesto
+    # — instaladores paralelos não podem misturar versões dos artefatos.
+    with _install_lock(user_root, timeout=lock_timeout):
+        _publish(repo, targets, files)
+
+
+def _publish(repo, targets, files):
+    """Transação stage→publish→manifest (invocada sob _install_lock)."""
     # Stage all content before changing any installed file; keep unrelated skills intact.
     transactions, changed, created = [], [], []
     def mkdir(path):
@@ -161,8 +228,8 @@ def install(repo, user_root, dry_run=False):
                     raise ValueError(f"Destino não é arquivo: {destination}")
                 staged = stage / "new" / relative
                 staged.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(repo / relative, staged)
-                if hashlib.sha256(staged.read_bytes()).digest() != hashlib.sha256((repo / relative).read_bytes()).digest():
+                shutil.copy2(_resolve_source(repo, relative), staged)
+                if hashlib.sha256(staged.read_bytes()).digest() != hashlib.sha256(_resolve_source(repo, relative).read_bytes()).digest():
                     raise ValueError(f"Cópia divergente: {relative}")
                 backup = stage / "old" / relative
                 if destination.exists():
@@ -197,7 +264,7 @@ def install(repo, user_root, dry_run=False):
                 "version": 2,
                 "files": sorted(new_set),
                 "hashes": {
-                    str(rel).replace("\\", "/"): hashlib.sha256((repo / rel).read_bytes()).hexdigest()
+                    str(rel).replace("\\", "/"): hashlib.sha256(_resolve_source(repo, rel).read_bytes()).hexdigest()
                     for rel in files
                 }
             }
@@ -260,7 +327,11 @@ if __name__ == "__main__":
     parser.add_argument("--user-root", type=Path, default=Path.home())
     args = parser.parse_args()
     try:
-        install(Path(__file__).resolve().parents[1], args.user_root.resolve(), args.dry_run)
+        try:
+            from scripts._paths import suite_root
+        except ImportError:
+            from _paths import suite_root
+        install(suite_root(), args.user_root.resolve(), args.dry_run)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"Instalação falhou: {error}", file=sys.stderr)
         sys.exit(1)

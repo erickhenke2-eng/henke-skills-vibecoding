@@ -44,11 +44,14 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
         except Exception:
             pass
 
-SUITE_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = SUITE_ROOT / "scripts"
+SCRIPTS_DIR = Path(__file__).resolve().parent
+_PKG_ROOT = SCRIPTS_DIR.parent
+if str(_PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PKG_ROOT))
 
-if str(SUITE_ROOT) not in sys.path:
-    sys.path.insert(0, str(SUITE_ROOT))
+from scripts._paths import suite_root as _suite_root  # noqa: E402
+
+SUITE_ROOT = _suite_root()  # checkout OU <prefix>/henke_data (wheel)
 
 try:
     # Tabela única da verdade — import real (scripts/ é namespace package PEP 420).
@@ -156,8 +159,11 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None) ->
     cand = Path(token)
     if not cand.is_absolute():
         suite_cand = SUITE_ROOT / cand
+        pkg_cand = _PKG_ROOT / cand  # wheel: portões vivem no pacote scripts/, não em henke_data
         repo_cand = repo_root / cand
-        cand = suite_cand if suite_cand.is_file() else (repo_cand if repo_cand.is_file() else suite_cand)
+        cand = (suite_cand if suite_cand.is_file()
+                else pkg_cand if pkg_cand.is_file()
+                else repo_cand if repo_cand.is_file() else suite_cand)
     if not cand.is_file():
         return None
     resolved = cand.resolve()
@@ -182,20 +188,34 @@ def _to_text(chunk) -> str:
     return str(chunk)
 
 
-def _record_gate_verdict(run_path: Path, gate_id: str, exit_code: int, sha: str, ms: int) -> None:
+def _record_gate_verdict(
+    run_path: Path,
+    gate_id: str,
+    exit_code: int,
+    sha: str,
+    ms: int,
+    *,
+    command: str | None = None,
+    evidence_file: str | Path | None = None,
+) -> None:
     """Grava o veredito na run. Levanta FileNotFoundError se a run não existe."""
     if not run_path.is_file():
         raise FileNotFoundError(f"run inexistente para record-gate: {run_path}")
     summary = f"stdout_sha256={sha};duration_ms={ms}"
     if _rs_record_gate is not None:
-        _rs_record_gate(run_path, gate_id, int(exit_code), summary)
+        _rs_record_gate(
+            run_path, gate_id, int(exit_code), summary,
+            command=command, evidence_file=evidence_file,
+        )
         return
     res = subprocess.run(  # fallback subprocess (mesma CLI real de run_state.py)
         [
             sys.executable, str(SCRIPTS_DIR / "run_state.py"), "record-gate",
             str(run_path), "--gate", gate_id, "--exit-code", str(int(exit_code)),
             "--summary", summary,
-        ],
+        ]
+        + (["--command", command] if command else [])
+        + (["--evidence-file", str(evidence_file)] if evidence_file else []),
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if res.returncode != 0:
@@ -213,6 +233,11 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
 
     Levanta FileNotFoundError (run inexistente), ValueError (run_id inválido) —
     nunca por portão desconhecido (esse vira verdict exit 2).
+
+    `all_green` só é True quando ran>0, zero portões pulados (skipped) e todos os
+    exits == 0 — "skip não é verde" (falso-verde do audit do Kimi).
+    Com `record=True`, a saída (stdout+stderr) de cada portão é persistida em
+    `.henke/evidence/<run_id>/<gate>.out` e registrada como evidência física.
     """
     root = Path(repo_root).resolve()
     run_path: Path | None = None
@@ -223,6 +248,10 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
         run_path = root / ".henke" / "runs" / f"{safe}.json"
         if not run_path.is_file():
             raise FileNotFoundError(f"run inexistente para record-gate: {run_path}")
+
+    evidence_dir: Path | None = None
+    if run_path is not None:
+        evidence_dir = run_path.parent.parent / "evidence" / run_path.stem
 
     child_env = os.environ.copy()
     child_env["PYTHONUTF8"] = "1"
@@ -273,8 +302,23 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
                 exit_code, out, err = 2, "", f"ERRO ao lançar processo: {exc}"
 
         sha = hashlib.sha256(out.encode("utf-8")).hexdigest()
+        evidence_file: Path | None = None
+        if evidence_dir is not None:
+            safe_gate = "".join(
+                c if c.isalnum() or c in ("-", "_", ".") else "_"
+                for c in str(gate_id)
+            ).strip("._") or "gate"
+            evidence_dir.mkdir(parents=True, exist_ok=True)
+            evidence_file = evidence_dir / f"{safe_gate}.out"
+            try:
+                evidence_file.write_text((out or "") + (err or ""), encoding="utf-8")
+            except OSError:
+                evidence_file = None
         if run_path is not None:
-            _record_gate_verdict(run_path, gate_id, exit_code, sha, ms)
+            _record_gate_verdict(
+                run_path, gate_id, exit_code, sha, ms,
+                command=cmd_str or f"gate-token:{token}", evidence_file=evidence_file,
+            )
         verdicts.append({
             "gate": gate_id,
             "cmd": cmd_str,
@@ -287,7 +331,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     return {
         "verdicts": verdicts,
         "skipped": skipped,
-        "all_green": all(v["exit"] == 0 for v in verdicts),
+        "all_green": bool(verdicts) and not skipped and all(v["exit"] == 0 for v in verdicts),
         "ran": len(verdicts),
     }
 

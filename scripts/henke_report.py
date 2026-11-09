@@ -38,10 +38,14 @@ for _s in (sys.stdout, sys.stderr):
         except Exception:
             pass
 
-SUITE_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = SUITE_ROOT / "scripts"
-if str(SUITE_ROOT) not in sys.path:
-    sys.path.insert(0, str(SUITE_ROOT))
+SCRIPTS_DIR = Path(__file__).resolve().parent
+_PKG_ROOT = SCRIPTS_DIR.parent
+if str(_PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PKG_ROOT))
+
+from scripts._paths import suite_root as _suite_root  # noqa: E402
+
+SUITE_ROOT = _suite_root()  # checkout OU <prefix>/henke_data (wheel)
 
 # Chaves alternativas que uma run pode usar para declarar o pedido original
 _PROMPT_KEYS = ("prompt", "pedido", "request", "task", "instrucao", "solicitacao")

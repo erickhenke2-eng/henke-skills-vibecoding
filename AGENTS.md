@@ -31,9 +31,11 @@ Antes de executar qualquer ação, determine o modo da sessão (registrado em `.
 
 | Modo | Quando Usar | Permissões de Escrita | Portões Obrigatórios |
 |---|---|---|---|
-| **`ANALISAR`** | Perguntas, diagnóstico, auditoria, banca adversarial, caça a bugs, investigação. | **NENHUMA**. Proibido alterar qualquer arquivo do projeto auditado. Arquivos temporários/ledger devem ir para `$TEMP`. | `repo_signals.py`, `hazard_scan.py`, `assertless_scan.py`, `a11y_scan.py`, `coverage_ledger.py` |
-| **`PLANEJAR`** | Concepção, desenho de arquitetura, histórias, MVP. | **APENAS** em `docs/designs/` e `.henke/`. Proibido alterar código-fonte (`src/`, `packages/`). | `TEMPLATE.md`, `spec_drift.py`, `contract_closure.py`, `fence_check.py` |
-| **`EXECUTAR`** | Implementação cirúrgica, correção de bugs, integrações LLM, observabilidade, testes. | **APENAS nos arquivos declarados** em `## 4. Escopo Declarado` da spec aprovada. | `spec_drift.py`, `contract_closure.py`, `ratchet.py`, `assertless_scan.py`, `mutant_hunt.py`, `metaconfig_diff.py`, `run_state.py` |
+| **`ANALISAR`** | Perguntas, diagnóstico, auditoria, banca adversarial, caça a bugs, investigação. | **NENHUMA**. Proibido alterar qualquer arquivo do projeto auditado. Arquivos temporários/ledger devem ir para `$TEMP`. | `repo_signals.py`, `hazard_scan.py`, `assertless_scan.py`, `coverage_ledger.py` |
+| **`PLANEJAR`** | Concepção, desenho de arquitetura, histórias, MVP. | **APENAS** em `docs/designs/` e `.henke/`. Proibido alterar código-fonte (`src/`, `packages/`). | `spec_drift.py`, `contract_closure.py`, `fence_check.py` |
+| **`EXECUTAR`** | Implementação cirúrgica, correção de bugs, integrações LLM, observabilidade, testes. | **APENAS nos arquivos declarados** em `## 4. Escopo Declarado` da spec aprovada. | `spec_drift.py`, `ratchet.py`, `hazard_scan.py`, `assertless_scan.py`, `fence_check.py`, `contract_closure.py`, `metaconfig_diff.py` |
+
+> A tabela acima é o **espelho documental de `MODE_GATES`** em `scripts/henke_router.py` — a fonte única da matriz. `a11y_scan.py` (ANALISAR) e `mutant_hunt.py` (EXECUTAR) são portões **aspiracionais**: entram na matriz só depois que seus próprios falso-verdes estiverem fechados; `run_state.py` orquestra a run, não é portão executável.
 
 > ⚠️ **Trava de PUBLISH:**  
 > Ações destrutivas ou de publicação (`deploy`, `push --force`, remoção em massa de arquivos, `drop table`, `rollback`) exigem **autorização humana prévia e explícita** com alvo e comando confirmados.

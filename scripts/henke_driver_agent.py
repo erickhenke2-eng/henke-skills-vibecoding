@@ -73,13 +73,13 @@ def main() -> int:
             "files_changed": [],
             "notes": f"cli '{cli}' sem preset. Disponíveis: {', '.join(sorted(PRESETS))}",
         }))
-        return 0
+        return 2  # preset inválido = erro de uso (nunca verde)
 
     try:
         envelope = json.load(sys.stdin)
     except (OSError, ValueError) as exc:
         print(json.dumps({"files_changed": [], "notes": f"envelope ilegível: {exc}"}))
-        return 0
+        return 2  # envelope ilegível = erro de uso (nunca verde)
 
     repo = str(envelope.get("repo_root") or ".")
     env_file = tempfile.NamedTemporaryFile(
@@ -103,20 +103,24 @@ def main() -> int:
             )
         except OSError as exc:
             print(json.dumps({"files_changed": [], "notes": f"cli '{cli}' indisponível: {exc}"}))
-            return 0
+            return 1  # CLI ausente = falha de driver (nunca verde)
 
         obj = _last_result_json(res.stdout or "")
         if obj is None:
-            obj = {
+            print(json.dumps({
                 "files_changed": [],
                 "notes": f"{cli} exit={res.returncode}; sem JSON de resultado "
                          f"(stdout_tail: {(res.stdout or '')[-300:]})",
-            }
-        else:
-            obj = {
-                "files_changed": [str(f) for f in obj["files_changed"]],
-                "notes": str(obj.get("notes", ""))[:2000],
-            }
+            }, ensure_ascii=False))
+            return 1  # sem resultado = driver falhou (nunca verde)
+        obj = {
+            "files_changed": [str(f) for f in obj["files_changed"]],
+            "notes": str(obj.get("notes", ""))[:2000],
+        }
+        if res.returncode != 0:
+            obj["notes"] = (obj["notes"] + f" [cli exit {res.returncode}]").strip()
+            print(json.dumps(obj, ensure_ascii=False))
+            return 1  # CLI saiu com erro — propaga (nunca verde)
         print(json.dumps(obj, ensure_ascii=False))
         return 0
     finally:

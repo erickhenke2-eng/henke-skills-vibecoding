@@ -57,7 +57,11 @@ def strip_code(text: str) -> str:
     return re.sub(r"(`+)[^`\n]*?\1", "", "".join(out))
 
 
-root = Path(__file__).resolve().parents[1]
+try:
+    from scripts._paths import suite_root
+except ImportError:
+    from _paths import suite_root
+root = suite_root()
 skills = sorted(p for p in root.glob("henke-*/SKILL.md") if p.is_file())
 errors = []
 

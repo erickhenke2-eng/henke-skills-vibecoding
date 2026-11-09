@@ -40,7 +40,9 @@ Códigos de saída:
   0  outcome derivado 'verified' (ou --dry-run concluído)
   1  outcome derivado 'failed' (portão vermelho, driver falhou, skill ilegível)
   2  bloqueio/erro de uso: autorização humana pendente, sem driver, driver
-     inválido, resultado de driver malformado, repo inexistente, prompt vazio
+     inválido, resultado de driver malformado, repo inexistente, prompt vazio,
+     portão obrigatório inviável (pré-despacho), --resume divergente ou
+     outcome 'unverified'/'blocked' (driver echo é simulação: nunca 'verified')
 """
 from __future__ import annotations
 
@@ -53,6 +55,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import signal          # killpg POSIX no timeout (avaliado só fora do Windows)
 import subprocess
 import sys
 import unicodedata
@@ -65,14 +68,18 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
         except Exception:
             pass
 
-SUITE_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = SUITE_ROOT / "scripts"
+SCRIPTS_DIR = Path(__file__).resolve().parent
+_PKG_ROOT = SCRIPTS_DIR.parent
 CLI_PATH = SCRIPTS_DIR / "henke_cli.py"
 
-if str(SUITE_ROOT) not in sys.path:
-    sys.path.insert(0, str(SUITE_ROOT))
+if str(_PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PKG_ROOT))
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+
+from scripts._paths import suite_root as _suite_root  # noqa: E402
+
+SUITE_ROOT = _suite_root()  # checkout OU <prefix>/henke_data (wheel)
 
 # --- Contrato M3: limite real de auto-reparo (PROTOCOLO.md — "no máximo 2 iterações") ---
 MAX_REWORK = 2
@@ -424,6 +431,30 @@ def _decide_authorization(
     return False, ""
 
 
+def _git_head(repo_root: Path) -> str | None:
+    """HEAD atual do repo (None se sem git/sem commits) — vínculo do --resume."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=15,
+        )
+        if res.returncode == 0:
+            return (res.stdout or "").strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def _approval_fingerprint(prompt: str, route_snapshot: dict | None) -> str:
+    """sha256 do escopo aprovado (prompt + route_snapshot normalizados)."""
+    payload = json.dumps(
+        {"prompt": prompt, "route_snapshot": route_snapshot or {}},
+        sort_keys=True, ensure_ascii=False, default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Estágio: envelope de execução (M2 — SKILL.md verbatim + sha256 de injeção)
 # ---------------------------------------------------------------------------
@@ -500,44 +531,116 @@ def _validate_driver_result(obj: object) -> dict | None:
     return {"files_changed": files_changed, "notes": notes}
 
 
+def _popen_tree_kwargs() -> dict:
+    """Isola o filho num grupo próprio para o timeout derrubar a ÁRVORE
+    (adapter + CLI-neto), não só o filho direto."""
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}  # POSIX: novo process group (killpg)
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Derruba `proc` e todos os descendentes (Windows: taskkill /T; POSIX:
+    SIGKILL no process group criado por _popen_tree_kwargs)."""
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True, timeout=20,
+            )
+        except Exception:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+    else:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+
+def _run_capturing_tree(
+    argv: list[str],
+    cwd: Path,
+    timeout_sec: float,
+    input_text: str | None = None,
+) -> tuple[int | None, str, str, bool]:
+    """subprocess.run(timeout=) que NUNCA deixa órfãos: timeout derruba a
+    árvore do processo. Retorna (returncode|None, stdout, stderr, timed_out)."""
+    proc = subprocess.Popen(  # OSError propaga p/ o chamador tratar
+        argv,
+        stdin=subprocess.PIPE if input_text is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(cwd),
+        env=_child_env(),
+        **_popen_tree_kwargs(),
+    )
+    try:
+        out, err = proc.communicate(input=input_text, timeout=timeout_sec)
+        return proc.returncode, out or "", err or "", False
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc)
+        try:
+            proc.communicate(timeout=15)
+        except Exception:
+            pass
+        return None, "", "", True
+
+
+def _run_driver_argv(
+    argv: list[str],
+    envelope: dict,
+    repo_root: Path,
+    timeout_sec: float,
+    desc: str,
+) -> tuple[dict | None, str]:
+    """Roda `argv` como LISTA direta (nunca string p/ shlex — WinError no
+    Windows) com o envelope JSON no stdin; stdout = JSON de resultado."""
+    payload = json.dumps(envelope, ensure_ascii=False)
+    try:
+        rc, out, err, timed_out = _run_capturing_tree(
+            argv, cwd=repo_root, timeout_sec=timeout_sec, input_text=payload
+        )
+    except OSError as exc:
+        return None, f"falha ao executar {desc}: {exc}"
+    if timed_out:
+        return None, (
+            f"[TIMEOUT] {desc} expirou após {timeout_sec}s — "
+            "árvore do processo encerrada (sem filhos órfãos)"
+        )
+    if rc != 0:
+        err_tail = (err or out or "").strip().splitlines()
+        tail = err_tail[-1][:200] if err_tail else "sem saída"
+        return None, f"{desc} saiu com exit {rc}: {tail}"
+    try:
+        obj = json.loads(out or "")
+    except Exception:
+        return None, f"{desc} retornou stdout que não é JSON de resultado válido"
+    validated = _validate_driver_result(obj)
+    if validated is None:
+        return None, "JSON de resultado do driver fora do schema {files_changed[], notes}"
+    return validated, ""
+
+
 def _call_cmd_driver(template: str, envelope: dict, repo_root: Path, timeout_sec: float) -> tuple[dict | None, str]:
-    """Invoca `cmd:<template>` com o envelope JSON no stdin; stdout deve ser o
-    JSON de resultado do driver. Retorna (resultado_validado, erro)."""
+    """Invoca `cmd:<template>` (shlex → argv) — ver _run_driver_argv."""
     try:
         tokens = shlex.split(template, posix=(os.name != "nt"))
     except ValueError as exc:
         return None, f"template de driver inválido: {exc}"
     if not tokens:
         return None, "template de driver vazio após 'cmd:'"
-    payload = json.dumps(envelope, ensure_ascii=False)
-    try:
-        res = subprocess.run(
-            tokens,
-            input=payload,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=str(repo_root),
-            env=_child_env(),
-            timeout=timeout_sec,
-        )
-    except subprocess.TimeoutExpired:
-        return None, f"driver expirou após {timeout_sec}s: '{template}'"
-    except OSError as exc:
-        return None, f"falha ao executar driver '{template}': {exc}"
-    if res.returncode != 0:
-        err_tail = (res.stderr or res.stdout or "").strip().splitlines()
-        tail = err_tail[-1][:200] if err_tail else "sem saída"
-        return None, f"driver '{template}' saiu com exit {res.returncode}: {tail}"
-    try:
-        obj = json.loads(res.stdout or "")
-    except Exception:
-        return None, "driver retornou stdout que não é JSON de resultado válido"
-    validated = _validate_driver_result(obj)
-    if validated is None:
-        return None, "JSON de resultado do driver fora do schema {files_changed[], notes}"
-    return validated, ""
+    return _run_driver_argv(tokens, envelope, repo_root, timeout_sec, desc=f"driver '{template}'")
 
 
 def _dispatch_driver(
@@ -607,9 +710,10 @@ def _dispatch_driver(
         parts = spec.split(":", 1)
         cli_name, model = parts[0], (parts[1] if len(parts) > 1 else "")
         adapter = SCRIPTS_DIR / "henke_driver_agent.py"
-        result, err = _call_cmd_driver(
-            f'"{sys.executable}" "{adapter}" {cli_name} {model}'.strip(),
-            envelope, repo_root, timeout_sec,
+        # argv de lista direta — NUNCA montar string p/ shlex (WinError no Windows).
+        argv = [sys.executable, str(adapter), cli_name] + ([model] if model else [])
+        result, err = _run_driver_argv(
+            argv, envelope, repo_root, timeout_sec, desc=f"driver '{driver}'"
         )
         if err:
             return None, err, 1
@@ -640,6 +744,39 @@ def _gates_max_rework() -> int:
     return MAX_REWORK
 
 
+def _preflight_gates(
+    repo_root: Path, gates: list[str], spec_path: str | None = None
+) -> tuple[bool, list[str]]:
+    """Valida ANTES do despacho se cada portão obrigatório é autoexecutável aqui.
+
+    Reutiliza `henke_gates._resolve_gate` (mesma regra do runner): None =
+    portão desconhecido/script ausente; (id, None) = conhecido mas sem
+    args/insumos neste contexto (spec, baseline, HEAD, ledger...). Portão
+    obrigatório inviável NUNCA vira verde — bloquear antes do driver editar é
+    fail-closed. Sem henke_gates importável → inviável (mesmo critério).
+
+    Retorna (todos_viáveis, problemas).
+    """
+    mod = _load_module("henke_gates")
+    resolver = getattr(mod, "_resolve_gate", None) if mod is not None else None
+    if resolver is None:
+        return False, ["henke_gates indisponível — não há como executar os portões obrigatórios"]
+    skip_reasons = getattr(mod, "_SKIP_REASONS", {}) or {}
+    spec = Path(spec_path) if spec_path else None
+    problems: list[str] = []
+    for raw in gates:
+        token = str(raw).strip()
+        resolved = resolver(token, Path(repo_root), spec)
+        if resolved is None:
+            problems.append(f"portão desconhecido ou script ausente: '{token}'")
+        elif resolved[1] is None:
+            reason = skip_reasons.get(
+                resolved[0], "sem args autoexecutáveis neste contexto (insumo ausente)"
+            )
+            problems.append(f"portão obrigatório '{resolved[0]}' não autoexecutável: {reason}")
+    return (not problems), problems
+
+
 def _invoke_test_cmd(repo_root: Path, test_cmd: str, timeout_sec: float) -> tuple[int, str]:
     """Executa o test_cmd via `henke exec -- <cmd>` (subprocess da CLI) para que a
     evidência caia em exec_log.jsonl/LEDGER.json. Retorna (exit_code, saída)."""
@@ -650,21 +787,15 @@ def _invoke_test_cmd(repo_root: Path, test_cmd: str, timeout_sec: float) -> tupl
     if not tokens:
         return 2, "test_cmd vazio"
     try:
-        res = subprocess.run(
+        rc, out, err, timed_out = _run_capturing_tree(
             [sys.executable, str(CLI_PATH), "exec", "--repo", str(repo_root), "--", *tokens],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            cwd=str(repo_root),
-            env=_child_env(),
-            timeout=timeout_sec,
+            cwd=repo_root, timeout_sec=timeout_sec,
         )
-        return res.returncode, (res.stdout or "") + (res.stderr or "")
-    except subprocess.TimeoutExpired:
-        return 2, f"test_cmd expirou após {timeout_sec}s"
     except OSError as exc:
         return 2, f"falha ao executar test_cmd: {exc}"
+    if timed_out:
+        return 2, f"[TIMEOUT] test_cmd expirou após {timeout_sec}s (árvore encerrada)"
+    return int(rc or 0), out + err
 
 
 def _red_verdicts(gres: dict | None) -> list[dict]:
@@ -753,6 +884,8 @@ def _print_report(
         print("Próximo passo: revise o diff da run e feche o ciclo — commit é ato humano (custódia).")
     elif outcome == "failed":
         print("Próximo passo: corrija os achados acima e rode `henke auto` de novo.")
+    elif outcome == "unverified":
+        print("Próximo passo: driver simulado (echo) — rode com um driver real (agent:<cli>/cmd:) para verificação de verdade.")
     else:
         print(f"Próximo passo: henke approve {run_path}  (ou revise os motivos no arquivo da run)")
 
@@ -847,6 +980,33 @@ def run_auto(args: argparse.Namespace) -> int:
             print("ERRO: run não aprovada. Rode primeiro:", file=sys.stderr)
             print(f"  henke approve {cand}", file=sys.stderr)
             return 2
+        # Vínculo da aprovação: HEAD + escopo (prompt + route_snapshot) não
+        # podem ter divergido desde a aprovação — divergência exige nova aprovação.
+        snap = resumed.get("route_snapshot")
+        binding = resumed.get("approval_binding")
+        stale: list[str] = []
+        if not isinstance(binding, dict):
+            stale.append("run sem approval_binding (criada antes do vínculo de aprovação)")
+        else:
+            head_then, head_now = binding.get("head"), _git_head(repo_root)
+            if head_then != head_now:
+                stale.append(
+                    f"HEAD divergiu: aprovado em {head_then or '<sem-git>'}, "
+                    f"agora {head_now or '<sem-git>'}"
+                )
+            fp_now = _approval_fingerprint(
+                str(resumed.get("prompt") or ""), snap if isinstance(snap, dict) else None
+            )
+            if fp_now != binding.get("scope_sha256"):
+                stale.append("escopo/prompt da run divergiu do snapshot aprovado")
+        if stale:
+            _record_stage(cand, "resume_bind", "RETOMADA RECUSADA: " + "; ".join(stale))
+            _patch_run(cand, lambda d: d.update({"review_status": "pending"}))
+            print("RETOMADA RECUSADA — HEAD/escopo divergiu desde a aprovação:", file=sys.stderr)
+            for r in stale:
+                print(f"  - {r}", file=sys.stderr)
+            print(f"Nova aprovação exigida: henke approve {cand}", file=sys.stderr)
+            return 2
         route = resumed.get("route_snapshot") or route
         prompt = str(resumed.get("prompt") or prompt)
         driver = driver or resumed.get("driver")
@@ -895,23 +1055,32 @@ def run_auto(args: argparse.Namespace) -> int:
             # run bloqueada por auth não declara mandatory_gates (nunca rodarão)
             mandatory_gates=None if sensitive_hit else list(route.get("gates_required") or []),
         )
-    _patch_run(run_path, lambda d: d.update({
+    route_snapshot = {
+        "mode": route.get("mode"),
+        "archetype": route.get("archetype"),
+        "confidence": route.get("confidence"),
+        "skills": route.get("skills"),
+        "gates_required": route.get("gates_required"),
+        "scope_paths": route.get("scope_paths"),
+        "requires_human_auth": route.get("requires_human_auth"),
+    }
+    run_patch: dict = {
         "prompt": prompt,
         "scope_paths": list(route.get("scope_paths") or []),
         "policy_efetiva": policy_efetiva,
         "driver": driver,
         "rework_attempts": 0,
         # snapshot do route p/ retomada futura (--resume) — escopo vinculado à run
-        "route_snapshot": {
-            "mode": route.get("mode"),
-            "archetype": route.get("archetype"),
-            "confidence": route.get("confidence"),
-            "skills": route.get("skills"),
-            "gates_required": route.get("gates_required"),
-            "scope_paths": route.get("scope_paths"),
-            "requires_human_auth": route.get("requires_human_auth"),
-        },
-    }))
+        "route_snapshot": route_snapshot,
+    }
+    if resumed is None:
+        # Vínculo da aprovação (--resume): HEAD + sha256(prompt+route_snapshot).
+        run_patch["approval_binding"] = {
+            "head": _git_head(repo_root),
+            "scope_sha256": _approval_fingerprint(prompt, route_snapshot),
+            "bound_at": _now_iso(),
+        }
+    _patch_run(run_path, lambda d: d.update(run_patch))
     _record_stage(
         run_path, "route",
         f"mode={route.get('mode')} archetype={route.get('archetype')} "
@@ -932,61 +1101,111 @@ def run_auto(args: argparse.Namespace) -> int:
         return 2
     _record_stage(run_path, "authorize", f"escopo comum autorizado (policy={policy_name}, yes={yes})")
 
-    # ---- estágio 4: envelope com SKILL.md verbatim (M2) ----
-    envelope, env_err = _build_envelope(
-        prompt, route, project, policy_efetiva, repo_root, run_id, driver
-    )
-    if env_err:
-        _record_stage(run_path, "dispatch", f"ERRO: {env_err}", exit_code=2)
-        print(f"ERRO no despacho: {env_err}", file=sys.stderr)
-        return 1
-    envelope_path = henke_dir / "runs" / f"{run_id}.envelope.json"
-    _atomic_write_json(envelope_path, envelope)
-    _record_stage(
-        run_path, "envelope",
-        f"envelope gravado em {envelope_path.name} com {len(envelope['skills'])} skill(s)",
-    )
-    # Prova de injeção verbatim na run (aceitação M2): skills_rodadas = sha256 do disco
-    _patch_run(run_path, lambda d: d.update({
-        "skills_rodadas": [
-            {"name": s["name"], "path": s["path"], "sha256": s["sha256"]}
-            for s in envelope["skills"]
-        ],
-        "envelope": str(envelope_path),
-    }))
-    record_gate(
-        run_path, "dispatch", 0,
-        f"{len(envelope['skills'])} skill(s) injetada(s) verbatim (sha256 conferido com disco)",
-    )
-
-    # ---- estágio 5: driver ----
+    is_analisar = str(route.get("mode", "")).upper() == "ANALISAR"
+    gates_required = list(route.get("gates_required") or [])
     driver_timeout = float(timeout_opt) if timeout_opt else 600.0
-    driver_result, drv_err, drv_exit = _dispatch_driver(
-        driver, envelope, envelope_path, repo_root, driver_timeout
-    )
-    if drv_err:
-        _record_stage(run_path, "dispatch", f"ERRO: {drv_err}", exit_code=drv_exit or 2)
-        print(drv_err, file=sys.stderr)
-        return drv_exit or 2
-    _patch_run(run_path, lambda d: d.update({
-        "driver_result": driver_result,
-        "files_changed": list(driver_result.get("files_changed") or []),
-    }))
-    if driver == "echo":
-        _record_stage(run_path, "dispatch", "driver=echo (simulated) — modo teste/CI")
-    else:
+    driver_result: dict | None = None
+    echo_dispatched = False
+
+    if is_analisar:
+        # ANALISAR limita a AÇÃO (não só o texto): nenhum driver despacha —
+        # a análise são os portões obrigatórios + test_cmd, nada mais.
         _record_stage(
             run_path, "dispatch",
-            f"driver={driver} → {len(driver_result.get('files_changed') or [])} arquivo(s); "
-            f"notes: {(driver_result.get('notes') or '')[:200]}",
+            f"modo ANALISAR — driver '{driver or 'nenhum'}' NÃO despachado; "
+            "ação limitada aos portões/testes",
+        )
+    else:
+        # ---- estágio 4: envelope com SKILL.md verbatim (M2) ----
+        envelope, env_err = _build_envelope(
+            prompt, route, project, policy_efetiva, repo_root, run_id, driver
+        )
+        if env_err:
+            _record_stage(run_path, "dispatch", f"ERRO: {env_err}", exit_code=2)
+            print(f"ERRO no despacho: {env_err}", file=sys.stderr)
+            return 1
+        envelope_path = henke_dir / "runs" / f"{run_id}.envelope.json"
+        _atomic_write_json(envelope_path, envelope)
+        _record_stage(
+            run_path, "envelope",
+            f"envelope gravado em {envelope_path.name} com {len(envelope['skills'])} skill(s)",
+        )
+        # Prova de injeção verbatim na run (aceitação M2): skills_rodadas = sha256 do disco
+        _patch_run(run_path, lambda d: d.update({
+            "skills_rodadas": [
+                {"name": s["name"], "path": s["path"], "sha256": s["sha256"]}
+                for s in envelope["skills"]
+            ],
+            "envelope": str(envelope_path),
+        }))
+        record_gate(
+            run_path, "dispatch", 0,
+            f"{len(envelope['skills'])} skill(s) injetada(s) verbatim (sha256 conferido com disco)",
         )
 
+        # ---- estágio 4b: PRE-FLIGHT de portões obrigatórios — ANTES do driver ----
+        # Portão obrigatório inviável (sem spec/baseline/HEAD/args) nunca vira
+        # verde: bloquear aqui evita "agente editou e a run falhou depois".
+        if gates_required:
+            pf_ok, pf_problems = _preflight_gates(repo_root, gates_required)
+            if not pf_ok:
+                detail = "; ".join(pf_problems)
+                _record_stage(
+                    run_path, "gates",
+                    f"PRE-FLIGHT bloqueou o despacho (portões inviáveis): {detail}",
+                )
+                print(
+                    "BLOQUEIO PRÉ-DESPACHO — portões obrigatórios inviáveis neste "
+                    "repositório; nada foi despachado:",
+                    file=sys.stderr,
+                )
+                for p in pf_problems:
+                    print(f"  - {p}", file=sys.stderr)
+                print(
+                    "Forneça os insumos (spec, baseline, HEAD/commit) ou revise o "
+                    f"route. Run registrada: {run_path}",
+                    file=sys.stderr,
+                )
+                return 2
+            _record_stage(
+                run_path, "preflight",
+                f"{len(gates_required)} portão(ões) obrigatório(s) viáveis",
+            )
+
+        # ---- estágio 5: driver ----
+        driver_result, drv_err, drv_exit = _dispatch_driver(
+            driver, envelope, envelope_path, repo_root, driver_timeout
+        )
+        if drv_err:
+            _record_stage(run_path, "dispatch", f"ERRO: {drv_err}", exit_code=drv_exit or 2)
+            print(drv_err, file=sys.stderr)
+            return drv_exit or 2
+        echo_dispatched = (driver == "echo")
+        _patch_run(run_path, lambda d: d.update({
+            "driver_result": driver_result,
+            "files_changed": list(driver_result.get("files_changed") or []),
+        }))
+        if driver == "echo":
+            _record_stage(
+                run_path, "dispatch",
+                "driver=echo (simulated) — modo teste/CI; outcome teto 'unverified'",
+            )
+        else:
+            _record_stage(
+                run_path, "dispatch",
+                f"driver={driver} → {len(driver_result.get('files_changed') or [])} arquivo(s); "
+                f"notes: {(driver_result.get('notes') or '')[:200]}",
+            )
+
     # ---- estágio 6: portões obrigatórios + auto-reparo (MAX_REWORK) ----
-    gates_required = list(route.get("gates_required") or [])
     gates_timeout = float(timeout_opt) if timeout_opt else 300.0
     gres: dict | None = None
     rework_attempts = 0
-    real_driver = isinstance(driver, str) and driver.startswith(("cmd:", "opencode", "agent:"))
+    real_driver = (
+        not is_analisar
+        and isinstance(driver, str)
+        and driver.startswith(("cmd:", "opencode", "agent:"))
+    )
 
     if not gates_required:
         _record_stage(run_path, "gates", "nenhum portão obrigatório declarado pelo route")
@@ -1053,9 +1272,13 @@ def run_auto(args: argparse.Namespace) -> int:
 
     # ---- estágio 8: fecho — outcome derivado + resumo PT-BR ----
     not_verified: list[str] = []
-    if driver == "echo":
+    if is_analisar:
+        not_verified.append(
+            "despacho de driver/edições — modo ANALISAR limita a ação à análise (portões/testes)"
+        )
+    if echo_dispatched:
         not_verified.append("execução real das skills (driver echo é simulado — nenhum arquivo alterado)")
-    if driver == "stdin":
+    if driver == "stdin" and not is_analisar:
         not_verified.append("conferência humana do resultado lido do stdin")
     if gres is None and gates_required:
         not_verified.append("portões obrigatórios não executados (henke_gates indisponível)")
@@ -1068,11 +1291,36 @@ def run_auto(args: argparse.Namespace) -> int:
         not_verified.append("ação sensível não executada — aguardando aprovação humana")
     not_verified.append("revisão Goldfish/contexto limpo e commit final (atos humanos — PROTOCOLO §9)")
 
+    # ---- cap de outcome: driver echo é SIMULAÇÃO — nunca 'verified' ----
+    # Última escrita na run (depois disto qualquer record_gate/_patch_run
+    # re-derivaria e desfaria o cap). Declarar pior que o derivado é a direção
+    # segura: verify_run_file só rejeita declarar MELHOR que a derivação.
+    if echo_dispatched:
+        data = json.loads(run_path.read_text(encoding="utf-8"))
+        derived, reasons = derive_run_outcome(data)
+        if derived == "verified":
+            data["outcome"] = "unverified"
+            data["outcome_capped_from"] = "verified"
+            data["reasons"] = list(reasons) + [
+                "ECHO-UNVERIFIED: driver echo é simulado — nenhuma execução real aconteceu"
+            ]
+            stages = data.setdefault("stages", [])
+            if isinstance(stages, list):
+                stages.append({
+                    "stage": "outcome_cap",
+                    "at": _now_iso(),
+                    "exit_code": 0,
+                    "detail": "driver echo → outcome limitado a 'unverified'",
+                })
+            data["updated_at"] = _now_iso()
+            _atomic_write_json(run_path, data)
+
     ok, _reasons = verify_run_file(run_path)
     run_data = json.loads(run_path.read_text(encoding="utf-8"))
     outcome = run_data.get("outcome", "blocked")
     _print_report(
-        run_path, run_data, prompt, route, driver_result, driver,
+        run_path, run_data, prompt, route, driver_result,
+        (None if is_analisar else driver),
         gres, test_info, not_verified,
     )
     if outcome == "verified" and ok:

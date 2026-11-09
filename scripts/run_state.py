@@ -17,11 +17,15 @@ Códigos de saída:
 from __future__ import annotations
 
 import argparse
+import contextlib
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
+import time
 
 for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
@@ -42,6 +46,61 @@ def _atomic_write_json(path: Path, data: dict) -> None:
     payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     tmp_path.write_text(payload, encoding="utf-8")
     os.replace(tmp_path, path)
+
+
+@contextlib.contextmanager
+def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
+    """Lock interprocessos por arquivo-alvo (`<target>.lock`).
+
+    Stdlib pura e multi-plataforma: `os.open(O_CREAT|O_EXCL)` com retry até
+    `timeout`. Cobre a transação read-modify-write inteira — sem ele, dois
+    processos leem o mesmo JSON e um write é perdido.
+    """
+    lock_path = Path(str(Path(target)) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout
+    fd: int | None = None
+    while fd is None:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"timeout aguardando lock de escrita: {lock_path}")
+            time.sleep(poll)
+    try:
+        os.write(fd, f"pid={os.getpid()}\n".encode("utf-8"))
+        yield
+    finally:
+        os.close(fd)
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
+def _repo_root_for_run(run_path: Path) -> Path | None:
+    """Deriva a raiz do repo de `.henke/runs/<id>.json` (None fora desse layout)."""
+    p = Path(run_path).resolve()
+    try:
+        if p.parent.name == "runs" and p.parent.parent.name == ".henke":
+            return p.parent.parent.parent
+    except (OSError, IndexError):
+        pass
+    return None
+
+
+def _git_head(repo_root: Path) -> str | None:
+    """HEAD atual do repo (None se git indisponível/sem commits — nunca inventa)."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    sha = (res.stdout or "").strip()
+    return sha if res.returncode == 0 and sha else None
 
 
 def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
@@ -70,11 +129,35 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
 
     # 2. Verifica execução física dos portões
     gates = run_data.get("gates", {})
-    if not isinstance(gates, dict) or len(gates) == 0:
+    if not isinstance(gates, dict):
+        return "blocked", ["NO-GATES-EXECUTED: 'gates' não é um objeto na run"]
+
+    # Atestações manuais (`manual: true` — record-gate sem --command/--evidence-file)
+    # NUNCA contam como portão físico; falha declarada manualmente segue reprovando.
+    physical_gates: dict = {}
+    manual_failures: list[str] = []
+    for gate_name, gate_info in gates.items():
+        if isinstance(gate_info, dict) and gate_info.get("manual") is True:
+            ec = gate_info.get("exit_code")
+            if isinstance(ec, int) and not isinstance(ec, bool) and ec != 0:
+                manual_failures.append(
+                    f"GATE-FAILED: {gate_name} (exit {ec} — atestação manual, sem evidência física)"
+                )
+            continue
+        physical_gates[gate_name] = gate_info
+
+    if not physical_gates:
+        if manual_failures:
+            return "failed", manual_failures
+        if gates:
+            return "blocked", [
+                "NO-GATES-EXECUTED: apenas atestações manuais (manual: true) na run — "
+                "nenhum portão físico registrado"
+            ]
         return "blocked", ["NO-GATES-EXECUTED: nenhum portão registrado na run"]
 
-    failed_gates: list[str] = []
-    for gate_name, gate_info in gates.items():
+    failed_gates: list[str] = list(manual_failures)
+    for gate_name, gate_info in physical_gates.items():
         if not isinstance(gate_info, dict):
             failed_gates.append(f"GATE-FAILED: {gate_name} (formato inválido)")
             continue
@@ -97,7 +180,7 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
                 (g_name == g or Path(g_name).stem == g)
                 and isinstance(g_info, dict)
                 and g_info.get("exit_code") == 0
-                for g_name, g_info in gates.items()
+                for g_name, g_info in physical_gates.items()
             )
         ]
         if not executed_core:
@@ -113,7 +196,7 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
                     (g_name == req or Path(g_name).stem == req)
                     and isinstance(g_info, dict)
                     and g_info.get("exit_code") == 0
-                    for g_name, g_info in gates.items()
+                    for g_name, g_info in physical_gates.items()
                 )
             ]
             if missing_spec:
@@ -129,7 +212,7 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
                 (g_name == req or Path(g_name).stem == gate_stem)
                 and isinstance(g_info, dict)
                 and g_info.get("exit_code") == 0
-                for g_name, g_info in gates.items()
+                for g_name, g_info in physical_gates.items()
             )
             if not found:
                 missing_mandatory.append(
@@ -221,57 +304,108 @@ def _load_run(run_path: Path) -> dict:
     return data
 
 
-def record_gate(run_path: Path, gate_name: str, exit_code: int, summary: str = "") -> dict:
-    """Registra o veredito de um portão na run e recalcula o outcome derivado."""
-    data = _load_run(run_path)
-    gates = data.setdefault("gates", {})
-    if not isinstance(gates, dict):
-        gates = {}
-        data["gates"] = gates
-    gates[gate_name] = {
-        "exit_code": int(exit_code),
-        "summary": summary,
-        "recorded_at": _now_iso(),
-    }
-    derived, reasons = derive_run_outcome(data)
-    data["outcome"] = derived
-    data["reasons"] = reasons
-    data["updated_at"] = _now_iso()
-    _atomic_write_json(run_path, data)
+def record_gate(
+    run_path: Path,
+    gate_name: str,
+    exit_code: int,
+    summary: str = "",
+    *,
+    command: str | None = None,
+    evidence_file: str | Path | None = None,
+    manual: bool = False,
+) -> dict:
+    """Registra o veredito de um portão na run e recalcula o outcome derivado.
+
+    Evidência física: `command` + `evidence_file` (arquivo de saída do comando)
+    gravam `command`/`evidence_file`/`evidence_sha256` — é o que prova execução
+    real. `manual=True` marca `manual: true`: atestação que NUNCA conta como
+    portão físico em `derive_run_outcome`. Chamadas de API sem evidência e sem
+    `manual=True` mantêm o comportamento legado (físico) — a exigência de
+    evidência vale na superfície CLI (`record-gate`).
+
+    Transação leitura→escrita coberta por `_file_lock(run_path)`.
+    """
+    has_cmd = bool(command and str(command).strip())
+    has_ev = evidence_file is not None and str(evidence_file).strip() != ""
+    if has_cmd != has_ev:
+        raise ValueError(
+            "evidência incompleta: informe command E evidence_file juntos "
+            "(ou nenhum dos dois para atestação manual)"
+        )
+    evidence_path: Path | None = None
+    evidence_sha: str | None = None
+    if has_cmd and has_ev:
+        evidence_path = Path(str(evidence_file))
+        if not evidence_path.is_file():
+            raise FileNotFoundError(f"evidence-file inexistente: {evidence_path}")
+        evidence_sha = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+
+    with _file_lock(run_path):
+        data = _load_run(run_path)
+        gates = data.setdefault("gates", {})
+        if not isinstance(gates, dict):
+            gates = {}
+            data["gates"] = gates
+        entry: dict = {
+            "exit_code": int(exit_code),
+            "summary": summary,
+            "recorded_at": _now_iso(),
+        }
+        if evidence_sha is not None:
+            entry["command"] = str(command)
+            entry["evidence_file"] = str(evidence_path)
+            entry["evidence_sha256"] = evidence_sha
+        elif manual:
+            entry["manual"] = True
+        gates[gate_name] = entry
+        derived, reasons = derive_run_outcome(data)
+        data["outcome"] = derived
+        data["reasons"] = reasons
+        data["updated_at"] = _now_iso()
+        _atomic_write_json(run_path, data)
     return data
 
 
 def amend_scope(run_path: Path, file_rel: str, reason: str) -> dict:
     """Adiciona uma emenda de escopo auditada à run e recalcula o outcome."""
-    data = _load_run(run_path)
-    amendments = data.setdefault("scope_amendments", [])
-    if not isinstance(amendments, list):
-        amendments = []
-        data["scope_amendments"] = amendments
-    amendments.append({
-        "file": file_rel.replace("\\", "/").strip(),
-        "reason": reason.strip(),
-        "amended_at": _now_iso(),
-    })
-    derived, reasons = derive_run_outcome(data)
-    data["outcome"] = derived
-    data["reasons"] = reasons
-    data["updated_at"] = _now_iso()
-    _atomic_write_json(run_path, data)
+    with _file_lock(run_path):
+        data = _load_run(run_path)
+        amendments = data.setdefault("scope_amendments", [])
+        if not isinstance(amendments, list):
+            amendments = []
+            data["scope_amendments"] = amendments
+        amendments.append({
+            "file": file_rel.replace("\\", "/").strip(),
+            "reason": reason.strip(),
+            "amended_at": _now_iso(),
+        })
+        derived, reasons = derive_run_outcome(data)
+        data["outcome"] = derived
+        data["reasons"] = reasons
+        data["updated_at"] = _now_iso()
+        _atomic_write_json(run_path, data)
     return data
 
 
 def approve_run(run_path: Path, approver: str = "human") -> dict:
-    """Registra aprovação humana explícita para destravar runs com requires_human_auth."""
-    data = _load_run(run_path)
-    data["review_status"] = "approved"
-    data["approved_by"] = approver.strip() or "human"
-    data["approved_at"] = _now_iso()
-    derived, reasons = derive_run_outcome(data)
-    data["outcome"] = derived
-    data["reasons"] = reasons
-    data["updated_at"] = _now_iso()
-    _atomic_write_json(run_path, data)
+    """Registra aprovação humana explícita para destravar runs com requires_human_auth.
+
+    Grava `approved_head` (git rev-parse HEAD do repo da run, ou None) como
+    evidência informativa — o vínculo executável (`approval_binding`) é criado
+    no nascimento da run e checado por `henke auto --resume`.
+    """
+    with _file_lock(run_path):
+        data = _load_run(run_path)
+        data["review_status"] = "approved"
+        data["approved_by"] = approver.strip() or "human"
+        data["approved_at"] = _now_iso()
+        repo_root = _repo_root_for_run(run_path)
+        data["approved_head"] = _git_head(repo_root) if repo_root is not None else None
+        derived, reasons = derive_run_outcome(data)
+        data["outcome"] = derived
+        data["reasons"] = reasons
+        data["updated_at"] = _now_iso()
+        _atomic_write_json(run_path, data)
     return data
 
 
@@ -293,6 +427,10 @@ def main(argv: list[str] | None = None) -> int:
     p_gate.add_argument("--gate", required=True, help="Nome do portão")
     p_gate.add_argument("--exit-code", type=int, required=True, help="Código de saída do portão")
     p_gate.add_argument("--summary", default="", help="Resumo curto da saída")
+    p_gate.add_argument("--command", default=None,
+                        help="Comando real executado (evidência física do veredito)")
+    p_gate.add_argument("--evidence-file", dest="evidence_file", type=Path, default=None,
+                        help="Arquivo de saída do comando; sha256 é registrado como evidência")
 
     p_amend = sub.add_parser("amend-scope", help="Registra emenda de escopo justificada")
     p_amend.add_argument("run_file", type=Path, help="Caminho para .henke/runs/<id>.json")
@@ -328,8 +466,23 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.subcmd == "record-gate":
-            data = record_gate(args.run_file, args.gate, args.exit_code, args.summary)
-            print(f"OK: Gate '{args.gate}' (exit {args.exit_code}) registrado -> outcome='{data['outcome']}'")
+            has_cmd = bool(args.command and str(args.command).strip())
+            has_ev = args.evidence_file is not None
+            if has_cmd != has_ev:
+                print(
+                    "ERRO: evidência incompleta — informe --command E --evidence-file juntos. "
+                    "Sem ambos, o veredito vira atestação manual (manual: true) e não conta "
+                    "como portão físico.",
+                    file=sys.stderr,
+                )
+                return 2
+            data = record_gate(
+                args.run_file, args.gate, args.exit_code, args.summary,
+                command=args.command, evidence_file=args.evidence_file,
+                manual=not has_cmd,
+            )
+            tag = " (atestação manual — não conta como portão físico)" if not has_cmd else ""
+            print(f"OK: Gate '{args.gate}' (exit {args.exit_code}) registrado{tag} -> outcome='{data['outcome']}'")
             return 0
 
         if args.subcmd == "amend-scope":

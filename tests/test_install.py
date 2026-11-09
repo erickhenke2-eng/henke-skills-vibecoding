@@ -86,6 +86,18 @@ class InstallTests(unittest.TestCase):
             installer.install(ROOT, self.user)
         self.assertEqual(snapshot(self.user), before)
 
+    def test_install_lock_blocks_parallel_installer(self):
+        """Lock .henke-install.lock por destino bloqueia instalador concorrente."""
+        lock = self.user / ".henke-install.lock"
+        lock.write_text("pid=999999\n", encoding="utf-8")
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Lock"):
+                installer.install(ROOT, self.user, lock_timeout=0.2)
+        finally:
+            lock.unlink(missing_ok=True)
+        # Destino intacto: nada foi publicado nem removido sob lock alheio.
+        self.assertEqual((self.user / TARGETS[0] / "PROTOCOLO.md").read_text(), "old protocol")
+
     def test_missing_dependency_has_actionable_error(self):
         result = subprocess.run([sys.executable, "-S", str(ROOT / "scripts/validate_skills.py")], capture_output=True, text=True, encoding="utf-8")
         self.assertNotEqual(result.returncode, 0)

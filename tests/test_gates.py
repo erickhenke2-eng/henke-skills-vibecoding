@@ -126,7 +126,7 @@ class GatesRunnerTests(unittest.TestCase):
         res = run_gates(str(self.repo), [], record=False)
         self.assertEqual(set(res), {"verdicts", "all_green", "ran", "skipped"})
         self.assertEqual(res["ran"], 0)
-        self.assertTrue(res["all_green"])  # vacuidade: nada reprovou
+        self.assertFalse(res["all_green"])  # ran=0 é NÃO-VEREDITO, não verde
 
     # ---------- from-route ----------
 
@@ -211,6 +211,48 @@ class GatesRunnerTests(unittest.TestCase):
         saida = buf.getvalue()
         self.assertIn("[PASS] fake_ok", saida)
         self.assertIn("RESULTADO: VERDE", saida)
+
+
+class GatesRunnerKimiAuditTests(unittest.TestCase):
+    """Regressões do audit do Kimi: skip!=verde, ran=0!=verde, evidência física."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name).resolve()
+        self.ok_script = self.repo / "fake_ok.py"
+        self.ok_script.write_text(GATE_OK_SRC, encoding="utf-8")
+
+    def test_all_green_false_em_zero_verdicts(self):
+        res = run_gates(str(self.repo), ["nao-existe"], record=False)
+        # gate desconhecido → verdict exit 2 — mas zero verde também reprova com ran>0
+        self.assertFalse(res["all_green"])
+        res_empty = run_gates(str(self.repo), [], record=False)
+        self.assertFalse(res_empty["all_green"], "ran=0 deve ser não-veredito")
+        self.assertEqual(res_empty["ran"], 0)
+
+    def test_skipped_gate_nao_conta_como_verde(self):
+        # 'ratchet' é portão conhecido sem args autoexecutáveis → skipped (não verdict)
+        res = run_gates(str(self.repo), ["ratchet"], record=False)
+        self.assertEqual(res["ran"], 0)
+        self.assertEqual(len(res["skipped"]), 1)
+        self.assertEqual(res["skipped"][0]["gate"], "ratchet")
+        self.assertFalse(res["all_green"], "portão pulado NUNCA pode dar all_green")
+
+    def test_evidence_file_criado_e_sha_registrado(self):
+        init_run(self.repo, "ev-run", mode="ANALISAR", archetype="SHERLOCK")
+        res = run_gates(str(self.repo), [str(self.ok_script)], run_id="ev-run", record=True)
+        ev_dir = self.repo / ".henke" / "evidence" / "ev-run"
+        evs = list(ev_dir.glob("*.out"))
+        self.assertTrue(evs, "saída física do portão deve ser persistida")
+        run = json.loads((self.repo / ".henke" / "runs" / "ev-run.json").read_text(encoding="utf-8"))
+        entry = run["gates"]["fake_ok"]
+        self.assertEqual(entry["command"], res["verdicts"][0]["cmd"])
+        self.assertEqual(entry["evidence_file"], str(evs[0]))
+        self.assertEqual(
+            entry["evidence_sha256"], hashlib.sha256(evs[0].read_bytes()).hexdigest()
+        )
+        self.assertNotIn("manual", entry, "portão com evidência não é atestação manual")
 
 
 if __name__ == "__main__":

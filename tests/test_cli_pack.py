@@ -56,9 +56,12 @@ class CliPackTests(unittest.TestCase):
         code, _, _ = run_cli(["run", "verify", str(run_file)])
         self.assertEqual(code, 1)
 
+        ev = self.repo / "evidence.out"
+        ev.write_text("saída real do portão\n", encoding="utf-8")
         code, out, err = run_cli([
             "run", "record-gate", str(run_file),
             "--gate", "hazard_scan", "--exit-code", "0", "--summary", "ok",
+            "--command", "python hazard_scan.py", "--evidence-file", str(ev),
         ])
         self.assertEqual(code, 0, err)
 
@@ -89,6 +92,51 @@ class CliPackTests(unittest.TestCase):
         # Run inexistente -> exit 2
         code, _, err = run_cli(["report", "nao-existe", "--repo", str(self.repo)])
         self.assertEqual(code, 2)
+
+    # ------------------------------------------------------------------
+    def test_manual_record_gate_nao_conta_como_portao_fisico(self):
+        """Audit do Kimi: record-gate SEM --command/--evidence-file → manual (blocked)."""
+        run_cli(["run", "init", "--repo", str(self.repo), "--run-id", "m1"])
+        run_file = self.repo / ".henke" / "runs" / "m1.json"
+
+        code, out, _ = run_cli([
+            "run", "record-gate", str(run_file),
+            "--gate", "hazard_scan", "--exit-code", "0", "--summary", "ok sem prova",
+        ])
+        self.assertEqual(code, 0)
+        self.assertIn("atestação manual", out)
+
+        data = json.loads(run_file.read_text(encoding="utf-8"))
+        self.assertTrue(data["gates"]["hazard_scan"]["manual"])
+        self.assertNotIn("evidence_sha256", data["gates"]["hazard_scan"])
+
+        code, out, err = run_cli(["run", "verify", str(run_file)])
+        self.assertEqual(code, 1, "atestação manual NUNCA pode liberar verify")
+
+    # ------------------------------------------------------------------
+    def test_record_gate_com_evidencia_conta_e_destrava_verify(self):
+        """Caminho físico: --command + --evidence-file → conta como portão executado."""
+        run_cli(["run", "init", "--repo", str(self.repo), "--run-id", "e1"])
+        run_file = self.repo / ".henke" / "runs" / "e1.json"
+        ev = self.repo / "ev.out"
+        ev.write_text("saída real\n", encoding="utf-8")
+
+        code, _, _ = run_cli([
+            "run", "record-gate", str(run_file),
+            "--gate", "hazard_scan", "--exit-code", "0",
+            "--command", "python hazard_scan.py",
+            "--evidence-file", str(ev),
+        ])
+        self.assertEqual(code, 0)
+        data = json.loads(run_file.read_text(encoding="utf-8"))
+        entry = data["gates"]["hazard_scan"]
+        self.assertNotIn("manual", entry)
+        self.assertEqual(entry["command"], "python hazard_scan.py")
+        self.assertEqual(entry["evidence_file"], str(ev))
+        self.assertIn("evidence_sha256", entry)
+
+        code, _, _ = run_cli(["run", "verify", str(run_file)])
+        self.assertEqual(code, 0)
 
     # ------------------------------------------------------------------
     def test_exec_timeout_flag_e_project_json(self):

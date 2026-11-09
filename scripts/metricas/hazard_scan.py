@@ -26,7 +26,9 @@ Arquitetura de 2 passes por arquivo (alinhada com swe-2-max):
 Códigos de saída:
   0  zero hazards encontrados
   1  pelo menos 1 hazard encontrado
-  2  entrada inválida, arquivo > 2 MB sem escopo válido ou stdout fechado
+  2  entrada inválida, arquivo(s) pulados por tamanho/legibilidade sem `--allow-oversize`
+     (lacuna de cobertura não declarada — segredo em arquivo grande não sai verde),
+     zero arquivos escaneados ou stdout fechado
 """
 from __future__ import annotations
 
@@ -707,6 +709,9 @@ def main() -> None:
                     help="Usa escopo legado de arquivo inteiro para XSS/UNBOUNDED-CONCURRENCY/IMDS")
     ap.add_argument("--fixtures-manifest", type=Path, default=None,
                     help="Caminho explícito para hazard_fixtures_manifest.json")
+    ap.add_argument("--allow-oversize", action="store_true",
+                    help="Aceita EXPLICITAMENTE a lacuna de cobertura de arquivos pulados "
+                         "por tamanho/legibilidade (oversize). Sem a flag, oversize>0 -> exit 2.")
     ap.add_argument("--json", action="store_true", help="Emite saída em JSON")
     args = ap.parse_args()
 
@@ -733,26 +738,54 @@ def main() -> None:
         findings.extend(fnd)
         oversize += ov
 
+    oversize_blocked = oversize > 0 and not args.allow_oversize
+    oversize_gap = oversize > 0 and args.allow_oversize
+
     if total_files == 0 and not findings:
+        if oversize:
+            print(
+                f"ERRO: {oversize} arquivo(s) pulados sem análise (oversize > teto ou ilegível)"
+                + (" — lacuna aceita via --allow-oversize, mas " if oversize_gap else " — ")
+                + "0 arquivos efetivamente escaneados.",
+                file=sys.stderr,
+            )
         print("NÃO-VEREDITO: 0 arquivos suportados escaneados.", file=sys.stderr)
         sys.exit(2)
 
     try:
         if args.json:
-            print(json.dumps({
+            payload = {
                 "files_scanned": total_files,
                 "oversize_skipped": oversize,
+                "oversize_blocked": oversize_blocked,
                 "findings": [
                     {"rule": r, "location": loc, "scope": sc, "message": msg}
                     for r, loc, sc, msg in findings
                 ],
-            }, ensure_ascii=False, indent=2))
+            }
+            if oversize_gap:
+                payload["coverage_gaps"] = [
+                    f"OVERSIZE-GAP: {oversize} arquivo(s) pulados sem análise (--allow-oversize declarado)"
+                ]
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             for r, loc, sc, msg in findings:
                 print(f"{r:<26} {loc}  [{sc}]  {msg}")
+            if oversize_gap:
+                print(f"{'OVERSIZE-GAP':<26} --allow-oversize  [coverage-gap]  "
+                      f"{oversize} arquivo(s) pulados sem análise — lacuna de cobertura aceita explicitamente")
             print(f"{total_files} file(s) scanned, {len(findings)} finding(s), {oversize} oversize skipped")
         sys.stdout.flush()
     except BrokenPipeError:
+        sys.exit(2)
+
+    if oversize_blocked:
+        print(
+            f"ERRO: {oversize} arquivo(s) pulados sem análise (oversize > teto ou ilegível) — "
+            "lacuna de cobertura NÃO declarada: segredo em arquivo grande sairia verde. "
+            "Re-execute com --allow-oversize para aceitar a lacuna explicitamente.",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     sys.exit(1 if findings else 0)

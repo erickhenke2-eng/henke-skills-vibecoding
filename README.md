@@ -86,7 +86,7 @@ Você **não precisa memorizar** 58 skills nem adivinhar qual chamar primeiro. B
 2. **Estágio 1 (Roteador Determinístico):** O script [`henke_router.py`](./scripts/henke_router.py) (ou `henke route`) analisa a intenção em milissegundos contra a fonte única da verdade (`SKILL.md` frontmatters + pontos de partida):
    - Aplica word-boundaries `\b`, desambiguação de verbos compostos (`"audita e corrige"`), afinidade com arquivos modificados (`_touched_files`) e a tabela de **Desambiguação Negativa** (`NEGATIVE_DISAMBIGUATION`, padrão *NVIDIA Skills Finder*).
    - Trava o **Modo de Operação** (`ANALISAR` por padrão em perguntas/auditorias; `requires_human_auth: true` em comandos `PUBLISH` como deploy, rollback ou faxina destrutiva).
-   - Devolve **apenas as 1 a 3 skills essenciais** para a rodada atual (ou `skills: []` se a pergunta for externa), economizando até 93% de tokens de instrução.
+   - Devolve **apenas as 1 a 3 skills essenciais** para a rodada atual (ou `skills: []` se a pergunta for externa) — economia real de tokens de instrução, sem injetar o catálogo inteiro no contexto.
 3. **Transição Dinâmica de Domínio:** Se a investigação do `SHERLOCK` revelar que a falha não era na tela, mas sim no contrato IPC do backend, o protocolo faz o **handoff automático** para o `CARPINTEIRO` com [`henke-code-ponte`](./henke-code-ponte/SKILL.md) e [`henke-code-cirurgico`](./henke-code-cirurgico/SKILL.md).
 
 ---

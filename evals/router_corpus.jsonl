@@ -41,7 +41,7 @@
 {"prompt": "o texto tá difícil de ler", "expect_top1": "henke-ui-tipografia", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "audita o design do app", "expect_top1": "henke-ui-auditoria", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "essa tela tá com cara de ia, limpa isso", "expect_top1": "henke-ui-antislop", "expect_mode": "ANALISAR", "expect_auth": false}
-{"prompt": "monta uma paleta de cores pro app", "expect_top1": "henke-ui-paleta", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "monta uma paleta de cores pro app", "expect_top1": "henke-ui-paleta", "expect_mode": "EXECUTAR", "expect_auth": false}
 {"prompt": "o formulário não valida direito", "expect_top1": "henke-code-formulario", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "o submit não funciona", "expect_top1": "henke-code-formulario", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "adiciona máscara no campo", "expect_top1": "henke-code-formulario", "expect_mode": "EXECUTAR", "expect_auth": false}
@@ -106,9 +106,9 @@
 {"prompt": "faz um pentest nas rotas da api", "expect_top1": "henke-audit-pentest", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "teste de invasão nos endpoints de pagamento", "expect_top1": "henke-audit-pentest", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "verifica se tem idor nas rotas", "expect_top1": "henke-audit-pentest", "expect_mode": "ANALISAR", "expect_auth": false}
-{"prompt": "monta uma poc reproduzível", "expect_top1": "henke-audit-pentest", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "monta uma poc reproduzível", "expect_top1": "henke-audit-pentest", "expect_mode": "EXECUTAR", "expect_auth": false}
 {"prompt": "faz uma auditoria completa com ledger", "expect_top1": "henke-audit-cobertura", "expect_mode": "ANALISAR", "expect_auth": false}
-{"prompt": "configura observabilidade com logs estruturados", "expect_top1": "henke-ops-observa", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "configura observabilidade com logs estruturados", "expect_top1": "henke-ops-observa", "expect_mode": "EXECUTAR", "expect_auth": false}
 {"prompt": "integra llm com structured output", "expect_top1": "henke-code-llm", "expect_mode": "EXECUTAR", "expect_auth": false}
 {"prompt": "verifica se tá pronto pra subir", "expect_top1": "henke-ops-preflight", "expect_mode": "ANALISAR", "expect_auth": true}
 {"prompt": "checklist antes de publicar", "expect_top1": "henke-ops-preflight", "expect_mode": "EXECUTAR", "expect_auth": true}
@@ -116,7 +116,7 @@
 {"prompt": "como faço deploy?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": true}
 {"prompt": "como funciona um deploy na nuvem?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": true}
 {"prompt": "quando posso subir pra produção?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": true}
-{"prompt": "configura as variáveis de ambiente", "expect_top1": "henke-ops-env", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "configura as variáveis de ambiente", "expect_top1": "henke-ops-env", "expect_mode": "EXECUTAR", "expect_auth": false}
 {"prompt": "cria o .env do projeto", "expect_top1": "henke-ops-env", "expect_mode": "EXECUTAR", "expect_auth": false}
 {"prompt": "onde ficam as chaves de api?", "expect_top1": "henke-ops-env", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "prepara o projeto pra ia codar", "expect_top1": "henke-prepara", "expect_mode": "EXECUTAR", "expect_auth": false}
@@ -142,6 +142,6 @@
 {"prompt": "qual a receita de bolo de cenoura?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "quantos planetas existem no sistema solar?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "what is the recipe for chocolate cake?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": false}
-{"prompt": "a integração com stripe não tá funcionando", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "a integração com stripe não tá funcionando", "expect_top1": "henke-code-integracao", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "jornada do usuário do app", "expect_top1": null, "expect_mode": "PLANEJAR", "expect_auth": false}
 {"prompt": "create a landing page", "expect_top1": null, "expect_mode": "EXECUTAR", "expect_auth": false}

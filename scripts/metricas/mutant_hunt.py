@@ -3,13 +3,21 @@
 mutant_hunt.py — Motor AST de testes de mutação diff-scoped para Python (PROTOCOLO v4.0, §10).
 
 Gera mutantes cirúrgicos na AST (operadores aritméticos, comparadores, constantes booleanas
-e retornos não-nulos), executa o comando de teste para cada mutante e restaura os bytes
-originais do arquivo-alvo de forma garantida via bloco `try ... finally`.
+e retornos não-nulos) e executa o comando de teste para cada mutante — sempre sobre uma
+CÓPIA do alvo em diretório temporário (sombreada via `sitecustomize` + meta_path no
+PYTHONPATH), NUNCA sobre o fonte original. Hunts paralelas não se corrompem porque o
+arquivo-fonte jamais é escrito.
+
+Veredito honesto: antes de mutar, a suíte é executada uma vez contra o código ORIGINAL.
+Se ela já está vermelha (`baseline_broken`) ou estoura o timeout (`baseline_timeout`),
+não existe baseline confiável — saída 2. Timeout em mutante individual é INCONCLUSIVO
+(não conta como kill) e zero mutantes gerados também é inconclusivo (saída 2), nunca 100%.
 
 Códigos de saída:
   0  kill_rate >= --min-kill-rate
   1  kill_rate < --min-kill-rate (testes fracos / mutantes sobreviventes acima do tolerado)
-  2  arquivo inválido, erro de sintaxe ou parâmetros incorretos
+  2  arquivo inválido, erro de sintaxe, parâmetros incorretos, suíte base quebrada,
+     timeout de baseline ou zero mutantes (resultado inconclusivo)
 """
 from __future__ import annotations
 
@@ -23,6 +31,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 
 for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
@@ -142,6 +151,67 @@ def extract_diff_lines(target: Path, git_ref: str = "HEAD") -> set[int] | None:
         return None
 
 
+def _import_module_names(t: Path) -> list[str]:
+    """Nomes de import que devem resolver para o mutante (ex.: 'calc', 'pkg.calc').
+
+    Sobe a cadeia de pacotes enquanto existir `__init__.py` para também sombrear
+    a forma dotted (`pkg.sub.mod`). Para alvo `__init__.py`, sombreia o pacote.
+    """
+    if t.stem == "__init__":
+        parts = [t.parent.name]
+        parent = t.parent.parent
+    else:
+        parts = [t.stem]
+        parent = t.parent
+    names = [parts[0]]
+    while parent.name and (parent / "__init__.py").is_file():
+        parts.append(parent.name)
+        parent = parent.parent
+    if len(parts) > 1:
+        names.append(".".join(reversed(parts)))
+    return names
+
+
+_SITE_HOOK_TEMPLATE = """\
+# mutant_hunt.py — hook gerado: força resolução do alvo para o mutante no tempdir.
+# Meta-path finder tem prioridade sobre QUALQUER entrada de sys.path, então o
+# mutante vence mesmo se o teste fizer sys.path.insert(0, <dir_original>).
+import importlib.util as _ilu
+import sys as _sys
+
+_MUTANT_FILES = {mapping!r}
+
+
+class _MutantFinder(object):
+    def find_spec(self, fullname, path=None, target=None):
+        src = _MUTANT_FILES.get(fullname)
+        if src is None:
+            return None
+        return _ilu.spec_from_file_location(fullname, src)
+
+
+if not any(isinstance(_f, _MutantFinder) for _f in _sys.meta_path):
+    _sys.meta_path.insert(0, _MutantFinder())
+"""
+
+
+def _run_test_cmd(test_cmd: list[str], timeout_sec: float, env: dict | None = None) -> tuple[int | None, subprocess.CompletedProcess | None]:
+    """Roda a suíte uma vez. Retorna (returncode, CompletedProcess); (None, None) em timeout."""
+    try:
+        res = subprocess.run(
+            test_cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_sec,
+            env=env,
+        )
+        return res.returncode, res
+    except subprocess.TimeoutExpired:
+        return None, None
+
+
 def run_mutant_hunt(
     target: Path,
     test_cmd: list[str],
@@ -149,7 +219,17 @@ def run_mutant_hunt(
     diff_lines: set[int] | None = None,
     timeout_sec: float = 10.0,
 ) -> dict:
-    """Executa caça a mutantes sobre `target` restaurando os bytes originais em `finally`."""
+    """Executa caça a mutantes sobre `target` SEM escrever no fonte original.
+
+    Fluxo:
+      1. Coleta mutantes AST; zero mutantes -> status 'no_mutants' (inconclusivo).
+      2. Baseline: roda a suíte no código ORIGINAL; se já falha -> 'baseline_broken'
+         (exit!=0 em código sadio não é evidência de kill) e timeout -> 'baseline_timeout'.
+      3. Cada mutante é gravado como cópia em tempdir e sombreado via
+         `sitecustomize`+meta_path (PYTHONPATH), de modo que `import <modulo>`
+         resolva para a cópia mutada em qualquer processo Python da suíte.
+         exit != 0 -> killed; exit 0 -> survived; timeout -> inconclusive (nunca kill).
+    """
     t = Path(target).resolve()
     original_bytes = t.read_bytes()
     original_text = original_bytes.decode("utf-8")
@@ -157,47 +237,87 @@ def run_mutant_hunt(
 
     mutants = _collect_mutants(tree, diff_lines=diff_lines, max_mutants=max_mutants)
     total = len(mutants)
+
+    report: dict = {
+        "target": str(target),
+        "status": "ok",
+        "baseline_exit": None,
+        "total_mutants": total,
+        "killed": 0,
+        "survived": 0,
+        "inconclusive": 0,
+        "kill_rate": None,
+        "survivors": [],
+        "inconclusive_mutants": [],
+    }
+
+    if total == 0:
+        report["status"] = "no_mutants"
+        return report
+
+    # Baseline anti-falso-verde: a suíte precisa passar no código ORIGINAL,
+    # senão qualquer exit!=0 contaria como kill (ex.: 'python -c exit(1)' -> 100%).
+    base_rc, base_res = _run_test_cmd(test_cmd, timeout_sec)
+    if base_rc is None:
+        report["status"] = "baseline_timeout"
+        return report
+    report["baseline_exit"] = base_rc
+    if base_rc != 0:
+        report["status"] = "baseline_broken"
+        if base_res is not None:
+            tail = ((base_res.stderr or "") + (base_res.stdout or ""))[-800:]
+            report["baseline_output_tail"] = tail.strip()
+        return report
+
     killed = 0
     survivors: list[dict] = []
+    inconclusive: list[dict] = []
 
-    try:
-        for lineno, desc, mutated_src in mutants:
+    with tempfile.TemporaryDirectory(prefix="mutant_hunt_") as td:
+        stage = Path(td)
+        mutant_path = stage / t.name
+        mapping = {name: str(mutant_path) for name in _import_module_names(t)}
+        (stage / "sitecustomize.py").write_text(
+            _SITE_HOOK_TEMPLATE.format(mapping=mapping), encoding="utf-8")
+
+        staged_env = os.environ.copy()
+        old_pp = staged_env.get("PYTHONPATH", "")
+        staged_env["PYTHONPATH"] = str(stage) + (os.pathsep + old_pp if old_pp else "")
+
+        # Se o próprio alvo aparece como argumento do test_cmd (ex.: 'python alvo.py'),
+        # o token é reescrito para a cópia mutada.
+        staged_cmd = []
+        for tok in test_cmd:
             try:
-                t.write_bytes((mutated_src + "\n").encode("utf-8"))
-                try:
-                    res = subprocess.run(
-                        test_cmd,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        timeout=timeout_sec,
-                    )
-                    if res.returncode != 0:
-                        killed += 1
-                    else:
-                        survivors.append({
-                            "line": lineno,
-                            "mutation": desc,
-                            "status": "survived",
-                        })
-                except subprocess.TimeoutExpired:
-                    # Timeout infinito causado pela mutação conta como mutante detectado/morto
-                    killed += 1
-            finally:
-                t.write_bytes(original_bytes)
-    finally:
-        t.write_bytes(original_bytes)
+                same_target = (Path.cwd() / tok).resolve() == t
+            except OSError:
+                same_target = False
+            staged_cmd.append(str(mutant_path) if same_target else tok)
 
-    kill_rate = (killed / total * 100.0) if total > 0 else 100.0
-    return {
-        "target": str(target),
-        "total_mutants": total,
+        for lineno, desc, mutated_src in mutants:
+            mutant_path.write_bytes((mutated_src + "\n").encode("utf-8"))
+            rc, _res = _run_test_cmd(staged_cmd, timeout_sec, env=staged_env)
+            if rc is None:
+                # Timeout: mutante pode ter criado laço infinito — inconclusivo, NÃO kill.
+                inconclusive.append({"line": lineno, "mutation": desc, "status": "timeout"})
+            elif rc != 0:
+                killed += 1
+            else:
+                survivors.append({
+                    "line": lineno,
+                    "mutation": desc,
+                    "status": "survived",
+                })
+
+    report.update({
         "killed": killed,
         "survived": len(survivors),
-        "kill_rate": round(kill_rate, 1),
+        "inconclusive": len(inconclusive),
+        "kill_rate": round(killed / total * 100.0, 1),
         "survivors": survivors,
-    }
+        "inconclusive_mutants": inconclusive,
+    })
+    return report
 
 
 def _split_cmd(cmd_str: str) -> list[str]:
@@ -221,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Ref Git para filtrar linhas do diff (default se sem valor: HEAD)",
     )
-    parser.add_argument("--timeout", type=float, default=10.0, help="Timeout em segundos por mutante")
+    parser.add_argument("--timeout", type=float, default=10.0, help="Timeout em segundos por execução da suíte")
     parser.add_argument("--json", action="store_true", help="Saída em formato JSON")
 
     try:
@@ -263,10 +383,36 @@ def main(argv: list[str] | None = None) -> int:
     else:
         for surv in report["survivors"]:
             print(f"SURVIVED-MUTANT            {target_path}:{surv['line']}  {surv['mutation']}")
+        for inc in report["inconclusive_mutants"]:
+            print(f"INCONCLUSIVE-MUTANT        {target_path}:{inc['line']}  {inc['mutation']} ({inc['status']})")
+        kr = report["kill_rate"]
+        kr_txt = f"{kr:.1f}%" if isinstance(kr, (int, float)) else "inconclusivo"
         print(
             f"Mutant Hunt: {report['killed']}/{report['total_mutants']} killed "
-            f"({report['kill_rate']:.1f}% kill rate), {report['survived']} survived"
+            f"({kr_txt} kill rate), {report['survived']} survived, "
+            f"{report['inconclusive']} inconclusive"
         )
+
+    status = report.get("status")
+    if status == "baseline_broken":
+        print(
+            f"ERRO: suíte base quebrada — '{args.test_cmd}' saiu com exit "
+            f"{report.get('baseline_exit')} no código ORIGINAL; kill_rate não é veredito.",
+            file=sys.stderr,
+        )
+        return 2
+    if status == "baseline_timeout":
+        print(
+            "ERRO: suíte base excedeu --timeout no código ORIGINAL — resultado inconclusivo.",
+            file=sys.stderr,
+        )
+        return 2
+    if status == "no_mutants" or report["total_mutants"] == 0:
+        print(
+            "NÃO-VEREDITO: 0 mutantes AST gerados para o alvo — resultado inconclusivo.",
+            file=sys.stderr,
+        )
+        return 2
 
     min_kr = args.min_kill_rate * 100.0 if 0.0 < args.min_kill_rate <= 1.0 else args.min_kill_rate
     return 0 if report["kill_rate"] >= min_kr else 1

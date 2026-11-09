@@ -11,7 +11,11 @@ Semântica de expect_top1:
 - lista  : skills[0].name deve pertencer à lista
 - null   : skills deve sair vazio (fora de escopo / sem match útil)
 
-Réguas: modo e auth são exatos por linha; top-1 exige >= 85% de acerto.
+Réguas: modo e auth são exatos por linha (subTest). Casos CRÍTICOS —
+destrutivos/publish (expect_auth=True) e ambíguos (top1 null ou lista
+disjuntiva) — exigem top1 exato por linha: nenhum erro crítico passa,
+diferente da régua anterior de 85% agregado (que tolerava ~20 erros em 147).
+O % agregado permanece como métrica informativa + piso de regressão.
 """
 from pathlib import Path
 import json
@@ -38,6 +42,20 @@ def _load_corpus() -> list[dict]:
     return rows
 
 
+def _is_critical(row: dict) -> bool:
+    """Crítico = destrutivo/publish (auth) ou ambíguo (top1 null / disjuntivo)."""
+    expected = row["expect_top1"]
+    return row["expect_auth"] is True or expected is None or isinstance(expected, list)
+
+
+def _top1_ok(expected, top1) -> bool:
+    if expected is None:
+        return top1 is None
+    if isinstance(expected, str):
+        return top1 == expected
+    return top1 in expected
+
+
 class TestRouterCorpus(unittest.TestCase):
 
     @classmethod
@@ -51,32 +69,42 @@ class TestRouterCorpus(unittest.TestCase):
             f"corpus com {len(self.rows)} linhas; mínimo {MIN_CORPUS_LINES}")
 
     def test_mode_and_auth_per_line(self):
-        fails = []
         for row, res in self.results:
-            if res["mode"] != row["expect_mode"] or res["requires_human_auth"] != row["expect_auth"]:
-                fails.append(
-                    f"prompt={row['prompt']!r} | esperado mode={row['expect_mode']} "
-                    f"auth={row['expect_auth']} | obtido mode={res['mode']} "
-                    f"auth={res['requires_human_auth']} skills={[s['name'] for s in res['skills']]}")
-        self.assertEqual(fails, [], "\n" + "\n".join(fails))
+            with self.subTest(prompt=row["prompt"]):
+                self.assertEqual(
+                    res["mode"], row["expect_mode"],
+                    f"skills={[s['name'] for s in res['skills']]}")
+                self.assertEqual(
+                    res["requires_human_auth"], row["expect_auth"],
+                    f"skills={[s['name'] for s in res['skills']]}")
+
+    def test_top1_critical_lines_exact(self):
+        """Destrutivos, publish e ambíguos: acerto exato, sem margem agregada."""
+        critical = [(row, res) for row, res in self.results if _is_critical(row)]
+        self.assertTrue(critical, "corpus sem casos críticos marcados")
+        for row, res in critical:
+            with self.subTest(prompt=row["prompt"]):
+                names = [s["name"] for s in res["skills"]]
+                top1 = names[0] if names else None
+                expected = row["expect_top1"]
+                self.assertTrue(
+                    _top1_ok(expected, top1),
+                    f"esperado top1={expected} | obtido top1={top1} "
+                    f"skills={names} mode={res['mode']}")
 
     def test_top1_accuracy_at_least_85pct(self):
+        """% agregada: métrica informativa + piso de regressão (não absolve críticos)."""
         misses = []
         for row, res in self.results:
-            expected = row["expect_top1"]
             names = [s["name"] for s in res["skills"]]
             top1 = names[0] if names else None
-            if expected is None:
-                ok = top1 is None
-            elif isinstance(expected, str):
-                ok = top1 == expected
-            else:
-                ok = top1 in expected
-            if not ok:
+            if not _top1_ok(row["expect_top1"], top1):
                 misses.append(
-                    f"prompt={row['prompt']!r} | esperado top1={expected} | "
+                    f"prompt={row['prompt']!r} | esperado top1={row['expect_top1']} | "
                     f"obtido top1={top1} skills={names} mode={res['mode']}")
         ratio = 1.0 - (len(misses) / len(self.results) if self.results else 1)
+        print(f"\n[router-corpus] top-1 agregado: {ratio:.1%} "
+              f"({len(self.results) - len(misses)}/{len(self.results)})")
         self.assertGreaterEqual(
             ratio, MIN_TOP1_RATIO,
             f"top-1 {ratio:.0%} < {MIN_TOP1_RATIO:.0%}:\n" + "\n".join(misses))

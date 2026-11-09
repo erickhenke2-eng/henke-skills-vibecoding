@@ -12,6 +12,7 @@ __pycache__/
 .venv/
 dist/
 build/
+*.egg-info/
 .agents/
 
 # Preferências pessoais do harness

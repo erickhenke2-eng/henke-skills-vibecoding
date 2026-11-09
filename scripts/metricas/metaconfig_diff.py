@@ -7,6 +7,12 @@ Portões auditam código-fonte, mas o pipeline real executa metaconfiguração:
 dependências, lockfiles, `build.rs`, `conftest.py`, workflows e `.cargo/config`.
 Mutar ou adicionar esses arquivos entre a auditoria e o publish executa código nunca auditado.
 
+Auditoria em DUAS superfícies independentes — mutação em qualquer uma conta:
+  - worktree: `git diff --name-status -z --no-renames <against>` + untracked (??)
+  - index/staged: `git diff --cached --name-status -z --no-renames <against>`,
+    com conteúdo lido via `git show :<path>` — pega mutação "staged-only"
+    (ex.: postinstall malicioso commitado no índice com worktree limpo).
+
 Regra: qualquer mutação em metaconfiguração exige aprovação humana explícita —
 saída carrega `requires_human_auth: true`. Arquivo listado em `## 4. Escopo
 Declarado` da spec fornecida via `--spec` conta como autorizado.
@@ -86,41 +92,74 @@ def _git(repo: Path, *args) -> subprocess.CompletedProcess:
     )
 
 
-def _changed_protected_files(repo: Path, against: str) -> tuple[list[tuple[str, str, str]] | None, str | None]:
-    """Retorna [(status, rel, kind)] para arquivos protegidos alterados ou untracked, ou (None, erro)."""
-    res = _git(repo, "diff", "--name-status", against, "--")
+def _parse_name_status_z(raw: str) -> list[tuple[str, str]]:
+    """Parse de `git diff --name-status -z --no-renames`: registros `STATUS\\0PATH\\0`.
+    Com -z os paths NÃO vêm quoted; --no-renames elimina registros R/C (que viram pares)."""
+    out: list[tuple[str, str]] = []
+    toks = raw.split("\0")
+    i = 0
+    while i + 1 < len(toks):
+        status = toks[i].strip()
+        path = toks[i + 1].strip().replace("\\", "/")
+        i += 2
+        if status and path:
+            out.append((status, path))
+    return out
+
+
+def _changed_protected_files(repo: Path, against: str) -> tuple[list[tuple[str, str, str, str]] | None, str | None]:
+    """Retorna [(status, rel, kind, surface)] para arquivos protegidos alterados.
+
+    `surface` é "worktree" (diff worktree vs ref + untracked ??) ou "staged"
+    (`git diff --cached` — conteúdo do índice via `git show :<rel>`). As duas
+    superfícies são auditadas separadamente: mutação em qualquer uma conta.
+    Retorna (None, erro) se algum diff falhar."""
+    res = _git(repo, "diff", "--name-status", "-z", "--no-renames", against, "--")
     if res.returncode != 0:
         return None, res.stderr.strip() or "git diff falhou"
-    changed: list[tuple[str, str, str]] = []
-    seen_rels: set[str] = set()
-    for line in res.stdout.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        status = parts[0].strip()
-        rel = parts[-1].strip().strip('"').replace("\\", "/")
-        kind = _is_protected(rel)
-        if kind:
-            changed.append((status, rel, kind))
-            seen_rels.add(rel)
+    entries_worktree = _parse_name_status_z(res.stdout)
 
-    # Captura arquivos untracked (??) como adições ('A')
-    res_untracked = _git(repo, "ls-files", "--others", "--exclude-standard")
+    res_cached = _git(repo, "diff", "--cached", "--name-status", "-z", "--no-renames", against, "--")
+    if res_cached.returncode != 0:
+        return None, res_cached.stderr.strip() or "git diff --cached falhou"
+    entries_staged = _parse_name_status_z(res_cached.stdout)
+
+    changed: list[tuple[str, str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for surface, entries in (("worktree", entries_worktree), ("staged", entries_staged)):
+        for status, rel in entries:
+            kind = _is_protected(rel)
+            if not kind:
+                continue
+            key = (surface, rel)
+            if key in seen:
+                continue
+            seen.add(key)
+            changed.append((status, rel, kind, surface))
+
+    # Captura arquivos untracked (??) como adições ('A') na superfície worktree
+    res_untracked = _git(repo, "ls-files", "--others", "--exclude-standard", "-z")
     if res_untracked.returncode == 0:
-        for line in res_untracked.stdout.splitlines():
-            rel = line.strip().strip('"').replace("\\", "/")
-            if not rel or rel in seen_rels:
+        for rel in res_untracked.stdout.split("\0"):
+            rel = rel.strip().replace("\\", "/")
+            if not rel or ("worktree", rel) in seen:
                 continue
             kind = _is_protected(rel)
             if kind:
-                changed.append(("A", rel, kind))
-                seen_rels.add(rel)
+                changed.append(("A", rel, kind, "worktree"))
+                seen.add(("worktree", rel))
 
     return changed, None
 
 
 def _blob(repo: Path, against: str, rel: str) -> str | None:
     res = _git(repo, "show", f"{against}:{rel}")
+    return res.stdout if res.returncode == 0 else None
+
+
+def _blob_index(repo: Path, rel: str) -> str | None:
+    """Conteúdo do arquivo NO INDEX (staged): `git show :<rel>`."""
+    res = _git(repo, "show", f":{rel}")
     return res.stdout if res.returncode == 0 else None
 
 
@@ -190,7 +229,10 @@ def _spec_declared(spec: Path | None) -> set[str]:
 
 
 def check_metaconfig(repo: Path | str, against: str, spec: Path | str | None = None) -> tuple[list[str], bool]:
-    """Retorna (mutações_não_autorizadas, requires_human_auth)."""
+    """Retorna (mutações_não_autorizadas, requires_human_auth).
+
+    Audita staged (index, `git show :<rel>`) E worktree separadamente:
+    mutação em qualquer superfície conta."""
     repo = Path(repo)
     spec_p = Path(spec) if spec else None
     declared = _spec_declared(spec_p)
@@ -201,18 +243,21 @@ def check_metaconfig(repo: Path | str, against: str, spec: Path | str | None = N
         raise RuntimeError(f"metaconfig_diff: não foi possível diff contra '{against}': {err}")
 
     mutations: list[str] = []
-    for status, rel, kind in changed:
+    for status, rel, kind, surface in changed:
         rel_n = rel.replace("\\", "/")
         if rel_n in declared or (declared_list and _sd.is_path_in_scope(rel_n, declared_list)):
             continue
         if status.startswith("A"):
-            mutations.append(f"[A] {rel_n}: metaconfig alterado sem autorização na spec (METACONFIG-MUTATION)")
+            mutations.append(f"[{surface}:A] {rel_n}: metaconfig alterado sem autorização na spec (METACONFIG-MUTATION)")
             continue
         if status.startswith("D"):
-            mutations.append(f"[D] {rel_n}: metaconfig removido sem autorização na spec (METACONFIG-MUTATION)")
+            mutations.append(f"[{surface}:D] {rel_n}: metaconfig removido sem autorização na spec (METACONFIG-MUTATION)")
             continue
-        work = repo / rel
-        new_text = work.read_text(encoding="utf-8", errors="replace") if work.is_file() else None
+        if surface == "staged":
+            new_text = _blob_index(repo, rel_n)
+        else:
+            work = repo / rel
+            new_text = work.read_text(encoding="utf-8", errors="replace") if work.is_file() else None
         old_text = _blob(repo, against, rel_n)
         if kind == "package_json":
             details = _diff_pkg_keys(old_text, new_text)
@@ -221,12 +266,12 @@ def check_metaconfig(repo: Path | str, against: str, spec: Path | str | None = N
         else:
             details = ["metaconfig alterado sem autorização na spec"]
         for d in details:
-            mutations.append(f"METACONFIG-MUTATION [{status}] {rel_n}: {d}")
+            mutations.append(f"METACONFIG-MUTATION [{surface}:{status}] {rel_n}: {d}")
     return mutations, bool(mutations)
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Trava de metaconfiguração anti-TOCTOU (diff semântico).")
+    ap = argparse.ArgumentParser(description="Trava de metaconfiguração anti-TOCTOU (diff semântico, staged+worktree).")
     ap.add_argument("--repo", type=str, required=True)
     ap.add_argument("--against", type=str, required=True, help="ref git de comparação (ex.: HEAD, main)")
     ap.add_argument("--spec", type=str, default=None, help="spec cujo '## 4. Escopo Declarado' autoriza arquivos")

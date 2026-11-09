@@ -54,12 +54,16 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
         except Exception:
             pass
 
-SUITE_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_DIR = SUITE_ROOT / "scripts"
+SCRIPTS_DIR = Path(__file__).resolve().parent
+_PKG_ROOT = SCRIPTS_DIR.parent
 METRICAS_DIR = SCRIPTS_DIR / "metricas"
 
-if str(SUITE_ROOT) not in sys.path:
-    sys.path.insert(0, str(SUITE_ROOT))
+if str(_PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PKG_ROOT))
+
+from scripts._paths import suite_root as _suite_root  # noqa: E402
+
+SUITE_ROOT = _suite_root()  # checkout OU <prefix>/henke_data (wheel)
 
 GATE_MAP: dict[str, Path] = {
     "hazard": METRICAS_DIR / "hazard_scan.py",
@@ -178,17 +182,20 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
     )
     git_ok = git_res.returncode == 0
     missing_scripts = [name for name, p in sorted(GATE_MAP.items()) if not p.is_file()]
+    expected_skills = 58
     skills_count = len(list(SUITE_ROOT.glob("henke-*/SKILL.md")))
     henke_dir = (repo_root / ".henke").is_dir()
 
     report = {
-        "status": "ok" if (py_ok and git_ok and not missing_scripts) else "degraded",
+        "status": "ok" if (py_ok and git_ok and not missing_scripts
+                         and skills_count >= expected_skills) else "degraded",
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         "python_ok": py_ok,
         "git_available": git_ok,
         "suite_root": str(SUITE_ROOT),
         "repo_root": str(repo_root),
         "skills_count": skills_count,
+        "skills_expected": expected_skills,
         "gates_available": len(GATE_MAP) - len(missing_scripts),
         "missing_gates": missing_scripts,
         "henke_initialized": henke_dir,
@@ -409,59 +416,80 @@ def _cmd_exec(
     stdout_sha256 = hashlib.sha256((out_text + err_text).encode("utf-8")).hexdigest()
     discovered, passed = parse_test_runner_output(out_text, err_text)
 
-    # Lê prev_hash da última entrada em exec_log.jsonl
-    prev_hash = "0" * 64
-    if exec_log_path.is_file():
-        try:
-            lines = [ln.strip() for ln in exec_log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-            if lines:
-                last_obj = json.loads(lines[-1])
-                prev_hash = str(last_obj.get("entry_hash", prev_hash))
-        except Exception as exc:
-            print(f"ERRO: Log de execução corrompido em '{exec_log_path}': {exc}", file=sys.stderr)
-            return 2
-
-    chain_payload = f"{prev_hash}|{cmd_str}|{res.returncode}|{discovered}|{stdout_sha256}"
-    entry_hash = hashlib.sha256(chain_payload.encode("utf-8")).hexdigest()
-
-    log_entry = {
-        "timestamp": _now_iso(),
-        "cmd": cmd_str,
-        "exit": res.returncode,
-        "testes_descobertos": discovered,
-        "testes_passados": passed,
-        "stdout_sha256": stdout_sha256,
-        "prev_hash": prev_hash,
-        "entry_hash": entry_hash,
-    }
-    exec_log_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(exec_log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-
-    # Atualiza .henke/LEDGER.json atomicamente apenas para runners de testes
-    if is_test_command(cmd_tokens, cmd_str) or discovered > 0:
-        existing_ledger: list[dict] = []
-        if ledger_path.is_file():
-            try:
-                loaded = json.loads(ledger_path.read_text(encoding="utf-8"))
-                if not isinstance(loaded, list):
-                    print(f"ERRO: Formato inválido em '{ledger_path}' (esperava lista JSON).", file=sys.stderr)
+    # Lê prev_hash + append da entrada + LEDGER.json sob o MESMO lock
+    # (read-modify-write atômico — concorrência não pode ver estado intermediário).
+    from scripts import run_state as _rs
+    try:
+        with _rs._file_lock(exec_log_path):
+            prev_hash = "0" * 64
+            if exec_log_path.is_file():
+                try:
+                    lines = [
+                        ln.strip()
+                        for ln in exec_log_path.read_text(encoding="utf-8").splitlines()
+                        if ln.strip()
+                    ]
+                    if lines:
+                        last_obj = json.loads(lines[-1])
+                        prev_hash = str(last_obj.get("entry_hash", prev_hash))
+                except Exception as exc:
+                    print(f"ERRO: Log de execução corrompido em '{exec_log_path}': {exc}", file=sys.stderr)
                     return 2
-                existing_ledger = loaded
-            except Exception as exc:
-                print(f"ERRO: Ledger corrompido em '{ledger_path}': {exc}", file=sys.stderr)
-                return 2
 
-        ledger_item = {
-            "cmd": cmd_str,
-            "exit": res.returncode,
-            "testes_descobertos": discovered,
-            "testes_passados": passed,
-            "stdout_sha256": stdout_sha256,
-            "entry_hash": entry_hash,
-        }
-        existing_ledger.append(ledger_item)
-        _atomic_write_json(ledger_path, existing_ledger)
+            chain_payload = f"{prev_hash}|{cmd_str}|{res.returncode}|{discovered}|{stdout_sha256}"
+            entry_hash = hashlib.sha256(chain_payload.encode("utf-8")).hexdigest()
+
+            log_entry = {
+                "timestamp": _now_iso(),
+                "cmd": cmd_str,
+                "exit": res.returncode,
+                "testes_descobertos": discovered,
+                "testes_passados": passed,
+                "stdout_sha256": stdout_sha256,
+                "prev_hash": prev_hash,
+                "entry_hash": entry_hash,
+            }
+            exec_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(exec_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+
+            # Atualiza .henke/LEDGER.json atomicamente apenas para runners de testes
+            if is_test_command(cmd_tokens, cmd_str) or discovered > 0:
+                existing_ledger: list[dict] = []
+                if ledger_path.is_file():
+                    try:
+                        loaded = json.loads(ledger_path.read_text(encoding="utf-8"))
+                        if not isinstance(loaded, list):
+                            print(f"ERRO: Formato inválido em '{ledger_path}' (esperava lista JSON).", file=sys.stderr)
+                            return 2
+                        existing_ledger = loaded
+                    except Exception as exc:
+                        print(f"ERRO: Ledger corrompido em '{ledger_path}': {exc}", file=sys.stderr)
+                        return 2
+
+                ledger_item = {
+                    "cmd": cmd_str,
+                    "exit": res.returncode,
+                    "testes_descobertos": discovered,
+                    "testes_passados": passed,
+                    "stdout_sha256": stdout_sha256,
+                    "entry_hash": entry_hash,
+                }
+                existing_ledger.append(ledger_item)
+                _atomic_write_json(ledger_path, existing_ledger)
+    except TimeoutError as exc:
+        print(f"ERRO: {exc}", file=sys.stderr)
+        return 2
+
+    # Zero testes descobertos NUNCA pode ser tratado como verde — "Ran 0 tests" é
+    # tão perigoso quanto suíte ausente (falso-verde do audit do Kimi).
+    if is_test_command(cmd_tokens, cmd_str) and discovered <= 0:
+        print(
+            "ERRO: comando de teste executado mas 0 testes descobertos — "
+            "a run não pode fechar sem teste real.",
+            file=sys.stderr,
+        )
+        return 2
 
     return res.returncode
 

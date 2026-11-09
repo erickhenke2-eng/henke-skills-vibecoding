@@ -514,6 +514,8 @@ def run(suite: Suite):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--suite-dir", required=True, help="checkout da suíte a medir")
+    ap.add_argument("--strict", action="store_true",
+                    help="CI: exit 1 se houver MISSED, ERROR:* ou FALSE-RED")
     args = ap.parse_args()
     suite = Suite(Path(args.suite_dir).resolve())
     if not (suite.root / "scripts").is_dir():
@@ -545,6 +547,14 @@ def main():
               f"({100*det/instrumented:.0f}%)")
     print(f"Cobertura instrumental: {instrumented}/{len(defects)} defeitos "
           f"({100*instrumented/len(defects):.0f}%)")
+
+    if args.strict:
+        bad = miss + err + fred
+        if bad:
+            print(f"\n--strict: {bad} não-conformidade(s) "
+                  f"({miss} MISSED · {err} ERROR · {fred} FALSE-RED) — reprovado.")
+            sys.exit(1)
+        print("\n--strict: nenhum MISSED/ERROR/FALSE-RED — aprovado.")
 
 
 if __name__ == "__main__":

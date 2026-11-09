@@ -3,6 +3,10 @@
 Portão Mecânico de Spec Drift (PROTOCOLO v4.0, §3.1, §3.3 e §10).
 Compara o diff real do Git contra o escopo declarado em docs/designs/<feature>.md
 e verifica a integridade do hash da especificação pós-aprovação.
+
+Anti-TOCTOU: a spec é lida UMA única vez (bytes) e tanto o sha256 quanto o escopo
+declarado são derivados do MESMO buffer — impossível combinar hash antigo com
+escopo novo se o arquivo for adulterado entre leituras.
 """
 import argparse
 import fnmatch
@@ -21,28 +25,21 @@ if hasattr(sys.stderr, "reconfigure"):
 _FORBIDDEN_WILDCARD_SCOPES = {"*", "**", "**/*", "./*", "./**", "/*", "/**"}
 
 
-def get_git_root(cwd: Path) -> Path:
-    try:
-        res = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return Path(res.stdout.strip()).resolve()
-    except Exception as e:
-        sys.exit(f"ERRO: Não foi possível determinar a raiz do repositório Git: {e}")
+def _decode_spec(raw: bytes) -> str:
+    """Normaliza os bytes da spec (UTF-8, CRLF->LF) — fonte única para hash e escopo."""
+    return raw.decode("utf-8").replace("\r\n", "\n")
+
+
+def _hash_spec_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def compute_spec_hash(spec_path: Path) -> str:
-    content = spec_path.read_text(encoding="utf-8").replace("\r\n", "\n")
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return _hash_spec_text(_decode_spec(spec_path.read_bytes()))
 
 
-def parse_declared_scope(spec_path: Path) -> list[str]:
-    """Extrai os caminhos declarados na seção '## 4. Escopo Declarado'."""
-    text = spec_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+def _parse_scope_text(text: str) -> list[str]:
+    """Extrai os caminhos declarados na seção '## 4. Escopo Declarado' do texto já lido."""
     match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
     if not match:
         return []
@@ -64,9 +61,13 @@ def parse_declared_scope(spec_path: Path) -> list[str]:
     return paths
 
 
-def parse_declared_symbols(spec_path: Path) -> list[tuple[str, str]]:
-    """Extrai pares (caminho, simbolo) para itens com '::' em '## 4. Escopo Declarado'."""
-    text = spec_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+def parse_declared_scope(spec_path: Path) -> list[str]:
+    """Extrai os caminhos declarados na seção '## 4. Escopo Declarado'."""
+    return _parse_scope_text(_decode_spec(spec_path.read_bytes()))
+
+
+def _parse_symbols_text(text: str) -> list[tuple[str, str]]:
+    """Extrai pares (caminho, simbolo) para itens com '::' a partir do texto já lido."""
     match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
     if not match:
         return []
@@ -86,6 +87,25 @@ def parse_declared_symbols(spec_path: Path) -> list[tuple[str, str]]:
                 if p_clean and sym_clean:
                     symbols.append((p_clean, sym_clean))
     return symbols
+
+
+def parse_declared_symbols(spec_path: Path) -> list[tuple[str, str]]:
+    """Extrai pares (caminho, simbolo) para itens com '::' em '## 4. Escopo Declarado'."""
+    return _parse_symbols_text(_decode_spec(spec_path.read_bytes()))
+
+
+def get_git_root(cwd: Path) -> Path:
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return Path(res.stdout.strip()).resolve()
+    except Exception as e:
+        sys.exit(f"ERRO: Não foi possível determinar a raiz do repositório Git: {e}")
 
 
 def discover_latest_spec(designs_dir: Path) -> Path | None:
@@ -208,8 +228,15 @@ def check_spec_drift(
         return False, [f"Arquivo de especificação não encontrado: '{spec_path}'"]
 
     errors = []
+    # Leitura ÚNICA dos bytes da spec (anti-TOCTOU): hash e escopo derivam do MESMO
+    # buffer — impossível casar hash antigo com escopo adulterado entre leituras.
+    try:
+        spec_text = _decode_spec(spec_path.read_bytes())
+    except (OSError, UnicodeDecodeError) as exc:
+        return False, [f"Spec ilegível ou não decodificável em UTF-8: '{spec_path}': {exc}"]
+
     # 1. Verificação de hash pós-aprovação (S1 obrigatório)
-    current_hash = compute_spec_hash(spec_path)
+    current_hash = _hash_spec_text(spec_text)
     if expected_hash is None:
         errors.append("Spec-hash obrigatório não fornecido (--expected-hash). Aprovação de design não vinculada.")
     elif current_hash != expected_hash:
@@ -218,7 +245,7 @@ def check_spec_drift(
         )
 
     # 2. Parse do escopo declarado e bloqueio de curinga irrestrito
-    declared_scope = parse_declared_scope(spec_path)
+    declared_scope = _parse_scope_text(spec_text)
     if not declared_scope:
         errors.append(f"Seção '## 4. Escopo Declarado' vazia ou ausente em '{spec_path.name}'.")
     for decl in declared_scope:

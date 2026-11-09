@@ -74,6 +74,10 @@ _FLEX_GENDER_SUF = (
 
 def _flex_word(tok: str) -> str:
     if len(tok) < 3:
+        # "x"/"y" soltos são placeholders de gatilho ("integra com X",
+        # "depois de X dias") — casam qualquer valor nomeado.
+        if tok in ("x", "y"):
+            return r"[\w-]+"
         return re.escape(tok)
     if tok in _FLEX_ARTICLES:
         return _FLEX_ARTICLE_RE
@@ -93,13 +97,18 @@ def _flex_word(tok: str) -> str:
         if len(tok) > len(suf) + 1 and tok.endswith(suf + "s"):
             return re.escape(tok[: -len(suf) - 1] + suf[:-1]) + r"[oa]s?"
     if tok.endswith("es"):
-        return re.escape(tok[:-2]) + r"es?"
+        # Cobre plural -e→-es ("chave"→"chaves") E radical nu ("país"→"países"):
+        # `(?:es?)?` é superconjunto do antigo `es?` — nunca perde casamento.
+        return re.escape(tok[:-2]) + r"(?:es?)?"
     if tok.endswith("m"):
         return re.escape(tok[:-1]) + r"(?:m|ns)"
     if tok.endswith("l"):
         return re.escape(tok[:-1]) + r"(?:l|is)"
+    # -r/-z + plural: `(?:es)?` torna o "es" todo opcional — o radical nu
+    # ("fazer", "subir", "luz") precisa casar a si mesmo (o antigo `es?`
+    # exigia a letra "e" e nunca casava a forma base).
     if tok.endswith(("r", "z")):
-        return re.escape(tok) + r"es?"
+        return re.escape(tok) + r"(?:es)?"
     if tok.endswith("s"):
         return re.escape(tok[:-1]) + r"s?"
     if tok.endswith("x"):
@@ -185,8 +194,9 @@ _PLAN_SIGNALS = PLAN_SIGNALS
 EXEC_SIGNALS = (
     "implementa", "cria", "construa", "corrige", "conserta", "edita",
     "adiciona", "refatora", "desmembra", "renomeia", "integra", "protege",
+    "configura", "configurar", "monta", "montar",
     "prepara o projeto", "inicia o henke", "mudanca", "muda", "alinha", "ajusta",
-    "atualiza", "aplica", "faz", "faze", "fazer", "mete", "bota", "botar",
+    "atualiza", "aplica", "faz", "faze", "fazer", "faz upload", "mete", "bota", "botar",
     "arruma", "arrumar",
     "deploy", "publica", "publicar", "sobe", "subir", "pro ar", "no ar",
     "em producao", "deleta", "deletar", "delete", "exclui", "excluir",
@@ -227,6 +237,53 @@ FALLBACK_SKILL_BY_MODE = {
     "ANALISAR": "henke-debug-raiz",
     "EXECUTAR": "henke-code-cirurgico",
     "PLANEJAR": "henke-plan-destrava",
+}
+
+# ── Matriz Mode → Portões Obrigatórios ─────────────────────────────────────
+# FONTE ÚNICA da matriz de portões. Espelha a tabela "Portões Obrigatórios" por
+# modo de AGENTS.md §2 (Máquina de Estados: ANALISAR/PLANEJAR/EXECUTAR) — a
+# versão operacional consumida por route_request: qualquer ajuste de portões
+# por modo deve acontecer AQUI e ser espelhado em AGENTS.md §2.
+MINIMAL_GATES = (
+    "scripts/repo_signals.py",
+    "scripts/metricas/hazard_scan.py",
+)
+
+MODE_GATES = {
+    "ANALISAR": (
+        "scripts/repo_signals.py",
+        "scripts/metricas/hazard_scan.py",
+        "scripts/metricas/assertless_scan.py",
+        "scripts/metricas/coverage_ledger.py",
+    ),
+    "PLANEJAR": (
+        "scripts/spec_drift.py",
+        "scripts/metricas/contract_closure.py",
+        "scripts/metricas/fence_check.py",
+    ),
+    "EXECUTAR": (
+        "scripts/spec_drift.py",
+        "scripts/metricas/ratchet.py",
+        "scripts/metricas/hazard_scan.py",
+        "scripts/metricas/assertless_scan.py",
+        "scripts/metricas/fence_check.py",
+        "scripts/metricas/contract_closure.py",
+        "scripts/metricas/metaconfig_diff.py",
+    ),
+    # Variante EXECUTAR com verbo composto ("audita e corrige"): mesmo conjunto
+    # CARPINTEIRO reforçado por repo_signals.py na cabeça (sinais do repo antes
+    # do diff). AGENTS.md §2 não distingue o caso composto — o acréscimo é
+    # deliberado e documentado aqui.
+    "EXECUTAR_COMPOUND": (
+        "scripts/repo_signals.py",
+        "scripts/spec_drift.py",
+        "scripts/metricas/ratchet.py",
+        "scripts/metricas/hazard_scan.py",
+        "scripts/metricas/assertless_scan.py",
+        "scripts/metricas/fence_check.py",
+        "scripts/metricas/contract_closure.py",
+        "scripts/metricas/metaconfig_diff.py",
+    ),
 }
 
 # Tabela declarativa de desambiguação negativa (padrão nvidia-skill-finder):
@@ -316,6 +373,7 @@ DOMAIN_BOOSTS: dict[str, tuple[str, ...]] = {
     "henke-test-mutantes": ("teste de mutacao", "testes de mutacao", "mutant_hunt", "mutantes sobreviventes", "kill rate", "mata mutantes", "mutacao de ast", "testes fracos"),
     "henke-audit-perf": ("audita a performance", "diagnostico de performance", "queries n+1", "n+1 query", "hotspot crap", "gargalo de cpu", "bloqueio de event loop", "io sincrono em async", "latencia p99", "benchmark antes e depois"),
     "henke-code-llm": ("integracao llm", "integra llm", "prompt injection", "structured output", "rag seguro", "agente de ia", "chamada de llm", "fallback de modelo", "orcamento de tokens", "tool calling"),
+    "henke-code-integracao": ("integracao com", "api externa", "servico externo", "stripe", "webhook"),
     "henke-ops-observa": ("observabilidade", "logs estruturados", "correlacao de trace_id", "run_id nos logs", "telemetria", "metricas de producao", "catch cego", "rastreamento de erros", "opentelemetry"),
     "henke-arch-seguranca": ("deixa isso seguro", "chave exposta", "segredo vazado", "proteger antes de subir"),
     "henke-arch-cloud": ("arquitetura cloud", "multi-cloud", "google cloud", "na aws", "da aws", "no gcp", "cloudflare", "bucket s3", "iam policy", "least privilege", "menor privilegio", "oidc", "secrets manager", "terraform", "imdsv2", "anti-custo", "blinda a infra"),
@@ -581,46 +639,20 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
                 top = (top + [(1.9, fb_name, fb_skill["path"],
                                f"fallback de engenharia ({mode})")])[:3]
 
-    # Seleção do Arquétipo e Portões Mecânicos Obrigatórios
+    # Seleção do Arquétipo e Portões Mecânicos Obrigatórios (matriz: MODE_GATES)
     lead_skill = top[0][1] if top else ""
     if is_compound_exec:
         archetype = "CARPINTEIRO"
-        gates_required = [
-            "scripts/repo_signals.py",
-            "scripts/spec_drift.py",
-            "scripts/metricas/ratchet.py",
-            "scripts/metricas/hazard_scan.py",
-            "scripts/metricas/assertless_scan.py",
-            "scripts/metricas/fence_check.py",
-            "scripts/metricas/contract_closure.py",
-            "scripts/metricas/metaconfig_diff.py",
-        ]
+        gates_required = list(MODE_GATES["EXECUTAR_COMPOUND"])
     elif mode == "ANALISAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-audit-", "henke-debug-"))):
         archetype = "SHERLOCK"
-        gates_required = [
-            "scripts/repo_signals.py",
-            "scripts/metricas/hazard_scan.py",
-            "scripts/metricas/assertless_scan.py",
-            "scripts/metricas/coverage_ledger.py",
-        ]
+        gates_required = list(MODE_GATES["ANALISAR"])
     elif mode == "PLANEJAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-plan-", "henke-arch-"))):
         archetype = "ESTADISTA"
-        gates_required = [
-            "scripts/spec_drift.py",
-            "scripts/metricas/contract_closure.py",
-            "scripts/metricas/fence_check.py",
-        ]
+        gates_required = list(MODE_GATES["PLANEJAR"])
     else:
         archetype = "CARPINTEIRO"
-        gates_required = [
-            "scripts/spec_drift.py",
-            "scripts/metricas/ratchet.py",
-            "scripts/metricas/hazard_scan.py",
-            "scripts/metricas/assertless_scan.py",
-            "scripts/metricas/fence_check.py",
-            "scripts/metricas/contract_closure.py",
-            "scripts/metricas/metaconfig_diff.py",
-        ]
+        gates_required = list(MODE_GATES["EXECUTAR"])
 
     return {
         "mode": mode,
@@ -631,10 +663,7 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             {"name": name, "path": path, "score": sc, "reason": rsn}
             for sc, name, path, rsn in top
         ],
-        "gates_required": gates_required if top else [
-            "scripts/repo_signals.py",
-            "scripts/metricas/hazard_scan.py",
-        ],
+        "gates_required": gates_required if top else list(MINIMAL_GATES),
         "scope_paths": scope_paths,
         "negative_rules_triggered": matched_negatives,
         "unrouted_catalog_skills": unrouted,

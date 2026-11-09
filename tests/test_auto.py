@@ -26,7 +26,8 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from scripts import henke_auto
-from scripts.run_state import record_gate
+from scripts.run_state import approve_run, record_gate
+import subprocess
 
 SUITE = Path(henke_auto.SUITE_ROOT)
 
@@ -37,10 +38,15 @@ PROMPT_PUBLISH = "faz deploy pra produção agora"          # requires_human_aut
 def _ns(**kw):
     base = dict(
         prompt=None, repo=".", driver=None, dry_run=False,
-        yes=False, policy=None, timeout=None,
+        yes=False, policy=None, timeout=None, resume=None,
     )
     base.update(kw)
     return argparse.Namespace(**base)
+
+
+def _fake_preflight_ok(repo, gates, spec_path=None):
+    """Emula _preflight_gates com todos os portões viáveis."""
+    return True, []
 
 
 def _fake_gates_ok(repo, gates, run_id, timeout_sec):
@@ -132,11 +138,13 @@ class AutoDispatchTests(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
              mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
+             mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
              contextlib.redirect_stdout(buf):
             rc = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="echo",
             ))
-        self.assertEqual(rc, 0, buf.getvalue())
+        # echo é simulação: outcome limitado a 'unverified' → exit 2, nunca 0
+        self.assertEqual(rc, 2, buf.getvalue())
 
         envs = _envelope_files(self.repo)
         self.assertEqual(len(envs), 1, "driver echo deve persistir o envelope")
@@ -154,7 +162,8 @@ class AutoDispatchTests(unittest.TestCase):
 
         run_file = envs[0].with_name(envs[0].name.replace(".envelope.json", ".json"))
         run = json.loads(run_file.read_text(encoding="utf-8"))
-        self.assertEqual(run["outcome"], "verified")
+        self.assertEqual(run["outcome"], "unverified")
+        self.assertTrue(any("ECHO-UNVERIFIED" in r for r in run.get("reasons", [])))
         self.assertEqual(
             [s["sha256"] for s in run.get("skills_rodadas", [])],
             [s["sha256"] for s in env["skills"]],
@@ -166,11 +175,14 @@ class AutoDispatchTests(unittest.TestCase):
             self.assertIn(st, stages)
 
     def test_policy_json_created_with_exact_schema(self):
-        with mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
+        result = json.dumps({"files_changed": ["x.py"], "notes": "ok"})
+        with mock.patch.object(sys, "stdin", io.StringIO(result)), \
+             mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
              mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
+             mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
              contextlib.redirect_stdout(io.StringIO()):
             rc = henke_auto.run_auto(_ns(
-                prompt=PROMPT_EXEC, repo=str(self.repo), driver="echo",
+                prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin",
             ))
         self.assertEqual(rc, 0)
         pol = json.loads((self.repo / ".henke" / "POLICY.json").read_text(encoding="utf-8"))
@@ -183,7 +195,8 @@ class AutoDispatchTests(unittest.TestCase):
 
     def test_missing_driver_writes_envelope_and_exits_2(self):
         buf_out, buf_err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
+        with mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
+             contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
             rc = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver=None,
             ))
@@ -192,7 +205,8 @@ class AutoDispatchTests(unittest.TestCase):
         self.assertIn("driver", buf_err.getvalue().lower())
 
     def test_unknown_driver_exits_2(self):
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        with mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             rc = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="bogus-driver",
             ))
@@ -200,6 +214,7 @@ class AutoDispatchTests(unittest.TestCase):
 
     def test_stdin_driver_invalid_json_exits_2(self):
         with mock.patch.object(sys, "stdin", io.StringIO("isso não é json")), \
+             mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             rc = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin",
@@ -212,6 +227,7 @@ class AutoDispatchTests(unittest.TestCase):
         with mock.patch.object(sys, "stdin", io.StringIO(result)), \
              mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
              mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
+             mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
              contextlib.redirect_stdout(buf):
             rc = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin",
@@ -226,6 +242,7 @@ class AutoDispatchTests(unittest.TestCase):
         buf = io.StringIO()
         with mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_red), \
              mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
+             mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
              contextlib.redirect_stdout(buf):
             rc = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="echo",
@@ -299,24 +316,29 @@ class AutoAuthorizationTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("--yes", buf.getvalue())
 
-        # strict + --yes → flui
+        # strict + --yes → flui (driver stdin p/ rc 0 significativo; echo→unverified=2)
+        result = json.dumps({"files_changed": ["x.py"], "notes": "ok"})
         buf2 = io.StringIO()
-        with mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
+        with mock.patch.object(sys, "stdin", io.StringIO(result)), \
+             mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
              mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
+             mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
              contextlib.redirect_stdout(buf2):
             rc2 = henke_auto.run_auto(_ns(
-                prompt=PROMPT_EXEC, repo=str(self.repo), driver="echo", yes=True,
+                prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin", yes=True,
             ))
         self.assertEqual(rc2, 0, buf2.getvalue())
 
         # balanced → flui sem --yes
         self._write_policy("balanced")
         buf3 = io.StringIO()
-        with mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
+        with mock.patch.object(sys, "stdin", io.StringIO(result)), \
+             mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
              mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
+             mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
              contextlib.redirect_stdout(buf3):
             rc3 = henke_auto.run_auto(_ns(
-                prompt=PROMPT_EXEC, repo=str(self.repo), driver="echo",
+                prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin",
             ))
         self.assertEqual(rc3, 0, buf3.getvalue())
 
@@ -346,6 +368,138 @@ class AutoMainTests(unittest.TestCase):
                 rc = henke_auto.main([PROMPT_EXEC, "--repo", td, "--dry-run"])
             self.assertEqual(rc, 0)
             self.assertIn("gates_required", buf.getvalue())
+
+
+class AutoModeTests(unittest.TestCase):
+    """Kimi-audit: ANALISAR não despacha driver; preflight bloqueia antes do driver."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name)
+        (self.repo / "pyproject.toml").write_text("[project]\nname = 'fixture'\n", encoding="utf-8")
+
+    def test_analisar_does_not_dispatch_driver(self):
+        buf = io.StringIO()
+        with mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
+             mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
+             contextlib.redirect_stdout(buf):
+            rc = henke_auto.run_auto(_ns(
+                prompt="audita o código do parser", repo=str(self.repo),
+                driver="cmd:binario-que-nao-existe-seria-erro-se-despachado",
+            ))
+        self.assertEqual(rc, 0, buf.getvalue())   # se despachasse, rc seria 1
+        self.assertEqual(_envelope_files(self.repo), [], "ANALISAR não gera envelope de execução")
+        run = json.loads(_run_files(self.repo)[0].read_text(encoding="utf-8"))
+        stages = {s["stage"]: s for s in run.get("stages", [])}
+        self.assertIn("ANALISAR", stages["dispatch"]["detail"])
+
+    def test_preflight_blocks_inviable_gates_before_driver(self):
+        # EXECUTAR num repo sem spec/HEAD: portões inviáveis → bloqueio ANTES do driver.
+        buf_err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(buf_err):
+            rc = henke_auto.run_auto(_ns(
+                prompt=PROMPT_EXEC, repo=str(self.repo), driver="echo",
+            ))
+        self.assertEqual(rc, 2)
+        self.assertIn("PRÉ-DESPACHO", buf_err.getvalue())
+        run = json.loads(_run_files(self.repo)[0].read_text(encoding="utf-8"))
+        self.assertEqual(run["outcome"], "blocked")  # MANDATORY-GATE-MISSING
+        stages = [s["stage"] for s in run.get("stages", [])]
+        self.assertNotIn("dispatch", [s for s in stages if s != "envelope"], "driver não pode ter rodado")
+
+
+class AutoResumeTests(unittest.TestCase):
+    """Kimi-audit: --resume exige vínculo intacto (HEAD + escopo) da aprovação."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name)
+        (self.repo / "pyproject.toml").write_text("[project]\nname = 'fixture'\n", encoding="utf-8")
+
+    def _blocked_run(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = henke_auto.run_auto(_ns(
+                prompt=PROMPT_PUBLISH, repo=str(self.repo), driver="echo",
+            ))
+        self.assertEqual(rc, 2)
+        return _run_files(self.repo)[0]
+
+    def test_resume_requires_new_approval_when_scope_diverges(self):
+        rp = self._blocked_run()
+        approve_run(rp)
+        data = json.loads(rp.read_text(encoding="utf-8"))
+        data["prompt"] = "pedido adulterado após aprovação"   # fingerprint diverge
+        rp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = henke_auto.run_auto(_ns(
+                prompt="x", repo=str(self.repo), driver="echo", resume=rp.stem,
+            ))
+        self.assertEqual(rc, 2)
+        data2 = json.loads(rp.read_text(encoding="utf-8"))
+        self.assertEqual(data2["review_status"], "pending")  # nova aprovação exigida
+
+    def test_resume_flows_when_binding_intact(self):
+        rp = self._blocked_run()
+        approve_run(rp)
+        result = json.dumps({"files_changed": ["a.py"], "notes": "ok"})
+        with mock.patch.object(sys, "stdin", io.StringIO(result)), \
+             mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
+             mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
+             mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
+             contextlib.redirect_stdout(io.StringIO()):
+            rc = henke_auto.run_auto(_ns(
+                prompt="x", repo=str(self.repo), driver="stdin", resume=rp.stem,
+            ))
+        self.assertEqual(rc, 0)
+
+
+class DriverAgentAdapterTests(unittest.TestCase):
+    """Kimi-audit: falhas do adapter propagam exit != 0 (JSON de erro no stdout)."""
+
+    def _run_adapter(self, argv, stdin_text):
+        from scripts import henke_driver_agent as adapter
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(sys, "stdin", io.StringIO(stdin_text)), \
+             contextlib.redirect_stdout(out):
+            rc = adapter.main()
+        return rc, out.getvalue()
+
+    def test_unknown_preset_exits_nonzero(self):
+        rc, out = self._run_adapter(["prog", "nao-existe"], "{}")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("sem preset", json.loads(out)["notes"])
+
+    def test_unreadable_envelope_exits_nonzero(self):
+        rc, out = self._run_adapter(["prog", "claude"], "isto nao e json")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("envelope", json.loads(out)["notes"])
+
+    def test_missing_cli_oserror_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch("subprocess.run", side_effect=OSError("WinError 2")):
+                rc, out = self._run_adapter(["prog", "claude"], json.dumps({"repo_root": td}))
+        self.assertNotEqual(rc, 0)
+        self.assertIn("indisponível", json.loads(out)["notes"])
+
+    def test_agent_without_result_json_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as td:
+            fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="texto sem json", stderr="")
+            with mock.patch("subprocess.run", return_value=fake):
+                rc, out = self._run_adapter(["prog", "claude"], json.dumps({"repo_root": td}))
+        self.assertNotEqual(rc, 0)
+        self.assertIn("sem JSON", json.loads(out)["notes"])
+
+    def test_agent_result_json_exit_0(self):
+        with tempfile.TemporaryDirectory() as td:
+            payload = '{"files_changed": ["a.py"], "notes": "feito"}'
+            fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="log...\n" + payload, stderr="")
+            with mock.patch("subprocess.run", return_value=fake):
+                rc, out = self._run_adapter(["prog", "claude"], json.dumps({"repo_root": td}))
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["files_changed"], ["a.py"])
 
 
 if __name__ == "__main__":
