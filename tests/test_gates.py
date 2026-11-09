@@ -124,7 +124,7 @@ class GatesRunnerTests(unittest.TestCase):
 
     def test_shape_do_resultado(self):
         res = run_gates(str(self.repo), [], record=False)
-        self.assertEqual(set(res), {"verdicts", "all_green", "ran"})
+        self.assertEqual(set(res), {"verdicts", "all_green", "ran", "skipped"})
         self.assertEqual(res["ran"], 0)
         self.assertTrue(res["all_green"])  # vacuidade: nada reprovou
 

@@ -124,7 +124,7 @@
 {"prompt": "organiza a memória desse projeto", "expect_top1": "henke-prepara", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "faz uma faxina nesse código", "expect_top1": "henke-mem-faxina", "expect_mode": "EXECUTAR", "expect_auth": true}
 {"prompt": "limpa esse projeto, tá cheio de arquivo inútil", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": false}
-{"prompt": "que arquivos eu posso apagar sem medo?", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "que arquivos eu posso apagar sem medo?", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": true}
 {"prompt": "tem dependência que eu não uso?", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "registra o que a gente fez hoje", "expect_top1": "henke-mem-diario", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "atualiza o diário do projeto", "expect_top1": "henke-mem-diario", "expect_mode": "EXECUTAR", "expect_auth": false}

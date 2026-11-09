@@ -27,6 +27,16 @@ HAZARDOUS_PATTERNS = [
     (r"\bchmod\s+(?:-R\s+)?777\b", "Permissão insegura 777 detectada"),
     (r"(?:curl|wget)\b.*\|\s*(?:ba)?sh\b", "Execução remota cega via pipe (curl | sh) proibida"),
     (r"\bformat\b\s+[a-zA-Z]:", "Comando de formatação de disco detectado"),
+    (r"\brm\b(?=[^|;&]*\s(?:-\w*r|--recursive)\b)(?=[^|;&]*\s(?:-\w*f|--force)\b)",
+     "Remoção recursiva forçada (flags separadas) proibida"),
+    (r"\bgit\s+reset\b[^|;&]*--hard\b", "git reset --hard destrutivo proibido em ledger"),
+    (r"\bgit\s+clean\b[^|;&]*-\w*f", "git clean -f destrutivo proibido em ledger"),
+    (r"\bgit\s+push\b[^|;&]*\+", "git push com refspec forçado (+ref) proibido"),
+    (r"\bRemove-Item\b[^|;&]*(?:-Recurse|-Force)", "Remove-Item recursivo/forçado proibido"),
+    (r"\b(?:rd|rmdir|del)\b[^|;&]*/s\b", "rd/del /s destrutivo proibido"),
+    (r"\bgh\s+release\s+(?:create|upload)\b", "gh release (publish) proibido em ledger"),
+    (r"\b(?:vercel|netlify|flyctl)\b[^|;&]*(?:--prod|deploy)\b", "Deploy para produção proibido em ledger"),
+    (r"\bdocker\s+push\b", "docker push (publish) proibido em ledger"),
 ]
 
 # Resolução real de lifecycle npm (anti-TOCTOU): `npm test` não é string cega —
@@ -122,10 +132,22 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
             errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: stdout_sha256 inválido na linha {idx} de '{log_p.name}'.")
             continue
 
+        if not isinstance(exit_r, int) or isinstance(exit_r, bool):
+            errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: exit não-inteiro na linha {idx} de '{log_p.name}'.")
+            continue
+
+        if idx > 1 and not prev_r:
+            errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: prev_hash ausente na linha {idx} de '{log_p.name}'.")
+            continue
+
         if idx > 1 and last_ehash and prev_r and prev_r != last_ehash:
             errors.append(
                 f"UNVERIFIED_EXECUTION_EVIDENCE: quebra de encadeamento prev_hash na linha {idx} de '{log_p.name}'."
             )
+            continue
+
+        if not ehash_r:
+            errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash ausente na linha {idx} de '{log_p.name}'.")
             continue
 
         if ehash_r:

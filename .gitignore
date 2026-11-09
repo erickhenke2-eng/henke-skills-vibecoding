@@ -16,3 +16,15 @@ build/
 
 # Preferências pessoais do harness
 .henke/CONFIG.local.json
+
+# Custódia local — baseline é estado da máquina, não fonte compartilhada
+.henke/gate-baseline.json
+.henke/runs/*.envelope.json
+
+# Segredos e chaves — nunca entram no repo
+.env
+.env.*
+.secrets/
+*.pem
+*.key
+id_rsa*

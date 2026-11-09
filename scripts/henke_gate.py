@@ -206,7 +206,11 @@ def main(argv=None):
             if out.exists() and not getattr(args, "force", False):
                 print(f"ERRO: Baseline já existente em {out}. Conclua a tarefa com 'check' ou use '--force' para recapturar.", file=sys.stderr)
                 return 1
+            if out.exists() and getattr(args, "force", False):
+                print("AVISO: --force descarta a custódia anterior. Esta recaptura fica marcada no baseline.", file=sys.stderr)
             baseline = capture_baseline(cwd)
+            if out.exists() and getattr(args, "force", False):
+                baseline["forced_recapture"] = True
             try:
                 baseline["_self_rel"] = out.resolve().relative_to(Path(baseline["toplevel"]).resolve()).as_posix()
             except ValueError:
@@ -218,6 +222,14 @@ def main(argv=None):
 
         baseline_path = args.baseline or Path(git(cwd, "rev-parse", "--show-toplevel").stdout.strip()) / DEFAULT_BASELINE
         baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        # C1: o caminho do próprio baseline é derivado do arquivo real em disco,
+        # nunca confiado ao campo _self_rel dentro do JSON (forjável pelo agente).
+        try:
+            baseline["_self_rel"] = baseline_path.resolve().relative_to(
+                Path(baseline.get("toplevel", "")).resolve()
+            ).as_posix()
+        except (ValueError, TypeError):
+            baseline["_self_rel"] = None
         scope = list(args.scope) if args.scope else []
         spec_path = getattr(args, "spec", None)
         if not scope and not spec_path:

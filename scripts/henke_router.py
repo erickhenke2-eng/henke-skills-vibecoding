@@ -134,19 +134,24 @@ def _has_flex_signal(text: str, sig: str) -> bool:
 # Vocabulário destrutivo e PUBLISH (PROTOCOLO §1) — exige autorização humana explícita
 DESTRUCTIVE_SIGNALS = (
     "deleta", "deletar", "deleto", "deletamos", "delete", "exclui", "excluir",
-    "excluo", "excluímos", "apago", "apagamos", "drop", "drop table",
-    "truncate", "wipe", "wipe database", "destroi", "destruo", "destruir",
-    "destruímos", "destroy", "purge",
+    "excluo", "excluímos", "apago", "apaga", "apagar", "apague", "apagamos",
+    "remove", "remover", "removo", "remova", "removendo", "erase", "erases",
+    "drop", "drop table", "truncate", "wipe", "wipe database",
+    "destroi", "destruo", "destruir", "destruímos", "destroy", "purge",
     "force-push", "push --force", "force push", "push -f", "reset --hard",
-    "hard reset", "rm -rf", "apaga o banco", "apagar o banco", "derruba",
+    "hard reset", "rm -rf", "rm -r", "git clean", "clean -fd", "clean -fdx",
+    "apaga o banco", "apagar o banco", "derruba", "zera", "zerar",
 )
 _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 
-PUBLISH_SIGNALS = (
+PUBLISH_ONLY_SIGNALS = (
     "deploy", "publica", "publicar", "producao", "production",
     "sobe", "subir", "pro ar", "no ar", "em producao",
+    "publish", "npm publish", "pypi", "release", "lanca release", "git push",
+    "push na main", "push pra main", "push origin",
     "faxina", "limpa o repo", "apaga arquivos", "reversao", "reverte", "rollback",
-) + DESTRUCTIVE_SIGNALS
+)
+PUBLISH_SIGNALS = PUBLISH_ONLY_SIGNALS + DESTRUCTIVE_SIGNALS
 _PUBLISH_SIGNALS = PUBLISH_SIGNALS
 
 # Sinais interrogativos / somente-inspeção -> travam teto em ANALISAR
@@ -444,13 +449,13 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             if rule.get("force_mode"):
                 forced_mode = rule["force_mode"]
 
+    is_question = norm_p.startswith(INTERROGATIVE_PREFIXES) or norm_p.endswith("?")
     requires_human_auth = (
         any(_has_signal(norm_p, sig) for sig in PUBLISH_SIGNALS)
         or any(_has_signal(norm_p, sig) for sig in DESTRUCTIVE_SIGNALS)
     )
 
     # Determinação de Modo com Veto de Segurança (§1)
-    is_question = norm_p.startswith(INTERROGATIVE_PREFIXES) or norm_p.endswith("?")
     is_destructive_cmd = any(_has_signal(norm_p, sig) for sig in DESTRUCTIVE_SIGNALS)
     has_audit = any(_has_signal(norm_p, s) for s in AUDIT_SIGNALS)
     has_plan = any(_has_signal(norm_p, s) for s in PLAN_SIGNALS)

@@ -570,7 +570,7 @@ def _cmd_check(
         results.append({
             "gate": gate_name,
             "exit_code": None,
-            "passed": True,
+            "passed": False,
             "skipped": True,
             "output": f"pulado: {motivo}",
         })
@@ -742,10 +742,15 @@ def _resolve_run_ref(repo_root: Path, run_ref: str | None) -> Path | None:
     """Resolve `--run`/`<run_id>` para um caminho `.henke/runs/<id>.json` existente."""
     if not run_ref:
         return None
+    runs_dir = (repo_root / ".henke" / "runs").resolve()
     cand = Path(run_ref)
     if cand.is_file():
-        return cand
-    runs_dir = repo_root / ".henke" / "runs"
+        real = cand.resolve()
+        try:
+            real.relative_to(runs_dir)
+        except ValueError:
+            return None  # C3-banca: recusa caminho fora de .henke/runs (traversal)
+        return real
     name = run_ref if run_ref.endswith(".json") else f"{run_ref}.json"
     path = runs_dir / name
     return path if path.is_file() else None
@@ -1159,8 +1164,9 @@ def main(argv: list[str] | None = None) -> int:
     p_auto.add_argument("--driver", default=None, help="Driver/executor externo")
     p_auto.add_argument("--dry-run", action="store_true", help="Simula sem escrever nada")
     p_auto.add_argument("--yes", action="store_true", help="Aprova automaticamente o permitido pela policy")
-    p_auto.add_argument("--policy", choices=("strict", "balanced", "yolo"), default="balanced", help="Política de aprovação")
+    p_auto.add_argument("--policy", choices=("strict", "balanced", "yolo"), default=None, help="Política de aprovação (default: a da POLICY.json, ou balanced)")
     p_auto.add_argument("--timeout", type=float, default=None, metavar="N", help="Teto em segundos")
+    p_auto.add_argument("--resume", default=None, metavar="RUN", help="Retoma run bloqueada após `henke approve`")
 
     try:
         args = parser.parse_args(raw_argv)

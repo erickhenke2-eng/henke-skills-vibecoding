@@ -93,25 +93,64 @@ def _looks_like_path(token: str) -> bool:
     return "/" in token or "\\" in token or token.lower().endswith(".py")
 
 
-def _default_gate_args(name: str | None, repo_root: Path) -> list[str]:
-    """Args default idênticos ao despacho de `henke gate` (henke_cli._cmd_gate)."""
+def _git_has_head(repo_root: Path) -> bool:
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"], cwd=str(repo_root),
+            capture_output=True, timeout=10,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+_SKIP_REASONS = {
+    "ratchet": "exige --baseline/--current (TSVs de referência) — não autoexecutável sem baseline registrado",
+    "fence_check": "exige JSONs de contrato gerados pelo pipeline — não autoexecutável fora dele",
+    "coverage_ledger": "exige ledger de cobertura — rode `coverage_ledger.py init` antes",
+    "spec_drift": "exige spec de referência — a run não declarou `spec_path`",
+    "contract_closure": "exige spec de referência — a run não declarou `spec_path`",
+    "metaconfig_diff": "exige commit base (HEAD) — repositório sem commits",
+}
+
+
+def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None = None) -> list[str] | None:
+    """Args por portão, espelhando `henke gate`/check. `None` = não autoexecutável
+    neste contexto — o veredito vira `skipped` (não-veredito), nunca verde."""
     if name in _GATES_COM_REPO_ARG:
         return [str(repo_root)]
     if name == "assertless":
         tests_dir = repo_root / "tests"
         return [str(tests_dir)] if tests_dir.is_dir() else [str(repo_root)]
+    if name == "metaconfig":
+        return ["--against", "HEAD"] if _git_has_head(repo_root) else None
+    if name == "signals":
+        return ["metrics", "--root", str(repo_root)]
+    if name == "drift":
+        if spec_path and spec_path.is_file():
+            return ["--repo", str(repo_root), "--spec", str(spec_path),
+                    "--expected-hash", hashlib.sha256(spec_path.read_bytes()).hexdigest()]
+        return None
+    if name == "contracts":
+        return ["--repo", str(repo_root), "--spec", str(spec_path)] if spec_path and spec_path.is_file() else None
+    if name == "coverage":
+        led = repo_root / ".henke" / "coverage-ledger.json"
+        return ["verify", str(led)] if led.is_file() else None
+    if name in ("ratchet", "fence"):
+        return None
     return []
 
 
-def _resolve_gate(token: str, repo_root: Path) -> tuple[str, list[str]] | None:
-    """Resolve um item de `gates` para (gate_id_canônico, cmd). None = desconhecido."""
+def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None) -> tuple[str, list[str] | None] | None:
+    """Resolve um item de `gates` para (gate_id_canônico, cmd_ou_None).
+    None = desconhecido; cmd=None = conhecido mas não autoexecutável aqui."""
     if not token:
         return None
     if token in GATE_MAP:
         script = Path(GATE_MAP[token])
         if not script.is_file():
             return None
-        return script.stem, [sys.executable, str(script), *_default_gate_args(token, repo_root)]
+        args = _default_gate_args(token, repo_root, spec_path)
+        return script.stem, ([sys.executable, str(script), *args] if args is not None else None)
     if not _looks_like_path(token):
         return None
     cand = Path(token)
@@ -124,7 +163,9 @@ def _resolve_gate(token: str, repo_root: Path) -> tuple[str, list[str]] | None:
     resolved = cand.resolve()
     path_to_name = {os.path.normcase(str(Path(p).resolve())): n for n, p in GATE_MAP.items()}
     name = path_to_name.get(os.path.normcase(str(resolved)))
-    args = _default_gate_args(name, repo_root) if name else [str(repo_root)]
+    args = _default_gate_args(name, repo_root, spec_path) if name else [str(repo_root)]
+    if args is None:
+        return resolved.stem, None
     return resolved.stem, [sys.executable, str(resolved), *args]
 
 
@@ -187,14 +228,27 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
 
+    spec_path: Path | None = None
+    if run_path is not None:
+        try:
+            spec_path = Path(json.loads(run_path.read_text(encoding="utf-8")).get("spec_path") or "")
+        except (OSError, ValueError):
+            spec_path = None
+
     verdicts: list[dict] = []
+    skipped: list[dict] = []
     for raw in gates:
         token = str(raw).strip()
-        resolved = _resolve_gate(token, root)
+        resolved = _resolve_gate(token, root, spec_path)
         if resolved is None:
             gate_id = _gate_id_of(token)
             cmd_str = ""
             exit_code, out, err, ms = 2, "", f"ERRO: portão desconhecido '{token}'", 0
+        elif resolved[1] is None:
+            gate_id = resolved[0]
+            skipped.append({"gate": gate_id, "skipped": True,
+                            "reason": _SKIP_REASONS.get(gate_id, "sem args autoexecutáveis neste contexto")})
+            continue
         else:
             gate_id, cmd = resolved
             cmd_str = shlex.join(cmd)
@@ -232,6 +286,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
 
     return {
         "verdicts": verdicts,
+        "skipped": skipped,
         "all_green": all(v["exit"] == 0 for v in verdicts),
         "ran": len(verdicts),
     }

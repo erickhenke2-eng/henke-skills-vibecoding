@@ -46,6 +46,10 @@ def inventory(repo):
         repo / "scripts" / "henke_gate.py",
         repo / "scripts" / "henke_cli.py",
         repo / "scripts" / "run_state.py",
+        repo / "scripts" / "henke_auto.py",
+        repo / "scripts" / "henke_detect.py",
+        repo / "scripts" / "henke_gates.py",
+        repo / "scripts" / "henke_report.py",
     ]
     for rel in sorted(repo.glob("scripts/metricas/*.py")) + root_gate_scripts:
         if rel.is_file():

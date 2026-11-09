@@ -91,7 +91,7 @@ POLICY_VALID = ("strict", "balanced", "yolo")
 
 # Piso duro de autorização (M8): estes escopos JAMAIS são liberados por
 # --yes, policy=yolo ou edição da POLICY.json — sempre `henke approve` humano.
-HARD_ALWAYS_ASK = frozenset({"publish", "destructive"})
+HARD_ALWAYS_ASK = frozenset({"publish", "destructive", "metaconfig"})
 
 # Heurística lexical de escopo sensível (M8 §3): complementa a classificação do
 # route (requires_human_auth) para o léxico real do vibecoder.
@@ -492,7 +492,7 @@ def _call_cmd_driver(template: str, envelope: dict, repo_root: Path, timeout_sec
     """Invoca `cmd:<template>` com o envelope JSON no stdin; stdout deve ser o
     JSON de resultado do driver. Retorna (resultado_validado, erro)."""
     try:
-        tokens = shlex.split(template)
+        tokens = shlex.split(template, posix=(os.name != "nt"))
     except ValueError as exc:
         return None, f"template de driver inválido: {exc}"
     if not tokens:
@@ -615,7 +615,7 @@ def _invoke_test_cmd(repo_root: Path, test_cmd: str, timeout_sec: float) -> tupl
     """Executa o test_cmd via `henke exec -- <cmd>` (subprocess da CLI) para que a
     evidência caia em exec_log.jsonl/LEDGER.json. Retorna (exit_code, saída)."""
     try:
-        tokens = shlex.split(test_cmd)
+        tokens = shlex.split(test_cmd, posix=(os.name != "nt"))
     except ValueError:
         tokens = [test_cmd]
     if not tokens:
@@ -646,6 +646,8 @@ def _red_verdicts(gres: dict | None) -> list[dict]:
     for v in gres.get("verdicts") or []:
         if not isinstance(v, dict):
             continue
+        if v.get("skipped"):
+            continue
         ec = v.get("exit_code", v.get("exit", 1))
         passed = v.get("passed", ec == 0)
         if passed is True or ec == 0:
@@ -653,7 +655,7 @@ def _red_verdicts(gres: dict | None) -> list[dict]:
         findings.append({
             "gate": v.get("gate", v.get("name", "?")),
             "exit_code": ec,
-            "output": str(v.get("output", v.get("summary", "")))[:2000],
+            "output": str(v.get("stderr_tail") or v.get("output") or v.get("summary") or "")[:2000],
         })
     return findings
 
@@ -746,6 +748,9 @@ def run_auto(args: argparse.Namespace) -> int:
     yes = bool(getattr(args, "yes", False))
     policy_flag = getattr(args, "policy", None)
     timeout_opt = getattr(args, "timeout", None)
+    if timeout_opt is not None and float(timeout_opt) <= 0:
+        print("ERRO: --timeout deve ser > 0.", file=sys.stderr)
+        return 2
 
     # ---- estágio: route + detect (comum ao dry-run e ao fluxo real) ----
     try:
@@ -784,6 +789,40 @@ def run_auto(args: argparse.Namespace) -> int:
         print(json.dumps(plan, ensure_ascii=False, indent=2))
         return 0
 
+    # ---- resume: retoma uma run bloqueada APÓS `henke approve` ----
+    # O escopo executado é o da run aprovada (route_snapshot), nunca re-roteado —
+    # a aprovação fica vinculada àquela run (C-fix banca: approve não era caminho).
+    resume_ref = getattr(args, "resume", None)
+    resumed: dict | None = None
+    if resume_ref:
+        runs_dir = (repo_root / ".henke" / "runs").resolve()
+        cand = Path(str(resume_ref))
+        cand = cand if cand.is_absolute() else runs_dir / (
+            cand.name if cand.name.endswith(".json") else f"{cand.name}.json"
+        )
+        try:
+            cand = cand.resolve()
+            cand.relative_to(runs_dir)
+        except (ValueError, OSError):
+            print("ERRO: --resume aceita apenas runs dentro de .henke/runs/.", file=sys.stderr)
+            return 2
+        if not cand.is_file():
+            print(f"ERRO: run inexistente: {cand}", file=sys.stderr)
+            return 2
+        try:
+            resumed = json.loads(cand.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            print("ERRO: run ilegível/corrompida.", file=sys.stderr)
+            return 2
+        if resumed.get("review_status") != "approved":
+            print("ERRO: run não aprovada. Rode primeiro:", file=sys.stderr)
+            print(f"  henke approve {cand}", file=sys.stderr)
+            return 2
+        route = resumed.get("route_snapshot") or route
+        prompt = str(resumed.get("prompt") or prompt)
+        driver = driver or resumed.get("driver")
+        print(f"Retomando run aprovada: {cand.name}")
+
     # ---- estágio 2: garantias .henke/ + run ----
     henke_dir = repo_root / ".henke"
     (henke_dir / "runs").mkdir(parents=True, exist_ok=True)
@@ -806,23 +845,43 @@ def run_auto(args: argparse.Namespace) -> int:
     )
     sensitive_hit = bool(scopes & (set(HARD_ALWAYS_ASK) | set(policy_doc.get("always_ask") or [])))
 
-    run_id = f"auto-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
-    run_path = init_run(
-        repo_root,
-        run_id,
-        mode=str(route.get("mode", "ANALISAR")),
-        archetype=str(route.get("archetype", "SHERLOCK")),
-        spec_path=None,
-        requires_human_auth=sensitive_hit,
-        # run bloqueada por auth não declara mandatory_gates (nunca rodarão)
-        mandatory_gates=None if sensitive_hit else list(route.get("gates_required") or []),
-    )
+    if resumed is not None:
+        run_id = cand.stem
+        run_path = cand
+        _patch_run(run_path, lambda d: d.update({
+            "mandatory_gates": list(route.get("gates_required") or []),
+            "driver": driver,
+        }))
+        _record_stage(run_path, "authorize", "RETOMADA pós-approve humana — escopo vinculado à run aprovada")
+        needs_human, sensitive_hit = False, False
+    else:
+        run_id = f"auto-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
+        run_path = init_run(
+            repo_root,
+            run_id,
+            mode=str(route.get("mode", "ANALISAR")),
+            archetype=str(route.get("archetype", "SHERLOCK")),
+            spec_path=None,
+            requires_human_auth=sensitive_hit,
+            # run bloqueada por auth não declara mandatory_gates (nunca rodarão)
+            mandatory_gates=None if sensitive_hit else list(route.get("gates_required") or []),
+        )
     _patch_run(run_path, lambda d: d.update({
         "prompt": prompt,
         "scope_paths": list(route.get("scope_paths") or []),
         "policy_efetiva": policy_efetiva,
         "driver": driver,
         "rework_attempts": 0,
+        # snapshot do route p/ retomada futura (--resume) — escopo vinculado à run
+        "route_snapshot": {
+            "mode": route.get("mode"),
+            "archetype": route.get("archetype"),
+            "confidence": route.get("confidence"),
+            "skills": route.get("skills"),
+            "gates_required": route.get("gates_required"),
+            "scope_paths": route.get("scope_paths"),
+            "requires_human_auth": route.get("requires_human_auth"),
+        },
     }))
     _record_stage(
         run_path, "route",
@@ -1008,6 +1067,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--yes", action="store_true", help="Confirma escopos comuns (NUNCA libera publish/destrutivo)")
     ap.add_argument("--policy", choices=POLICY_VALID, default=None, help="Sobrepõe a policy da POLICY.json")
     ap.add_argument("--timeout", type=float, default=None, help="Timeout (s) do driver/portões/testes")
+    ap.add_argument("--resume", default=None, metavar="RUN", help="Retoma run bloqueada após `henke approve` (id ou caminho em .henke/runs)")
     try:
         ns = ap.parse_args(argv)
     except SystemExit as exc:
