@@ -356,16 +356,19 @@ def _resolve_exec_timeout(repo_root: Path, cli_timeout: float | None) -> float:
     """
     # B1 (banca v13): --timeout nan/inf passava nas checagens e o subprocesso
     # nunca expirava — finito+positivo em ambas as fontes.
+    # A13 (banca v14): timeout controlado pelo repo podia ser 1e9 — o stage
+    # pendurava ~31 anos. Teto honesto de 1h.
+    _CAP = 3600.0
     if (cli_timeout is not None and math.isfinite(cli_timeout)
             and cli_timeout > 0):
-        return float(cli_timeout)
+        return min(float(cli_timeout), _CAP)
     project_json = repo_root / ".henke" / "PROJECT.json"
     try:
         pdata = json.loads(project_json.read_text(encoding="utf-8"))
         val = pdata.get("timeout_sec") if isinstance(pdata, dict) else None
         if (isinstance(val, (int, float)) and not isinstance(val, bool)
                 and math.isfinite(val) and val > 0):
-            return float(val)
+            return min(float(val), _CAP)
     except Exception:
         pass  # PROJECT.json ausente/inválido -> fallback silencioso para 180s
     return 180.0
@@ -436,6 +439,12 @@ def _cmd_exec(
             exec_tokens[0] = resolved
         elif (os.name == "nt"
               and exec_tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls")):
+            # A6 (banca v14): `cmd /c` re-parseia o rabo — `echo ok & calc`
+            # executava o segundo comando mesmo com builtin "inocente".
+            if any(re.search(r"[&|<>^]", str(t)) for t in exec_tokens):
+                print("ERRO: metacaractere de shell (&|<>) em comando builtin "
+                      "— recusado (cmd /c re-parseia o rabo).", file=sys.stderr)
+                return 2
             exec_tokens = ["cmd.exe", "/c"] + exec_tokens
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"

@@ -33,13 +33,23 @@ def _resolve_cli(name: str) -> str | None:
     return shutil.which(name)
 
 
+def _safe_env() -> dict:
+    """A4 (banca v14): env cru herdado (GIT_*/PYTHONPATH) subvertia o CLI."""
+    return {k: v for k, v in os.environ.items()
+            if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                    or k.startswith("LD_") or k.startswith("DYLD_")
+                    or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                             "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                             "DOTNET_STARTUP_HOOKS"))}
+
+
 def _run_cli(argv: list[str], cwd: str) -> subprocess.CompletedProcess:
     exe = argv[0]
     if exe.lower().endswith((".cmd", ".bat")):
         argv = ["cmd", "/d", "/s", "/c", subprocess.list2cmdline(argv)]
     return subprocess.run(
         argv, cwd=cwd, capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
+        encoding="utf-8", errors="replace", env=_safe_env(),
     )
 
 _INSTR = (
@@ -63,7 +73,8 @@ def _last_result_json(text: str) -> dict | None:
                 return obj
         except ValueError:
             pass
-    for match in re.finditer(r'\{[^{}]*"files_changed"[^{}]*\}', text):
+    # A10 (banca v14): último match — dump com o padrão antes do real.
+    for match in list(re.finditer(r'\{[^{}]*"files_changed"[^{}]*\}', text))[::-1]:
         try:
             obj = json.loads(match.group(0))
         except ValueError:
@@ -103,6 +114,16 @@ def main() -> int:
         if exe is None:
             print(json.dumps({"files_changed": [], "notes": "opencode não encontrado no PATH"}))
             return 1
+        # A9 (banca v14): which() procura no CWD em py<3.12 — shim plantado
+        # no repo virava "o driver" e recebia o envelope inteiro.
+        try:
+            _exe_r = Path(exe).resolve()
+            _repo_r = Path(repo).resolve()
+            if _exe_r == _repo_r or _repo_r in _exe_r.parents:
+                print(json.dumps({"files_changed": [], "notes": "opencode resolve dentro do repo — recusado (shim plantado)"}))
+                return 2
+        except OSError:
+            pass
         try:
             res = _run_cli(
                 [exe, "run", "-m", model, "--auto", "-f", env_file.name, prompt],

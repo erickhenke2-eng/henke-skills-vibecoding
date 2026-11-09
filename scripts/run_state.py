@@ -538,7 +538,14 @@ def load_anchor_sidecar(run_id: str, repo_root: Path | str | None = None) -> dic
 
 # A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
 # no ambiente redirecionariam o git das âncoras/vereditos para outro repo/index.
-_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+# A4 (banca v14): env higienizado nos subprocessos git internos —
+# PYTHONPATH/loader hooks subvertem tooling que produz evidência.
+_GIT_ENV = {k: v for k, v in os.environ.items()
+            if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                    or k.startswith("LD_") or k.startswith("DYLD_")
+                    or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                             "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                             "DOTNET_STARTUP_HOOKS"))}
 
 
 def _git_head(repo_root: Path) -> str | None:
@@ -1482,6 +1489,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  head_start      : {_prev.get('head_start')}")
             print(f"  spec_sha256     : {str(_prev.get('spec_sha256'))[:16]}…")
             print(f"  spec_path       : {_prev.get('spec_path')}")
+            # A7 (banca v14): test_cmd/policy efetivos alimentam o
+            # scope_sha256 e executam sob o selo da aprovação — o resumo
+            # precisa mostrar O QUE será executado, não só o escopo.
+            print(f"  test_cmd        : {_prev.get('test_cmd') or '(nenhum)'}")
+            _pol = _prev.get("policy_efetiva") or _prev.get("policy") or {}
+            if isinstance(_pol, dict) and _pol:
+                _pl = {k: _pol.get(k) for k in
+                       ("policy", "allowed_cmds", "source") if k in _pol}
+                print(f"  policy_efetiva  : {_pl}")
             # A3 (banca v12): o HEAD que será vinculado também entra no
             # resumo — approve_run ancora ao HEAD VIVO, que o driver pode
             # ter acabado de commitar sem o humano ver.

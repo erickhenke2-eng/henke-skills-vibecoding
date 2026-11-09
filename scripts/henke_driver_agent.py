@@ -75,14 +75,27 @@ def _last_result_json(text: str) -> dict | None:
                 return obj
         except ValueError:
             pass
-    for match in re.finditer(r'\{[^{}]*"files_changed"[^{}]*\}', text):
+    # A10 (banca v14): último match, não primeiro — dump de arquivo com o
+    # padrão ANTES do resultado real vencia o fallback.
+    for match in list(re.finditer(r'\{[^{}]*"files_changed"[^{}]*\}', text))[::-1]:
         try:
             obj = json.loads(match.group(0))
         except ValueError:
             continue
         if isinstance(obj.get("files_changed"), list):
-            return obj  # primeiro match — o JSON real precede o dump do cat
+            return obj  # último match — o resultado real é o último JSON
     return None
+
+
+def _safe_env() -> dict:
+    """A4 (banca v14): adapters herdavam env cru (GIT_*/PYTHONPATH subvertem
+    o CLI do agente)."""
+    return {k: v for k, v in os.environ.items()
+            if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                    or k.startswith("LD_") or k.startswith("DYLD_")
+                    or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                             "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                             "DOTNET_STARTUP_HOOKS"))}
 
 
 def main() -> int:
@@ -133,13 +146,23 @@ def main() -> int:
         if exe is None:
             print(json.dumps({"files_changed": [], "notes": f"cli '{cli}' indisponível (não está no PATH)"}))
             return 1  # CLI ausente = falha de driver (nunca verde)
+        # A9 (banca v14): which() sem re-check — em py<3.12 procura no CWD;
+        # shim `claude.cmd` plantado no repo virava "o driver".
+        try:
+            _exe_r = Path(exe).resolve()
+            _repo_r = Path(repo).resolve()
+            if _exe_r == _repo_r or _repo_r in _exe_r.parents:
+                print(json.dumps({"files_changed": [], "notes": f"cli '{cli}' resolve dentro do repo — recusado (shim plantado)"}))
+                return 2
+        except OSError:
+            pass
         argv[0] = exe
         if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
             argv = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", *argv]
         try:
             res = subprocess.run(
                 argv, cwd=repo, capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
+                encoding="utf-8", errors="replace", env=_safe_env(),
             )
         except OSError as exc:
             print(json.dumps({"files_changed": [], "notes": f"cli '{cli}' indisponível: {exc}"}))

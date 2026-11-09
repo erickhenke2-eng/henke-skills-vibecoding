@@ -203,6 +203,15 @@ _HOMOGLYPHS = str.maketrans({
     # 'nu|<' → dobra para a letra óbvia antes da comparação de termos.
     "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t",
     "@": "a", "$": "s", "!": "i",
+    # A2 (banca v14): confusáveis que faltavam — lunate epsilon, YE cirílico,
+    # leet 2/6/8/9/| e small-caps (ᴅᴇʟᴇᴛᴇ).
+    "ϵ": "e", "є": "e", "ε": "e", "2": "z", "6": "b", "8": "b", "9": "g",
+    "|": "l", "Ꭰ": "a",
+    "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f",
+    "ɢ": "g", "ʜ": "h", "ɪ": "i", "ᴊ": "j", "ᴋ": "k", "ʟ": "l",
+    "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ǫ": "q", "ʀ": "r",
+    "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v", "ᴡ": "w", "ʏ": "y",
+    "ᴢ": "z",
 })
 
 
@@ -253,30 +262,32 @@ def _has_signal(text: str, sig: str) -> bool:
     # "de\nlete", "dropTable" viram tokens que \b não casa. Compara o sinal
     # compactado contra cada token compactado e pares adjacentes, por
     # igualdade exata (sem substring: "cleanup" não acende "clean").
-    sig_compact = re.sub(r"[^a-z0-9]", "", sig_clean)
-    # 'checkout .'/'checkout --' perdem o discriminador na compactação e
-    # casariam em "tela de checkout" — só compacta sinais que já são
-    # puramente alfanuméricos+espaços.
-    # ALTO-2 (banca v13): split em >=3 fragmentos ("de le te"), tokens de
-    # pontuação que compactam pra "" ("dele / te") e sinais curtos ("w i p e",
-    # "r m") evadiam — janela acumulada até len(sig_compact), piso >=2.
-    # MÉDIO-5 (banca v13): identificadores/paths com '_' — "x_wipe.sh" é um
-    # token só; reparte por [_./\\] além de whitespace (segmentos, não substring).
-    if len(sig_compact) >= 2 and re.fullmatch(r"[a-z0-9 ]+", sig_clean):
+    # A1 (banca v14): alfabeto POR SINAL — `checkout --`/`dd if=`/`format c:`
+    # eram desqualificados do caminho compacto (fullmatch [a-z0-9 ]) e
+    # "checkout - -" evadia. Mantém a pontuação do próprio sinal no compacto:
+    # "checkout--" só casa se o texto também trouxer os '-' (o discriminador).
+    _allowed = set("abcdefghijklmnopqrstuvwxyz0123456789") | {
+        ch for ch in sig_clean if not ch.isalnum() and ch != " "}
+    sig_compact = "".join(ch for ch in sig_clean if ch in _allowed)
+    # ALTO-2 (banca v13): split em >=3 fragmentos, tokens de pontuação que
+    # compactam pra "" e sinais curtos — janela acumulada até len, piso >=2.
+    # MÉDIO-5 (banca v13): reparte por [_./\\] além de whitespace.
+    # A3 (banca v14): range em vez de fatia — toks[i+1:] era O(n²).
+    if len(sig_compact) >= 2:
         toks: list[str] = []
         for _t in re.split(r"\s+", text):
             for _seg in re.split(r"[_./\\]+", _t):
-                _seg = re.sub(r"[^a-z0-9]", "", _seg)
+                _seg = "".join(ch for ch in _seg if ch in _allowed)
                 if _seg:
                     toks.append(_seg)
-        for i, t in enumerate(toks):
-            acc = t
+        for i in range(len(toks)):
+            acc = toks[i]
             if acc == sig_compact:
                 return True
-            for nxt in toks[i + 1:]:
+            for j in range(i + 1, len(toks)):
                 if len(acc) >= len(sig_compact):
                     break
-                acc += nxt
+                acc += toks[j]
                 if acc == sig_compact:
                     return True
     return False
@@ -1273,6 +1284,14 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     resume_ref = getattr(args, "resume", None)
     resumed: dict | None = None
     if resume_ref:
+        # A5 (banca v14): .henke/.henke/runs junction fazia o cand.resolve()
+        # casar com runs_dir resolvido pelo MESMO alvo — a run fora do repo
+        # era lida/mutada antes dos checks de confinamento do estágio 2.
+        _hd = repo_root / ".henke"
+        if _hd.is_symlink() or (_hd / "runs").is_symlink():
+            print("ERRO: '.henke'/'.henke/runs' é symlink/junction — resume "
+                  "recusado (custódia fora do repo).", file=sys.stderr)
+            return 2
         runs_dir = (repo_root / ".henke" / "runs").resolve()
         cand = Path(str(resume_ref))
         cand = cand if cand.is_absolute() else runs_dir / (
@@ -1363,6 +1382,11 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     except OSError:
         print("ERRO: '.henke' não resolvível — recusado.", file=sys.stderr)
         return 2
+    if henke_dir.exists() and not henke_dir.is_dir():
+        # A15 (banca v14): .henke como ARQUIVO explodia em NotADirectoryError.
+        print("ERRO: '.henke' existe mas não é diretório — recusado.",
+              file=sys.stderr)
+        return 2
     (henke_dir / "runs").mkdir(parents=True, exist_ok=True)
     try:
         runs_r = (henke_dir / "runs").resolve()
@@ -1373,6 +1397,21 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     except OSError:
         print("ERRO: '.henke/runs' não resolvível — recusado.", file=sys.stderr)
         return 2
+    # A5 (banca v14): .henke/evidence nunca era conferido — junction redi-
+    # recionava <gate>.out/tests.out/artifacts pra fora do repo e o
+    # EVIDENCE-OUTSIDE-SCOPE nunca disparava (dois lados resolvem igual).
+    ev_dir = henke_dir / "evidence"
+    if ev_dir.exists() or ev_dir.is_symlink():
+        try:
+            ev_r = ev_dir.resolve()
+            if ev_dir.is_symlink() or repo_root.resolve() not in ev_r.parents:
+                print("ERRO: '.henke/evidence' é symlink/junction ou resolve "
+                      "fora do repo — recusado.", file=sys.stderr)
+                return 2
+        except OSError:
+            print("ERRO: '.henke/evidence' não resolvível — recusado.",
+                  file=sys.stderr)
+            return 2
     # Custódia: a pipeline NUNCA materializa .henke/PROJECT.json|POLICY.json —
     # ambos constam na lista protegida do metaconfig, então cada primeiro
     # `henke auto` num repo novo se auto-flagava como mutação não autorizada.
@@ -1663,6 +1702,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                 # sidecar) vs. o atual revela arquivo escondido (evil.log,
                 # dist/payload.js não-declarado).
                 new_ignored: list[str] = []
+                _audit_fail = False
                 _ign_start = None
                 if isinstance(_sc, dict):
                     _ign_start = (_sc.get("fields") or {}).get("ignored_start")
@@ -1701,6 +1741,10 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                             and p not in declared
                         )
                         new_ignored += [f"{p} (deletado)" for p in gone_ignored]
+                    elif _si.returncode != 0:
+                        # A8 (banca v14): git rc!=0 = enumeração indisponível,
+                        # não "nada ignorado" — a auditoria NÃO rodou.
+                        _audit_fail = True
                 # Arquivo gitignored é INVISÍVEL ao diff (status -uall não lista
                 # ignorados): declarar `dist/x.js` ou `.env` permite esconder a
                 # edição de todos os portões baseados em diff — inconclusivo.
@@ -1721,6 +1765,8 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                             l.strip() for l in _ci.stdout.splitlines()
                             if l.strip() and l.strip() not in touched
                         ]
+                    elif _ci.returncode not in (0, 1):
+                        _audit_fail = True  # check-ignore falhou ≠ nada casou
             except Exception:
                 # Git indisponível → a auditoria NÃO rodou: atestação exit 2
                 # (erro honesto) reprova a run — nunca verde por omissão.
@@ -1740,7 +1786,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                     "FILES-CHANGED-IGNORED: declarados gitignored invisíveis "
                     "ao diff — nenhum portão consegue verificá-los: "
                     + ", ".join(ignored_declared[:10])))
-            if undeclared is None:
+            if undeclared is None or _audit_fail:
                 audit_findings.append((2,
                     "AUDIT-UNAVAILABLE: git falhou ao enumerar o diff real — "
                     "files_changed não auditado (inconclusivo ≠ verde)"))

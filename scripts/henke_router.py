@@ -68,6 +68,14 @@ _HOMOGLYPHS = str.maketrans({
     # dobram para a letra óbvia antes da comparação de termos.
     "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t",
     "@": "a", "$": "s", "!": "i",
+    # A2 (banca v14): idêntico ao henke_auto — ϵ/є, leet 2/6/8/9/|, small-caps.
+    "ϵ": "e", "є": "e", "ε": "e", "2": "z", "6": "b", "8": "b", "9": "g",
+    "|": "l", "Ꭰ": "a",
+    "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f",
+    "ɢ": "g", "ʜ": "h", "ɪ": "i", "ᴊ": "j", "ᴋ": "k", "ʟ": "l",
+    "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ǫ": "q", "ʀ": "r",
+    "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v", "ᴡ": "w", "ʏ": "y",
+    "ᴢ": "z",
 })
 
 
@@ -119,28 +127,28 @@ def _has_signal(text: str, sig: str) -> bool:
     # F-1 (banca v12): idêntico ao henke_auto — fragmentação intra-palavra
     # ("de-lete", "de\nlete", "dropTable") evade \b; sinal compactado casa
     # por igualdade exata contra tokens e pares adjacentes compactados.
-    sig_compact = re.sub(r"[^a-z0-9]", "", sig_clean)
-    # 'checkout .'/'checkout --' perdem o discriminador na compactação e
-    # casariam em "tela de checkout" — só compacta sinais que já são
-    # puramente alfanuméricos+espaços.
-    # ALTO-2/MÉDIO-5 (banca v13): idêntico ao henke_auto — >=3 fragmentos,
-    # tokens vazios de pontuação, sinais curtos ("w i p e"), separadores
-    # [_./\\] em identificadores/paths ("x_wipe.sh").
-    if len(sig_compact) >= 2 and re.fullmatch(r"[a-z0-9 ]+", sig_clean):
+    # A1 (banca v14): idêntico ao henke_auto — alfabeto por-sinal mantém a
+    # pontuação do sinal no compacto ("checkout--" só casa com '-' no texto).
+    _allowed = set("abcdefghijklmnopqrstuvwxyz0123456789") | {
+        ch for ch in sig_clean if not ch.isalnum() and ch != " "}
+    sig_compact = "".join(ch for ch in sig_clean if ch in _allowed)
+    # ALTO-2/MÉDIO-5 (banca v13) + A3 (v14): >=3 fragmentos, tokens vazios,
+    # [_./\\] em identificadores; range em vez de fatia (era O(n²)).
+    if len(sig_compact) >= 2:
         toks: list[str] = []
         for _t in re.split(r"\s+", text):
             for _seg in re.split(r"[_./\\]+", _t):
-                _seg = re.sub(r"[^a-z0-9]", "", _seg)
+                _seg = "".join(ch for ch in _seg if ch in _allowed)
                 if _seg:
                     toks.append(_seg)
-        for i, t in enumerate(toks):
-            acc = t
+        for i in range(len(toks)):
+            acc = toks[i]
             if acc == sig_compact:
                 return True
-            for nxt in toks[i + 1:]:
+            for j in range(i + 1, len(toks)):
                 if len(acc) >= len(sig_compact):
                     break
-                acc += nxt
+                acc += toks[j]
                 if acc == sig_compact:
                     return True
     return False

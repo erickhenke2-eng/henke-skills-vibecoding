@@ -116,7 +116,11 @@ def parse_declared_symbols(spec_path: Path) -> list[tuple[str, str]]:
 
 # A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
 # no ambiente redirecionariam o git dos vereditos para outro repo/index.
-_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+_GIT_ENV = {k: v for k, v in os.environ.items() if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                or k.startswith("LD_") or k.startswith("DYLD_")
+                or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                         "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                         "DOTNET_STARTUP_HOOKS"))}
 
 
 def get_git_root(cwd: Path) -> Path:

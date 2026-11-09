@@ -52,15 +52,25 @@ EVIDENCE_NAME = {
 
 def _run(argv: list[str], cwd: Path | None = None,
          timeout: float = 300.0) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        argv, cwd=str(cwd) if cwd else None,
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=timeout,
-        # F-8 (banca v12): GIT_* herdado redirecionava o git dos coletores.
-        env={k: v for k, v in os.environ.items()
-             if not k.startswith("GIT_")
-             } | {"NoDefaultCurrentDirectoryInExePath": "1"},
-    )
+    try:
+        return subprocess.run(
+            argv, cwd=str(cwd) if cwd else None,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout,
+            # F-8 (banca v12): GIT_* herdado redirecionava o git dos coletores.
+            env={k: v for k, v in os.environ.items()
+                 if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                        or k.startswith("LD_") or k.startswith("DYLD_")
+                        or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                                 "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                                 "DOTNET_STARTUP_HOOKS"))
+                 } | {"NoDefaultCurrentDirectoryInExePath": "1"},
+        )
+    except subprocess.TimeoutExpired:
+        # A15 (banca v14): timeout propagava traceback exit 1 — infra é 2.
+        return subprocess.CompletedProcess(
+            argv, returncode=2, stdout="",
+            stderr=f"gate_pipeline: timeout ({timeout}s) em {argv[:2]}")
 
 
 def main(argv: list[str] | None = None) -> int:
