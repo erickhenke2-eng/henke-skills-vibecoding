@@ -41,7 +41,9 @@ HAZARDOUS_PATTERNS = [
 
 # Resolução real de lifecycle npm (anti-TOCTOU): `npm test` não é string cega —
 # o pipeline executa pretest -> test -> posttest, e `npm run X` expande preX/X/postX.
-_NPM_CMD_RE = re.compile(r"^\s*(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)\s*$")
+# A5 (banca v12): args/flags após o script NÃO podem pular a expansão —
+# `npm test -- --runInBand`/`npm run test -s` rodam pretest/posttest de verdade.
+_NPM_CMD_RE = re.compile(r"^\s*(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)(?:\s|$)")
 _NPM_RUN_RE = re.compile(r"(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)")
 _TEST_CMD_RE = re.compile(
     r"\b(?:pytest|jest|vitest|mocha|unittest|cargo\s+test|go\s+test|npm\s+test|npm\s+t\b|bun\s+test|pnpm\s+test|yarn\s+test)\b",
@@ -199,13 +201,19 @@ def verify_log_chain(log_p: Path) -> tuple[list[str], str | None]:
             "— âncora local da ponta não é resolvível, integridade não provada"
         )
     if repo_root is not None and last_ehash:
+        # A6 (banca v12): 'from scripts import' resolve por PYTHONPATH —
+        # scripts/run_state.py falso era importado e spoofava o tip.
+        # Carrega SEMPRE por path explícito ao lado deste arquivo.
+        _rs_tip = None
         try:
-            from scripts import run_state as _rs_tip
-        except ImportError:
-            try:
-                import run_state as _rs_tip
-            except ImportError:
-                _rs_tip = None
+            import importlib.util as _ilu2
+            _rs_spec = _ilu2.spec_from_file_location(
+                "run_state", Path(__file__).resolve().parent / "run_state.py")
+            if _rs_spec and _rs_spec.loader:
+                _rs_tip = _ilu2.module_from_spec(_rs_spec)
+                _rs_spec.loader.exec_module(_rs_tip)
+        except Exception:
+            _rs_tip = None
         if _rs_tip is not None:
             expected_tip = _rs_tip.load_exec_tip(repo_root)
             if expected_tip is None:
@@ -267,6 +275,9 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
             if e_sha is not None and vrec["stdout_sha256"] != str(e_sha).strip():
                 continue
             matched = True
+            # A7 (banca v12): consumo 1:1 — um registro do log não pode
+            # validar N entradas duplicadas do ledger.
+            verified_records.remove(vrec)
             break
         if not matched:
             errors.append(
@@ -430,10 +441,18 @@ def main():
     has_sha_entries = isinstance(content, list) and any(
         isinstance(x, dict) and "stdout_sha256" in x for x in content
     )
+    # A2 (banca v12): a custódia era opt-in chaveada por dado controlado pelo
+    # atacante — ledger sem 'stdout_sha256' pulava verify_exec_log. Qualquer
+    # entrada de teste/testes_descobertos dispara a verificação cruzada.
+    has_test_entries = isinstance(content, list) and any(
+        isinstance(x, dict) and (
+            "testes_descobertos" in x or is_test_cmd(str(x.get("cmd", "")))
+        ) for x in content
+    )
     exec_log_p = None
     if args.exec_log:
         exec_log_p = args.exec_log.resolve()
-    elif args.require_exec_log or has_sha_entries:
+    elif args.require_exec_log or has_sha_entries or has_test_entries:
         cand_log = ledger_path.parent / "exec_log.jsonl"
         exec_log_p = cand_log if cand_log.is_file() else Path(".henke/exec_log.jsonl").resolve()
 

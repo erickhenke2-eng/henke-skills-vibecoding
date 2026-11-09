@@ -36,6 +36,7 @@ import hashlib
 import io
 import json
 import os
+import re
 os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 from pathlib import Path
 import subprocess
@@ -230,7 +231,9 @@ def verify_ledger(
                 errors.append(f"STALE-DELETED [{uid}]: arquivo '{rel}' não existe mais no disco")
         else:
             cur_sha, _ = _file_sha256_and_lines(disk_files[rel])
-            if cur_sha != u.get("sha256") and status in ("covered", "finding_confirmed", "needs_validation"):
+            # A10 (banca v12): sha era só checado p/ status auditados —
+            # pending/deferred/out_of_scope viravam faixa de edição livre.
+            if u.get("sha256") and cur_sha != u.get("sha256"):
                 errors.append(f"STALE-HASH [{uid}]: arquivo '{rel}' mudou após a auditoria (sha256 divergente)")
 
         if status == "pending":
@@ -243,6 +246,10 @@ def verify_ledger(
             if not isinstance(checks, list) or not checks:
                 errors.append(f"EMPTY-CHECKS [{uid}]: unidade 'covered' exige pelo menos 1 check em 'checks[]'")
             for chk in checks if isinstance(checks, list) else []:
+                if not isinstance(chk, dict):
+                    # A13 (banca v12): chk não-dict explodia com traceback.
+                    errors.append(f"INVALID-CHECK [{uid}]: check não-objeto")
+                    continue
                 if not chk.get("agent_id") or not chk.get("invariant") or not chk.get("result"):
                     errors.append(f"INCOMPLETE-CHECK [{uid}]: check exige 'agent_id', 'invariant' e 'result'")
                 if chk.get("method") not in ("source", "local"):
@@ -271,6 +278,9 @@ def verify_ledger(
 
     # 2. Validação dos findings (fp-check gates + checagem física de file:line)
     for idx, f in enumerate(data.get("findings", [])):
+        if not isinstance(f, dict):
+            errors.append(f"INVALID-FINDING: finding #{idx} não-objeto")
+            continue
         fid = f.get("id", f"finding-{idx}")
         fstatus = f.get("status")
         if fstatus == "finding_confirmed":
@@ -318,22 +328,24 @@ def verify_ledger(
     # 3b. Anti-diluição por diretório: teto de out_of_scope avaliado por pasta-pai
     # (impede concentrar código perigoso no core/ diluindo com DTOs auditáveis na ui/).
     # Diretórios com menos de `min_dir_units` unidades são isentos.
-    dir_totals: dict[str, int] = {}
-    dir_oos: dict[str, int] = {}
+    # A12 (banca v12): unidades duplicadas do mesmo path diluíam o teto
+    # out_of_scope — conta caminhos distintos, não unidades.
+    dir_totals: dict[str, set] = {}
+    dir_oos: dict[str, set] = {}
     for u in units:
         if u.get("status") not in VALID_UNIT_STATUS:
             continue
         parent = u.get("path", "").replace("\\", "/").rsplit("/", 1)[0] or "."
-        dir_totals[parent] = dir_totals.get(parent, 0) + 1
+        dir_totals.setdefault(parent, set()).add(u.get("path", ""))
         if u.get("status") == "out_of_scope":
-            dir_oos[parent] = dir_oos.get(parent, 0) + 1
+            dir_oos.setdefault(parent, set()).add(u.get("path", ""))
     for d in sorted(dir_totals):
-        if dir_totals[d] >= min_dir_units:
-            d_pct = 100.0 * dir_oos.get(d, 0) / dir_totals[d]
+        if len(dir_totals[d]) >= min_dir_units:
+            d_pct = 100.0 * len(dir_oos.get(d, set())) / len(dir_totals[d])
             if d_pct > max_oos_per_dir_pct:
                 errors.append(
                     f"DILUTED-OUT-OF-SCOPE: diretório '{d}/' tem {d_pct:.1f}% de unidades fora de escopo "
-                    f"({dir_oos.get(d, 0)}/{dir_totals[d]}) excedendo o teto por-diretório de {max_oos_per_dir_pct:.1f}%")
+                    f"({len(dir_oos.get(d, set()))}/{len(dir_totals[d])}) excedendo o teto por-diretório de {max_oos_per_dir_pct:.1f}%")
 
     # 3c. Arquivo criado na própria PR não pode ser out_of_scope (diluição por nascença).
     if against:
@@ -358,20 +370,32 @@ def verify_ledger(
             cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=_GIT_ENV,
         )
-        if res_added.returncode == 0:
+        # A14 (banca v12): diff falho caía silencioso — NEW-FILE-OUT-OF-SCOPE
+        # nunca avaliado. Falha de enumeração é erro validado (fail-closed).
+        if res_added.returncode != 0:
+            errors.append(
+                f"DIFF-FAILED: 'git diff --name-status {against}' retornou "
+                f"rc={res_added.returncode} — checagem de arquivos novos "
+                "indisponível")
+        else:
             # F28 (banca v11): -z — nomes com tab/newline não quebram o parse.
+            # A11 (banca v12): arquivo literalmente chamado 'A'/'R'/'C' era
+            # confundido com status e dessincronizava o stream — status tem
+            # forma ^[A-Z]\d{0,3}$, paths são consumidos por contagem fixa.
             toks = res_added.stdout.split("\0")
             added_files: set[str] = set()
             i_tok = 0
             while i_tok < len(toks) - 1:
                 st = toks[i_tok]
-                if st in ("A", "R", "C"):
-                    # R/C ocupam 2 campos de path (origem + destino)
-                    i_tok += 2 if st == "A" else 3
-                    if st == "A":
-                        added_files.add(toks[i_tok - 1].strip().replace("\\", "/"))
+                if not re.fullmatch(r"[A-Z]\d{0,3}", st or ""):
+                    break  # dessincronizado — não inventa
+                code = st[:1]
+                if code in ("R", "C"):
+                    i_tok += 3
                 else:
-                    i_tok += 1
+                    if code == "A":
+                        added_files.add(toks[i_tok + 1].strip().replace("\\", "/"))
+                    i_tok += 2
             for u in units:
                 rel_u = u.get("path", "").replace("\\", "/")
                 if u.get("status") == "out_of_scope" and rel_u in added_files:

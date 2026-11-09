@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -117,7 +118,11 @@ def _git_has_head(repo_root: Path) -> bool:
             ["git", "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "rev-parse", "--verify", "HEAD"], cwd=str(repo_root),
             capture_output=True, timeout=10,
-            env={**os.environ, "NoDefaultCurrentDirectoryInExePath": "1"},
+            # F-8 (banca v12): GIT_* herdado redirecionava a consulta para
+            # repo estranho — strip consistente com spec_drift/henke_auto.
+            env={k: v for k, v in os.environ.items()
+                 if not k.startswith("GIT_")
+                 } | {"NoDefaultCurrentDirectoryInExePath": "1"},
         ).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -299,9 +304,9 @@ def _record_gate_verdict(
             sys.executable, str(SCRIPTS_DIR / "run_state.py"), "record-gate",
             str(run_path), "--gate", gate_id, "--exit-code", str(int(exit_code)),
             "--summary", summary,
-        ]
-        + (["--command", command] if command else [])
-        + (["--evidence-file", str(evidence_file)] if evidence_file else []),
+            # F-9 (banca v12): o CLI recusa --command/--evidence-file (M2 v9)
+            # — passá-los tornava o fallback permanentemente quebrado.
+        ],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if res.returncode != 0:
@@ -346,7 +351,10 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     if run_path is not None:
         evidence_dir = run_path.parent.parent / "evidence" / run_path.stem
 
-    child_env = os.environ.copy()
+    # F-8 (banca v12): portões-filho herdam env — GIT_* do chamador
+    # redirecionava o git interno (repo_signals/ratchet/fence) para outro repo.
+    child_env = {k: v for k, v in os.environ.items()
+                 if not k.startswith("GIT_")}
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
     # Windows: sem isso, CreateProcess procura o binário no CWD do processo
@@ -569,8 +577,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.gates is None and args.from_route is None:
         print("ERRO: informe --gates <lista> ou --from-route <route.json>.", file=sys.stderr)
         return 2
-    if args.timeout <= 0:
-        print("ERRO: --timeout deve ser > 0.", file=sys.stderr)
+    # F-6 (banca v12): nan/inf passavam por '<= 0' e quebravam communicate().
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        print("ERRO: --timeout deve ser um número finito > 0.", file=sys.stderr)
         return 2
 
     try:

@@ -362,9 +362,14 @@ def load_anchor_sidecar(run_id: str, repo_root: Path | str | None = None) -> dic
         return None
     if not isinstance(data, dict) or data.get("run_id") != safe:
         return None
-    if repo_root is not None and data.get("repo"):
+    # A10 (banca v12): sidecar sem 'repo' era âncora-curinga — aceita por
+    # qualquer repo_root. Quando o verificador informa repo, o campo é exigido.
+    if repo_root is not None:
+        _sc_repo = data.get("repo")
+        if not _sc_repo:
+            return None
         try:
-            if str(Path(repo_root).resolve()) != str(data["repo"]):
+            if str(Path(repo_root).resolve()) != str(_sc_repo):
                 return None
         except OSError:
             return None
@@ -632,8 +637,12 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
                 "local de âncoras está ausente — campos não-verificáveis"
             ]
     if isinstance(_sc_fields, dict) and _sc_fields:
+        # A1 (banca v12): igualdade solta — `1 == True` desarmava o
+        # tamper-check mas `1 is True` desarmava a derivação de auth.
+        # Campos ancorados exigem identidade de TIPO+VALOR.
         _tampered_fields = [
-            k for k, v in _sc_fields.items() if data.get(k) != v
+            k for k, v in _sc_fields.items()
+            if type(data.get(k)) is not type(v) or data.get(k) != v
         ]
         if _tampered_fields:
             return False, [
@@ -1086,7 +1095,8 @@ def amend_scope(run_path: Path, file_rel: str, reason: str) -> dict:
     return data
 
 
-def approve_run(run_path: Path, approver: str = "human") -> dict:
+def approve_run(run_path: Path, approver: str = "human",
+                expected: dict | None = None) -> dict:
     """Registra aprovação humana explícita para destravar runs com requires_human_auth.
 
     Grava `approved_head` (git rev-parse HEAD do repo da run, ou None) como
@@ -1095,6 +1105,14 @@ def approve_run(run_path: Path, approver: str = "human") -> dict:
     """
     with _file_lock(run_path):
         data = _load_run(run_path)
+        # A3 (banca v12): TOCTOU da cerimônia — o resumo exibido vinha de uma
+        # leitura e a aprovação de outra. O driver trocava run+sidecar na
+        # janela humana. Quando o chamador exibe um resumo, os bytes aprovados
+        # DEVEM ser os mesmos bytes exibidos.
+        if expected is not None and data != expected:
+            raise ValueError(
+                "APPROVE-TOCTOU: a run mudou entre o resumo exibido e a "
+                "gravação da aprovação — aprovação recusada")
         # A1 (banca v10): approve sem checagem = token sobre binding adulterado.
         # O fingerprint é determinístico (recomputável por quem edita o JSON) —
         # a prova real é a âncora LOCAL: campos de decisão divergentes do
@@ -1117,7 +1135,9 @@ def approve_run(run_path: Path, approver: str = "human") -> dict:
                 "APPROVE-SIDECAR-MISSING: run declara campos de decisão sem "
                 "sidecar local — aprovação recusada (init_run não rodou aqui?)")
         _drift = [f for f in _ANCHORED_FIELDS
-                  if f in _sc_fields and _sc_fields[f] != data.get(f)]
+                  if f in _sc_fields and (
+                      type(_sc_fields[f]) is not type(data.get(f))
+                      or _sc_fields[f] != data.get(f))]
         if _drift:
             raise ValueError(
                 "ANCHOR-DRIFT: campos da run divergem do sidecar local "
@@ -1275,6 +1295,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  head_start      : {_prev.get('head_start')}")
             print(f"  spec_sha256     : {str(_prev.get('spec_sha256'))[:16]}…")
             print(f"  spec_path       : {_prev.get('spec_path')}")
+            # A3 (banca v12): o HEAD que será vinculado também entra no
+            # resumo — approve_run ancora ao HEAD VIVO, que o driver pode
+            # ter acabado de commitar sem o humano ver.
+            try:
+                _rr = _repo_root_for_run(args.run_file)
+                _live_head = _git_head(_rr) if _rr else "(sem repo)"
+            except Exception:
+                _live_head = "(indisponível)"
+            print(f"  approved_head   : {_live_head}  (HEAD vivo no momento do approve)")
             if not args.yes:
                 if not sys.stdin.isatty():
                     print(
@@ -1287,7 +1316,7 @@ def main(argv: list[str] | None = None) -> int:
                 if resp not in ("yes", "y"):
                     print("Aprovação abortada pelo operador.")
                     return 2
-            data = approve_run(args.run_file, args.approver)
+            data = approve_run(args.run_file, args.approver, expected=_prev)
             print(f"OK: Run aprovada por '{args.approver}' -> outcome='{data['outcome']}'")
             return 0
 

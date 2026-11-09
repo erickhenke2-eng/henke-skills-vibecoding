@@ -438,6 +438,7 @@ def _cmd_exec(
     try:
         with _rs._file_lock(exec_log_path):
             prev_hash = "0" * 64
+            _last = None
             if exec_log_path.is_file():
                 # A1 (banca v9): ANTES de encadear, a cadeia existente tem que
                 # verificar — append sobre um log plantado lavaria a âncora da
@@ -478,6 +479,16 @@ def _cmd_exec(
                     if lines:
                         last_obj = json.loads(lines[-1])
                         prev_hash = str(last_obj.get("entry_hash", prev_hash))
+                    # A4 (banca v12): TOCTOU verify→append — driver truncava o
+                    # log para prefixo válido entre _vlc() e a releitura, e o
+                    # append 'lavava' entradas reais do rabo. A ponta relida
+                    # DEVE ser a mesma que o verificador aprovou.
+                    if (_is_canonical and _vlc is not None
+                            and _last is not None and prev_hash != _last):
+                        print("ERRO: exec_log mudou entre a verificação da "
+                              "cadeia e o append (ponta divergente) — "
+                              "append recusado.", file=sys.stderr)
+                        return 2
                 except Exception as exc:
                     print(f"ERRO: Log de execução corrompido em '{exec_log_path}': {exc}", file=sys.stderr)
                     return 2

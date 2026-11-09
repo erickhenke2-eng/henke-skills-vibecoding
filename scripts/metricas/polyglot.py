@@ -45,10 +45,24 @@ KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "new", "delete",
             "assert", "expect", "describe", "it", "test", "specify"}
 
 
+# A9 (banca v12): TODA pasta oculta era podada — `.platform/evil.py` e
+# `.github/scripts` eram invisíveis a metrics/edges/ledger. Só os dot-dirs
+# pesados/de-VCS continuam fora.
+_DOT_PRUNE = {
+    ".git", ".hg", ".svn", ".venv", ".tox", ".nox", ".mypy_cache",
+    ".pytest_cache", ".ruff_cache", ".next", ".nuxt", ".svelte-kit",
+    ".turbo", ".idea", ".vscode", ".parcel-cache", ".yarn", ".npm",
+    ".pnpm-store", ".cache",
+}
+
+
 def iter_source_files(root: Path, exts=None):
     """os.walk com poda in-place de diretórios mortos (O(N) em arquivos vivos)."""
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS and not d.startswith(".")]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in PRUNE_DIRS and d not in _DOT_PRUNE
+        ]
         for fn in filenames:
             if exts is None or Path(fn).suffix.lower() in exts:
                 yield Path(dirpath) / fn

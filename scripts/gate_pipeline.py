@@ -56,6 +56,10 @@ def _run(argv: list[str], cwd: Path | None = None,
         argv, cwd=str(cwd) if cwd else None,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=timeout,
+        # F-8 (banca v12): GIT_* herdado redirecionava o git dos coletores.
+        env={k: v for k, v in os.environ.items()
+             if not k.startswith("GIT_")
+             } | {"NoDefaultCurrentDirectoryInExePath": "1"},
     )
 
 

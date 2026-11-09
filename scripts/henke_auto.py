@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 import hashlib
 import importlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -111,6 +112,10 @@ PUBLISH_VERBS = (
     # Publish/release EN (banca v11 — A3): 'ship it', 'go live', 'push to prod'.
     "ship", "shipped", "shipping", "go live", "goes live", "going live",
     "push to prod", "push to production", "release", "released", "releases",
+    # Multilíngue publish (banca v12 — F-2): 'sube a producción' e cia.
+    "sube", "despliega", "produccion", "supprime", "publie", "deployer",
+    "deploie", "mets en ligne", "veroffentlicht", "bereitstellen",
+    "pubblica", "push", "prod",
 )
 DESTRUCTIVE_VERBS = (
     "deleta", "deletar", "delete", "exclui", "excluir", "apaga", "apagar",
@@ -149,6 +154,17 @@ DESTRUCTIVE_VERBS = (
     "reset --hard", "checkout .", "docker system prune", "docker volume prune",
     "kubectl delete", "terraform destroy", "helm uninstall", "systemctl stop",
     "systemctl disable", "roll back", "rolled back", "obliterate",
+    # Multilíngue ES/FR/DE/IT + flexões PT restantes + EN nativos (banca v12 — F-2)
+    "apaguei", "removi", "destrui", "zerei", "limpei", "eliminei", "formatei",
+    "desfaz", "desfazer", "descarta", "sobrescreve", "desliga",
+    "borra", "borrar", "suprime", "suprimir", "quita", "quitar",
+    "supprime", "efface", "losche", "entferne", "cancella", "distruggi",
+    "trash", "scrub", "flush", "unlink", "discard", "dispose", "deltree",
+    "droptable", "forcepush", "shutdown", "format h:", "format i:",
+    "format j:", "format k:", "format l:", "format m:", "format n:",
+    "format o:", "format p:", "format q:", "format r:", "format s:",
+    "format t:", "format u:", "format v:", "format w:", "format x:",
+    "format y:", "format z:", "format d:",
 )
 METACONFIG_SIGNALS = (
     "package.json", "package-lock", "lockfile", "requirements", "pyproject",
@@ -214,10 +230,27 @@ def _has_signal(text: str, sig: str) -> bool:
     if not sig_clean:
         return False
     if re.fullmatch(r"[\w-]+", sig_clean):
-        return bool(re.search(r"\b" + re.escape(sig_clean) + r"\b", text))
-    prefix = r"\b" if sig_clean[0].isalnum() else ""
-    suffix = r"\b" if sig_clean[-1].isalnum() else ""
-    return bool(re.search(prefix + re.escape(sig_clean) + suffix, text))
+        if re.search(r"\b" + re.escape(sig_clean) + r"\b", text):
+            return True
+    else:
+        prefix = r"\b" if sig_clean[0].isalnum() else ""
+        suffix = r"\b" if sig_clean[-1].isalnum() else ""
+        if re.search(prefix + re.escape(sig_clean) + suffix, text):
+            return True
+    # F-1 (banca v12): fragmentação intra-palavra — "de-lete", "ex/clui",
+    # "de\nlete", "dropTable" viram tokens que \b não casa. Compara o sinal
+    # compactado contra cada token compactado e pares adjacentes, por
+    # igualdade exata (sem substring: "cleanup" não acende "clean").
+    sig_compact = re.sub(r"[^a-z0-9]", "", sig_clean)
+    # 'checkout .'/'checkout --' perdem o discriminador na compactação e
+    # casariam em "tela de checkout" — só compacta sinais que já são
+    # puramente alfanuméricos+espaços.
+    if len(sig_compact) >= 5 and re.fullmatch(r"[a-z0-9 ]+", sig_clean):
+        toks = [re.sub(r"[^a-z0-9]", "", t) for t in text.split()]
+        joined = set(toks) | {a + b for a, b in zip(toks, toks[1:])}
+        if sig_compact in joined:
+            return True
+    return False
 
 
 def _atomic_write_json(path: Path, data: object) -> None:
@@ -1125,8 +1158,10 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     yes = bool(getattr(args, "yes", False))
     policy_flag = getattr(args, "policy", None)
     timeout_opt = getattr(args, "timeout", None)
-    if timeout_opt is not None and float(timeout_opt) <= 0:
-        print("ERRO: --timeout deve ser > 0.", file=sys.stderr)
+    # F-6 (banca v12): nan/inf passam por '<= 0' e quebram communicate().
+    if timeout_opt is not None and (
+            not math.isfinite(float(timeout_opt)) or float(timeout_opt) <= 0):
+        print("ERRO: --timeout deve ser um número finito > 0.", file=sys.stderr)
         return 2
 
     # ---- estágio: route + detect (comum ao dry-run e ao fluxo real) ----
@@ -1390,7 +1425,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     gates_required = list(route.get("gates_required") or [])
     try:
         driver_timeout = float(timeout_opt) if timeout_opt else 600.0
-        if driver_timeout <= 0:
+        if not math.isfinite(driver_timeout) or driver_timeout <= 0:
             raise ValueError
     except (TypeError, ValueError):
         driver_timeout = 600.0
@@ -1558,16 +1593,23 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                             e[3:].strip() for e in _si.stdout.split("\0")
                             if e.startswith("!! ") and e[3:].strip()
                         }
+                        # F-4 (banca v12): '.henke/' gitignored isentava TUDO —
+                        # driver regravava fence/coverage/policy invisível.
+                        # Os never-declared vazam do filtro e viram undeclared.
                         new_ignored = sorted(
                             p for p in cur_ig - set(_ign_start or [])
-                            if not p.startswith(".henke/") and p not in declared
+                            if (not p.startswith(".henke/")
+                                or p.lower() in _never_declared)
+                            and p not in declared
                         )
                         # A3 (banca v10): DELETAR ignorado pré-existente
                         # (.env, dist/payload) também some do conjunto —
                         # simetricamente invisível ao diff.
                         gone_ignored = sorted(
                             p for p in set(_ign_start or []) - cur_ig
-                            if not p.startswith(".henke/") and p not in declared
+                            if (not p.startswith(".henke/")
+                                or p.lower() in _never_declared)
+                            and p not in declared
                         )
                         new_ignored += [f"{p} (deletado)" for p in gone_ignored]
                 # Arquivo gitignored é INVISÍVEL ao diff (status -uall não lista
@@ -1659,6 +1701,8 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         and " ".join(str(test_cmd).split()) not in _allowed_set)
     _gate_test_cmd = None if _test_cmd_rejected else test_cmd
     gates_timeout = float(timeout_opt) if timeout_opt else 300.0
+    if not math.isfinite(gates_timeout):
+        gates_timeout = 300.0  # F-6 (banca v12): nan/inf → default seguro
     gres: dict | None = None
     rework_attempts = 0
     real_driver = (
@@ -1754,12 +1798,19 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                         e[3:].strip() for e in _si2.stdout.split("\0")
                         if e.startswith("!! ") and e[3:].strip()
                     }
+                    _nd2 = {
+                        ".henke/policy.json", ".henke/project.json",
+                        ".henke/ratchet-baseline.tsv", ".henke/fence.json",
+                        ".henke/coverage-ledger.json",
+                    }
                     _newig2 = sorted(
                         p for p in _cur2 - set(_ign2)
-                        if not p.startswith(".henke/") and p not in _decl2)
+                        if (not p.startswith(".henke/") or p.lower() in _nd2)
+                        and p not in _decl2)
                     _newig2 += [
                         f"{p} (deletado)" for p in set(_ign2) - _cur2
-                        if not p.startswith(".henke/") and p not in _decl2]
+                        if (not p.startswith(".henke/") or p.lower() in _nd2)
+                        and p not in _decl2]
             _never2 = {
                 ".henke/policy.json", ".henke/project.json",
                 ".henke/ratchet-baseline.tsv", ".henke/fence.json",
@@ -1793,6 +1844,9 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             )
         else:
             test_timeout = float(timeout_opt or (project or {}).get("timeout_sec") or 180.0)
+            if not math.isfinite(test_timeout) or test_timeout <= 0:
+                # F-6 (banca v12): timeout hostil do PROJECT.json → default.
+                test_timeout = 180.0
             t_exit, t_out = _invoke_test_cmd(repo_root, str(test_cmd), test_timeout)
         discovered = passed = 0
         try:

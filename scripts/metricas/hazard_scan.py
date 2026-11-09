@@ -119,7 +119,11 @@ _DOCUMENTED_EXAMPLE_KEYS = {
     "AKIAY34FZKBOKMUTVV7A",
 }
 
-_URL_CRED_RE = re.compile(r"https?://([A-Za-z0-9._%-]+):([^/\s'\"@]{3,})@([A-Za-z0-9.-]+)")
+# A7 (banca v12): DSNs fora de http — postgres/mysql/mongo/redis/amqp/ssh.
+_URL_CRED_RE = re.compile(
+    r"(?:https?|postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|"
+    r"amqps?|ldaps?|ssh|git\+https?|ftps?)://"
+    r"([A-Za-z0-9._%-]+):([^/\s'\"@]{3,})@([A-Za-z0-9.-]+)")
 _SQL_INTERP_PY_RE = re.compile(
     r"""(?ix)\b(?:f['"]{1,3}|['"]{1,3}[^'"]*%s)[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*(?:\{[^}]+\}|['"]\s*%\s*\w)"""
 )
@@ -508,6 +512,7 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
     except (SyntaxError, ValueError, MemoryError, RecursionError):
         return []
     aliases: dict[str, str] = {}
+    star_mods: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
@@ -517,12 +522,23 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
             mod = node.module or ""
             for a in node.names:
                 if a.name == "*":
+                    # A2 (banca v12): `from os import *` — o nome vira bare
+                    # (`system(cmd)`); resolve tenta `os.<nome>` contra os
+                    # conjuntos de sink antes de aceitar o bare.
+                    star_mods.append(mod)
                     continue
                 aliases[a.asname or a.name] = f"{mod}.{a.name}"
 
     def resolve(func) -> str:
         if isinstance(func, ast.Name):
-            return aliases.get(func.id, func.id)
+            if func.id in aliases:
+                return aliases[func.id]
+            for _sm in star_mods:
+                for _ss in (_AST_SHELL_FUNCS, _AST_DESER_FUNCS,
+                            _AST_SUBPROC_SHELL_KW, _AST_EXEC_BUILTINS):
+                    if f"{_sm}.{func.id}" in _ss:
+                        return f"{_sm}.{func.id}"
+            return func.id
         if isinstance(func, ast.Attribute):
             base = resolve(func.value)
             return f"{base}.{func.attr}" if base else func.attr
@@ -561,6 +577,12 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
                 for t in node.targets:
                     if isinstance(t, ast.Name):
                         loader_map[t.id] = bound
+                        # A3 (banca v12): `f = eval` / `s = os.system` — alias
+                        # por atribuição (só import-alias era rastreado).
+                        for _ss in (_AST_SHELL_FUNCS, _AST_DESER_FUNCS,
+                                    _AST_SUBPROC_SHELL_KW, _AST_EXEC_BUILTINS):
+                            if bound in _ss or bound.rsplit(".", 1)[-1] in _ss:
+                                aliases.setdefault(t.id, bound)
         elif isinstance(node, ast.ClassDef) and node.bases:
             loader_map[node.name] = resolve(node.bases[0])
 
@@ -1070,7 +1092,11 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
     try:
         top_res = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
+            cwd=str(cwd), capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=5,
+            # A19 (banca v12): GIT_* herdado resolvia toplevel de repo estranho.
+            env={k: v for k, v in os.environ.items()
+                 if not k.startswith("GIT_")},
         )
         if top_res.returncode != 0:
             # rc!=0 silencioso = .env commitado invisível (banca v10 A7).
@@ -1081,7 +1107,10 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
             ["git", "-c", "core.quotePath=false",
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "ls-files"],
-            cwd=str(git_root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
+            cwd=str(git_root), capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=5,
+            env={k: v for k, v in os.environ.items()
+                 if not k.startswith("GIT_")},
         )
         if res.returncode != 0:
             return [("ENV-CHECK-UNAVAILABLE", str(target), "git",

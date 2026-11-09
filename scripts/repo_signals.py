@@ -142,7 +142,10 @@ def cmd_churn(args):
     if args.order == "oldest-first":
         cmd.append("--reverse")
     res = subprocess.run(cmd, capture_output=True, text=True,
-                         encoding="utf-8", errors="replace", timeout=60)
+                         encoding="utf-8", errors="replace", timeout=60,
+                         # A19 (banca v12): GIT_* herdado lia outro repo.
+                         env={k: v for k, v in os.environ.items()
+                              if not k.startswith("GIT_")})
     if res.returncode != 0:
         _fail(f"git log falhou: {res.stderr.strip()[:200]}")
     sha, count = None, 0

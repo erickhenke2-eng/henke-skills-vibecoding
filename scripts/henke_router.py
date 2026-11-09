@@ -98,10 +98,26 @@ def _has_signal(text: str, sig: str) -> bool:
     if not sig_clean:
         return False
     if re.fullmatch(r"[\w-]+", sig_clean):
-        return bool(re.search(r"\b" + re.escape(sig_clean) + r"\b", text))
-    prefix = r"\b" if sig_clean[0].isalnum() else ""
-    suffix = r"\b" if sig_clean[-1].isalnum() else ""
-    return bool(re.search(prefix + re.escape(sig_clean) + suffix, text))
+        if re.search(r"\b" + re.escape(sig_clean) + r"\b", text):
+            return True
+    else:
+        prefix = r"\b" if sig_clean[0].isalnum() else ""
+        suffix = r"\b" if sig_clean[-1].isalnum() else ""
+        if re.search(prefix + re.escape(sig_clean) + suffix, text):
+            return True
+    # F-1 (banca v12): idêntico ao henke_auto — fragmentação intra-palavra
+    # ("de-lete", "de\nlete", "dropTable") evade \b; sinal compactado casa
+    # por igualdade exata contra tokens e pares adjacentes compactados.
+    sig_compact = re.sub(r"[^a-z0-9]", "", sig_clean)
+    # 'checkout .'/'checkout --' perdem o discriminador na compactação e
+    # casariam em "tela de checkout" — só compacta sinais que já são
+    # puramente alfanuméricos+espaços.
+    if len(sig_compact) >= 5 and re.fullmatch(r"[a-z0-9 ]+", sig_clean):
+        toks = [re.sub(r"[^a-z0-9]", "", t) for t in text.split()]
+        joined = set(toks) | {a + b for a, b in zip(toks, toks[1:])}
+        if sig_compact in joined:
+            return True
+    return False
 
 
 # Flexão morfológica PT para matching de gatilhos (sem libs externas).
@@ -230,6 +246,17 @@ DESTRUCTIVE_SIGNALS = (
     "checkout .", "docker system prune", "docker volume prune",
     "kubectl delete", "terraform destroy", "helm uninstall", "systemctl stop",
     "systemctl disable", "roll back", "rolled back", "obliterate",
+    # Multilíngue ES/FR/DE/IT + flexões PT restantes + EN nativos (banca v12 — F-2)
+    "apaguei", "removi", "destrui", "zerei", "limpei", "eliminei", "formatei",
+    "desfaz", "desfazer", "descarta", "sobrescreve", "desliga",
+    "borra", "borrar", "suprime", "suprimir", "quita", "quitar",
+    "supprime", "efface", "losche", "entferne", "cancella", "distruggi",
+    "trash", "scrub", "flush", "unlink", "discard", "dispose", "deltree",
+    "droptable", "forcepush", "shutdown", "format h:", "format i:",
+    "format j:", "format k:", "format l:", "format m:", "format n:",
+    "format o:", "format p:", "format q:", "format r:", "format s:",
+    "format t:", "format u:", "format v:", "format w:", "format x:",
+    "format y:", "format z:",
 )
 _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 
@@ -244,6 +271,9 @@ PUBLISH_ONLY_SIGNALS = (
     # Publish/release EN (banca v11 — A3): 'ship it', 'go live'.
     "ship", "shipped", "shipping", "go live", "goes live", "going live",
     "push to prod", "push to production",
+    # Multilíngue publish (banca v12 — F-2): 'sube a producción' e cia.
+    "despliega", "produccion", "supprime", "publie", "deployer", "deploie",
+    "mets en ligne", "veroffentlicht", "bereitstellen", "pubblica",
 )
 PUBLISH_SIGNALS = PUBLISH_ONLY_SIGNALS + DESTRUCTIVE_SIGNALS
 _PUBLISH_SIGNALS = PUBLISH_SIGNALS
