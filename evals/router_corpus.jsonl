@@ -1,0 +1,147 @@
+{"prompt": "corrige o bug do login", "expect_top1": ["henke-code-cirurgico", "henke-debug-raiz"], "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "por que o deploy tá falhando?", "expect_top1": ["henke-debug-raiz", "henke-debug-backend", "henke-ops-deploy"], "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "faz deploy pra produção agora", "expect_top1": "henke-ops-deploy", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "audita a segurança do projeto inteiro", "expect_top1": "henke-audit-seguranca", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "planeja o mvp de um app de receitas", "expect_top1": "henke-plan-mvp", "expect_mode": "PLANEJAR", "expect_auth": false}
+{"prompt": "cria uma landing page com formulário de contato responsiva", "expect_top1": ["henke-code-formulario", "henke-ui-responsivo"], "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "sobe pra produção", "expect_top1": "henke-ops-deploy", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "publica o projeto em produção", "expect_top1": "henke-ops-deploy", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "bota o deploy pra rodar hoje", "expect_top1": "henke-ops-deploy", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "coloca o app no ar", "expect_top1": "henke-ops-deploy", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "arruma o deploy que falhou", "expect_top1": ["henke-ops-deploy", "henke-code-cirurgico"], "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "o deploy deu errado, volta atrás", "expect_top1": "henke-ops-deploy", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "deploy to production now", "expect_top1": "henke-ops-deploy", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "mete um login nesse app", "expect_top1": ["henke-code-cirurgico", "henke-code-autentica"], "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "arruma o css quebrado da tela", "expect_top1": "henke-code-cirurgico", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "corrige o endpoint que tá quebrando", "expect_top1": ["henke-code-cirurgico", "henke-debug-backend"], "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "fix the login bug", "expect_top1": ["henke-code-cirurgico", "henke-debug-raiz"], "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "add a login form", "expect_top1": ["henke-code-cirurgico", "henke-code-autentica", "henke-code-formulario"], "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "o login tá quebrado", "expect_top1": "henke-debug-raiz", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "tá dando erro no build", "expect_top1": "henke-code-cirurgico", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "por que o build tá falhando?", "expect_top1": "henke-debug-raiz", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o teste tá falhando no ci", "expect_top1": "henke-debug-raiz", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "the api is failing", "expect_top1": ["henke-debug-raiz", "henke-debug-backend"], "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "why is the build failing?", "expect_top1": ["henke-debug-raiz", "henke-debug-backend"], "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o app trava às vezes", "expect_top1": "henke-debug-raiz", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "acha a causa desse bug", "expect_top1": "henke-debug-raiz", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "a api tá retornando erro 500", "expect_top1": "henke-debug-backend", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o banco não tá salvando", "expect_top1": "henke-debug-backend", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "a chamada da api tá falhando", "expect_top1": "henke-debug-rede", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o front não recebe os dados", "expect_top1": "henke-debug-rede", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "olha o console, tá cheio de erro", "expect_top1": "henke-debug-console", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "cliquei e não acontece nada", "expect_top1": "henke-debug-frontend", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "a tela tá branca", "expect_top1": "henke-debug-frontend", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "funcionava antes, agora quebrou", "expect_top1": "henke-debug-reversao", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "reverte isso", "expect_top1": "henke-debug-reversao", "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "o menu não funciona no celular", "expect_top1": "henke-ui-responsivo", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "testa em tela pequena", "expect_top1": "henke-ui-responsivo", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "a tela fica branca quando carrega", "expect_top1": "henke-ui-estados", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o app não mostra se a ação funcionou", "expect_top1": "henke-ui-estados", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "os botões não dão resposta quando clico", "expect_top1": "henke-ui-feedback", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o texto tá difícil de ler", "expect_top1": "henke-ui-tipografia", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "audita o design do app", "expect_top1": "henke-ui-auditoria", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "essa tela tá com cara de ia, limpa isso", "expect_top1": "henke-ui-antislop", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "monta uma paleta de cores pro app", "expect_top1": "henke-ui-paleta", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o formulário não valida direito", "expect_top1": "henke-code-formulario", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o submit não funciona", "expect_top1": "henke-code-formulario", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "adiciona máscara no campo", "expect_top1": "henke-code-formulario", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "implementa autenticação no app", "expect_top1": "henke-code-autentica", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "o logout não funciona", "expect_top1": "henke-code-autentica", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "verifica se a sessão tá segura", "expect_top1": "henke-code-autentica", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "muda a cor sem mexer no resto", "expect_top1": "henke-code-cirurgico", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "só ajusta a mensagem de erro", "expect_top1": "henke-code-cirurgico", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "alinha os tipos entre os dois lados", "expect_top1": "henke-code-ponte", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "dados sumiram na tela", "expect_top1": "henke-code-ponte", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "campos vieram errados do servidor", "expect_top1": "henke-code-ponte", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "faz a ponte dos tipos", "expect_top1": "henke-code-ponte", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "cria uma cena 3d interativa", "expect_top1": "henke-code-3d-scene", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "faz um objeto 3d que gira", "expect_top1": "henke-code-3d-scene", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "documenta esse código", "expect_top1": "henke-code-comentarios", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "adiciona comentários explicando o código", "expect_top1": "henke-code-comentarios", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "cria dados falsos pra eu ver a tela", "expect_top1": "henke-code-mock", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "mocka a api", "expect_top1": "henke-code-mock", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "integra com o stripe", "expect_top1": "henke-code-integracao", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "adiciona envio de email", "expect_top1": "henke-code-integracao", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "faz upload pro s3", "expect_top1": "henke-code-integracao", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "refatora esse monstro", "expect_top1": "henke-arch-desmembrar", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "divide isso em módulos", "expect_top1": "henke-arch-desmembrar", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "esse arquivo tá gigante, desmembra ele", "expect_top1": "henke-arch-desmembrar", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "renomeia essas variáveis pra nomes melhores", "expect_top1": "henke-refactor-nomes", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "os nomes tão confusos, melhora", "expect_top1": "henke-refactor-nomes", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "tem código duplicado aqui", "expect_top1": "henke-refactor-duplicado", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "tá repetido, extrai isso", "expect_top1": "henke-refactor-duplicado", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "junta o frontend e o backend num lugar só", "expect_top1": "henke-arch-monorepo", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "compartilha os tipos entre front e back", "expect_top1": "henke-arch-monorepo", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "modela o banco de dados desse app", "expect_top1": "henke-arch-banco", "expect_mode": "PLANEJAR", "expect_auth": false}
+{"prompt": "preciso de uma tabela de usuários", "expect_top1": "henke-arch-banco", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "os dados tão salvos em localstorage, quero banco de verdade", "expect_top1": "henke-arch-banco", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "deleta a tabela de usuários do banco", "expect_top1": "henke-arch-banco", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "como deletar uma tabela sem perder dados?", "expect_top1": "henke-arch-banco", "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "drop table users and wipe database", "expect_top1": "henke-arch-banco", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "can we delete the users table?", "expect_top1": "henke-arch-banco", "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "delete the users table", "expect_top1": "henke-arch-banco", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "me recomenda a stack pra esse app", "expect_top1": "henke-arch-stack", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "preciso de banco de dados — qual?", "expect_top1": ["henke-arch-banco", "henke-arch-stack"], "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "deixa esse projeto seguro", "expect_top1": "henke-arch-seguranca", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "desenha a arquitetura cloud na aws", "expect_top1": "henke-arch-cloud", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "blinda a infra antes de ir pra produção", "expect_top1": "henke-arch-cloud", "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "define o mvp desse projeto", "expect_top1": "henke-plan-mvp", "expect_mode": "PLANEJAR", "expect_auth": false}
+{"prompt": "qual a menor versão útil disso?", "expect_top1": "henke-plan-mvp", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "escreve as histórias desse mvp", "expect_top1": "henke-plan-historias", "expect_mode": "PLANEJAR", "expect_auth": false}
+{"prompt": "quebra isso em tarefas", "expect_top1": "henke-plan-historias", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "quero implementar x — quebra em passos", "expect_top1": "henke-plan-historias", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o que falta nesse app?", "expect_top1": "henke-plan-destrava", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "me sugere o que implementar agora", "expect_top1": "henke-plan-destrava", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "o que seria legal adicionar?", "expect_top1": "henke-plan-destrava", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "desenha o fluxo do app", "expect_top1": "henke-plan-fluxo", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "planeja o fluxo de telas do app", "expect_top1": "henke-plan-fluxo", "expect_mode": "PLANEJAR", "expect_auth": false}
+{"prompt": "pesquisa como outros apps fazem a tela de checkout", "expect_top1": "henke-plan-radar", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "roda os testes e me diz se passou", "expect_top1": "henke-debug-sanidade", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "verifica se tá tudo certo antes de commitar", "expect_top1": "henke-debug-sanidade", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "roda teste de mutação pra achar teste fraco", "expect_top1": "henke-test-mutantes", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "audita a performance do app, tá lenta", "expect_top1": "henke-audit-perf", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "audita o que a outra ia fez, caça gambiarra", "expect_top1": "henke-audit-vibecode", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "convoca uma banca adversarial todos contra todos", "expect_top1": "henke-audit-banca", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "quero uma segunda opinião adversarial", "expect_top1": "henke-audit-banca", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "faz um pentest nas rotas da api", "expect_top1": "henke-audit-pentest", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "teste de invasão nos endpoints de pagamento", "expect_top1": "henke-audit-pentest", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "verifica se tem idor nas rotas", "expect_top1": "henke-audit-pentest", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "monta uma poc reproduzível", "expect_top1": "henke-audit-pentest", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "faz uma auditoria completa com ledger", "expect_top1": "henke-audit-cobertura", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "configura observabilidade com logs estruturados", "expect_top1": "henke-ops-observa", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "integra llm com structured output", "expect_top1": "henke-code-llm", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "verifica se tá pronto pra subir", "expect_top1": "henke-ops-preflight", "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "checklist antes de publicar", "expect_top1": "henke-ops-preflight", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "posso fazer deploy?", "expect_top1": ["henke-ops-preflight", "henke-ops-deploy"], "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "como faço deploy?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "como funciona um deploy na nuvem?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "quando posso subir pra produção?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "configura as variáveis de ambiente", "expect_top1": "henke-ops-env", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "cria o .env do projeto", "expect_top1": "henke-ops-env", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "onde ficam as chaves de api?", "expect_top1": "henke-ops-env", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "prepara o projeto pra ia codar", "expect_top1": "henke-prepara", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "inicia o henke aqui", "expect_top1": "henke-prepara", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "organiza a memória desse projeto", "expect_top1": "henke-prepara", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "faz uma faxina nesse código", "expect_top1": "henke-mem-faxina", "expect_mode": "EXECUTAR", "expect_auth": true}
+{"prompt": "limpa esse projeto, tá cheio de arquivo inútil", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "que arquivos eu posso apagar sem medo?", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "tem dependência que eu não uso?", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "registra o que a gente fez hoje", "expect_top1": "henke-mem-diario", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "atualiza o diário do projeto", "expect_top1": "henke-mem-diario", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "anota essa decisão pra não esquecer", "expect_top1": "henke-mem-decisoes", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "lista as decisões do projeto", "expect_top1": "henke-mem-decisoes", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "onde foi que eu parei?", "expect_top1": "henke-mem-retomada", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "resumo rápido do projeto", "expect_top1": "henke-mem-retomada", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "me explica a estrutura desse projeto", "expect_top1": "henke-mem-mapa", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "faz um mapa da codebase", "expect_top1": "henke-mem-mapa", "expect_mode": "EXECUTAR", "expect_auth": false}
+{"prompt": "que arquivo faz o quê?", "expect_top1": "henke-mem-mapa", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "organiza as pastas desse projeto", "expect_top1": "henke-arch-pastas", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "essa pasta tá uma bagunça", "expect_top1": "henke-arch-pastas", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "verifica se tá seguro pra produção", "expect_top1": "henke-audit-seguranca", "expect_mode": "ANALISAR", "expect_auth": true}
+{"prompt": "o que um atacante conseguiria fazer?", "expect_top1": "henke-audit-seguranca", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "qual a receita de bolo de cenoura?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "quantos planetas existem no sistema solar?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "what is the recipe for chocolate cake?", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "a integração com stripe não tá funcionando", "expect_top1": null, "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "jornada do usuário do app", "expect_top1": null, "expect_mode": "PLANEJAR", "expect_auth": false}
+{"prompt": "create a landing page", "expect_top1": null, "expect_mode": "EXECUTAR", "expect_auth": false}

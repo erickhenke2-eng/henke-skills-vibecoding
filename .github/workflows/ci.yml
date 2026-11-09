@@ -56,10 +56,10 @@ jobs:
       - name: Testar Portões Métricos Assimilados
         run: python tests/test_metric_gates.py
 
-      - name: Executar os 70 Canários Bilaterais dos Portões Métricos (M1-M70)
+      - name: Executar os 80 Canários Bilaterais dos Portões Métricos (M1-M80)
         run: python evals/canaries_metricas.py
 
-      - name: Executar Benchmark Adversarial Completo (17 Defeitos + 3 Controles)
+      - name: Executar Benchmark Adversarial Completo (23 Defeitos + 4 Controles)
         run: python evals/bench_corpus.py --suite-dir .
 
       - name: Executar Dogfooding do Hazard Scan (. no próprio repositório)

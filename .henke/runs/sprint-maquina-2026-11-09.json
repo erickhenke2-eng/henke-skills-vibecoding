@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "run_id": "sprint-maquina-2026-11-09",
+  "mode": "EXECUTAR",
+  "archetype": "CARPINTEIRO",
+  "spec_path": null,
+  "created_at": "2026-11-09T12:08:32.379588+00:00",
+  "updated_at": "2026-11-09T12:08:33.002675+00:00",
+  "requires_human_auth": false,
+  "review_status": "not_required",
+  "gates": {
+    "validate_skills": {
+      "exit_code": 0,
+      "summary": "58 skills OK",
+      "recorded_at": "2026-11-09T12:08:32.478049+00:00"
+    },
+    "unittest": {
+      "exit_code": 0,
+      "summary": "109 testes OK",
+      "recorded_at": "2026-11-09T12:08:32.595596+00:00"
+    },
+    "canaries_metricas": {
+      "exit_code": 0,
+      "summary": "80/80 canarios",
+      "recorded_at": "2026-11-09T12:08:32.694934+00:00"
+    },
+    "bench_corpus": {
+      "exit_code": 0,
+      "summary": "23/23 defeitos + 4/4 controles",
+      "recorded_at": "2026-11-09T12:08:32.792036+00:00"
+    },
+    "hazard_scan": {
+      "exit_code": 0,
+      "summary": "dogfooding limpo",
+      "recorded_at": "2026-11-09T12:08:32.888290+00:00"
+    },
+    "metaconfig_diff": {
+      "exit_code": 0,
+      "summary": "sem mutacao nao autorizada",
+      "recorded_at": "2026-11-09T12:08:33.002675+00:00"
+    }
+  },
+  "scope_amendments": [],
+  "mandatory_gates": [
+    "validate_skills",
+    "unittest",
+    "canaries_metricas",
+    "bench_corpus"
+  ],
+  "outcome": "verified",
+  "reasons": []
+}

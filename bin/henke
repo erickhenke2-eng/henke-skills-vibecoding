@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+# henke — wrapper POSIX para a CLI global da Suíte Henke (v4.0).
+# Resolve scripts/henke_cli.py instalado ao lado deste diretório bin/.
+set -eu
+
+BIN_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+HENKE_CLI="$BIN_DIR/../scripts/henke_cli.py"
+
+if [ ! -f "$HENKE_CLI" ]; then
+  echo "ERRO: henke_cli.py nao encontrado em '$HENKE_CLI'." >&2
+  exit 2
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "$HENKE_CLI" "$@"
+fi
+exec python "$HENKE_CLI" "$@"

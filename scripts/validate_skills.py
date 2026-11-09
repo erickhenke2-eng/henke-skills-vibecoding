@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validação estrutural da Suíte Henke (PROTOCOLO v3.4).
+Validação estrutural da Suíte Henke (PROTOCOLO v4.0).
 Endurecido para rejeitar adulterações: YAML inválido, chaves duplicadas,
 links quebrados e ausência de marcadores mínimos. Não avalia semântica.
 """

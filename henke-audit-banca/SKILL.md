@@ -79,8 +79,9 @@ python scripts/metricas/coverage_ledger.py verify $TEMP/banca-ledger.json --min-
 # 2. Renderização mecânica das lacunas não verificadas
 python scripts/metricas/coverage_ledger.py render-gaps $TEMP/banca-ledger.json
 
-# 3. Verificação da certificação Goldfish na máquina de estados
-python scripts/henke_cli.py goldfish --repo . --check
+# 3. Certificação Goldfish: com driver de subagente gera o envelope isolado;
+#    sem driver registra goldfish_unavailable e sai 2 (nunca check local disfarçado)
+python scripts/henke_cli.py goldfish --repo . --run .henke/runs/<run_id>.json --driver <cmd>
 ```
 
 **Linhas Vermelhas (PROIBIDO):**

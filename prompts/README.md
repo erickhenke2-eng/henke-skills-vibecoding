@@ -2,7 +2,7 @@
 
 Este diretório contém os **Prompts de Orquestração Prontos para Uso** da Suíte Henke, desenhados para serem colados diretamente em agentes autônomos (Devin, Claude Code, Codex, Antigravity, Cursor, etc.).
 
-Cada prompt encadeia as 53 skills da suíte com portões de custódia, disciplina operacional e verificações de evidência física.
+Cada prompt encadeia as 58 skills da suíte com portões de custódia, disciplina operacional e verificações de evidência física.
 
 ---
 

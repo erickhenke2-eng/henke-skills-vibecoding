@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-Instalador da Suíte Henke (Windows PowerShell) - PROTOCOLO v3.4
+Instalador da Suíte Henke (Windows PowerShell) - PROTOCOLO v4.0
 .DESCRIPTION
 Valida o pacote, prepara cópias e restaura arquivos se houver erro de escrita.
 #>

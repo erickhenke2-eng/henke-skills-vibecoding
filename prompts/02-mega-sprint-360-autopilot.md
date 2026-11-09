@@ -1,4 +1,4 @@
-# ORQUESTRAÇÃO MESTRE UNIVERSAL — SUÍTE HENKE (MODO FULL AUTOPILOT — 53 SKILLS & 8 PORTÕES MÉTRICOS)
+# ORQUESTRAÇÃO MESTRE UNIVERSAL — SUÍTE HENKE (MODO FULL AUTOPILOT — 58 SKILLS & 14 PORTÕES EXECUTÁVEIS)
 
 Você atuará sob a governança da **Suíte Henke** via Maestro central (`henke-skills`), adotando a disciplina **Caveman** (conciso, fatos secos, zero prolixidade) e **Ponytail** (soluções mais simples possíveis, minimalismo cirúrgico, sem over-engineering).
 
@@ -26,7 +26,7 @@ Sua missão neste repositório é executar uma **Mega-Sprint 360 Completa em Mod
 ---
 
 ## ETAPA 2: Raio-X Forense 360 & Perícia de Camada Zero
-*Skills: `henke-audit-vibecode`, `henke-audit-seguranca`, `henke-audit-pentest`, `henke-audit-cobertura`, `henke-arch-cloud`, `henke-arch-seguranca`, `henke-debug-sanidade`, `henke-debug-raiz`, `henke-debug-console`, `henke-debug-backend`, `henke-debug-rede`, `henke-debug-frontend`, `henke-ui-auditoria`, `henke-ui-antislop`, `henke-refactor-duplicado`, `henke-arch-desmembrar`*
+*Skills: `henke-audit-vibecode`, `henke-audit-seguranca`, `henke-audit-pentest`, `henke-audit-cobertura`, `henke-audit-perf`, `henke-audit-banca`, `henke-arch-cloud`, `henke-arch-seguranca`, `henke-debug-sanidade`, `henke-debug-raiz`, `henke-debug-console`, `henke-debug-backend`, `henke-debug-rede`, `henke-debug-frontend`, `henke-ui-auditoria`, `henke-ui-antislop`, `henke-refactor-duplicado`, `henke-arch-desmembrar`*
 
 Investigue a base de código a fundo em 5 eixos físicos:
 
@@ -43,14 +43,17 @@ Investigue a base de código a fundo em 5 eixos físicos:
    - Varredura de credenciais, chaves de API, arquivos `.env` ou tokens commitados.
    - Superfície de injeção: SQL cru, interpolação perigosa de HTML (`innerHTML`/XSS), execução de shell com concatenação de strings sem sanitização, ataques de temporização (`===` em tokens).
    - Vulnerabilidades em dependências (`npm audit`, etc.).
-4. **Camada de Comunicação, Runtime & Concorrência (`henke-debug-backend` & `henke-debug-rede`):**
+4. **Camada de Comunicação, Runtime & Concorrência (`henke-debug-backend`, `henke-debug-rede` & `henke-audit-perf`):**
    - Análise de chamadas síncronas bloqueando a thread principal (ex: `readFileSync` em eventos de UI/Electron).
    - Vazamentos de memória: listeners de eventos sem cleanup (`removeListener`), URLs de Blob sem descarte (`revokeObjectURL`), buffers pesados trafegados em Base64 no IPC em vez de paths locais.
    - Race conditions em Promises, WebSockets e sincronização de estado.
+   - Hotspots de performance: queries N+1, I/O síncrono em event-loop e concorrência sem semáforo.
 5. **Auditoria Visual & UX (Se o projeto tiver interface visual) (`henke-ui-auditoria` & `henke-ui-antislop`):**
    - Nota visual de 0 a 10 avaliando clichês de IA (gradientes roxos/neon sem contraste, cards excessivos).
    - Cobertura de estados da tela: carregando, vazio, erro, sucesso e preenchido (`henke-ui-estados`).
    - Armadilhas de acessibilidade e trapaças de `.sr-only`.
+
+*Consolidação do dossiê:* os achados confirmados com prova `file:line` podem ser submetidos à banca adversarial multi-modelo (`henke-audit-banca`) como segunda opinião antes da consolidação, quando houver subagentes disponíveis.
 
 ---
 
@@ -68,7 +71,7 @@ Investigue a base de código a fundo em 5 eixos físicos:
 ---
 
 ## ETAPA 4: Execução Cirúrgica, Validação & Portões
-*Skills: `henke-plan-historias`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-ponte`, `henke-code-contratos`, `henke-arch-stack`, `verification-before-completion`, `henke-ops-preflight`, `henke-mem-diario`*
+*Skills: `henke-plan-historias`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-ponte`, `henke-code-contratos`, `henke-code-llm`, `henke-arch-stack`, `henke-audit-cobertura`, `henke-test-mutantes`, `henke-ops-observa`, `henke-ops-preflight`, `henke-mem-diario`*
 
 1. **Design Spec Vinculada (`henke-plan-historias`):**
    - Grave em `docs/designs/sprint-<data>.md` o escopo auto-aprovado, critérios de aceite e a seção obrigatória `## 4. Escopo Declarado` com a lista estrita de arquivos. Calcule o SHA-256 da spec.
@@ -76,10 +79,10 @@ Investigue a base de código a fundo em 5 eixos físicos:
    - Aplique o menor diff possível para sanar os problemas selecionados.
    - **Regra `henke-arch-stack`:** Proibido adicionar dependências pesadas de terceiros para resolver problemas solucionáveis com código nativo limpo.
    - Preserve integralmente comentários, docstrings e estruturas não envolvidas.
-   - Garanta idempotência, escrita atômica e contratos de tipos estritos (`henke-code-ponte`).
+   - Garanta idempotência, escrita atômica e contratos de tipos estritos (`henke-code-ponte`); integrações com LLMs/RAG seguem `henke-code-llm` e telemetria/logs seguem `henke-ops-observa`.
 3. **Protocolo Anti-Looping (Rollback de Segurança):**
    - Se qualquer alteração introduzir quebra de build ou falha em testes que antes passavam, e não for sanada em até 2 iterações, reverta o diff do arquivo para o baseline e documente o impedimento. Jamais faça gambiarras em cascata para mascarar quebras.
-4. **Portão de Validação & Evidência Física (`verification-before-completion`):**
+4. **Portão de Validação & Evidência Física (`henke-audit-cobertura` & `henke-test-mutantes`):**
    - Execute novamente o build completo e a suíte inteira de testes.
    - Verifique que nenhum arquivo fora do escopo foi tocado (`git status --porcelain`).
    - Apresente o ledger comprovando exit 0 de cada comando.

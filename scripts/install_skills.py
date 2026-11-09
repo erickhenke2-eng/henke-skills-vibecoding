@@ -50,6 +50,11 @@ def inventory(repo):
     for rel in sorted(repo.glob("scripts/metricas/*.py")) + root_gate_scripts:
         if rel.is_file():
             files.append(rel.relative_to(repo))
+    # Wrappers da CLI global `henke`: instalados em <dest>/bin/ e resolvem
+    # <dest>/scripts/henke_cli.py automaticamente (caminho relativo ao bin/).
+    for wrapper in (repo / "bin" / "henke", repo / "bin" / "henke.cmd"):
+        if wrapper.is_file():
+            files.append(wrapper.relative_to(repo))
     return files
 
 
@@ -222,7 +227,25 @@ def install(repo, user_root, dry_run=False):
                     directory.rmdir()
                 except OSError:
                     pass
+    # Wrapper POSIX precisa de bit executável no destino (o bit pode se perder no
+    # checkout em Windows/copy2); no Windows o .cmd já é invocável sem chmod.
+    if os.name == "posix":
+        for target in targets:
+            sh_wrapper = target / "bin" / "henke"
+            if sh_wrapper.is_file():
+                try:
+                    sh_wrapper.chmod(sh_wrapper.stat().st_mode | 0o755)
+                except OSError:
+                    pass
     print(f"Instalados {len(files) - 1} arquivos de skills e PROTOCOLO.md nos quatro destinos.")
+    bin_dirs = [target / "bin" for target in targets if (target / "bin" / "henke").is_file()]
+    if bin_dirs:
+        print()
+        print("CLI 'henke' instalada. Para chamá-la de qualquer diretório, adicione UM destes caminhos ao PATH:")
+        for d in bin_dirs:
+            print(f"  - {d}")
+        print("Alternativa sem PATH: 'pipx install .' ou 'pip install .' na raiz deste repositório "
+              "(expõe 'henke' via [project.scripts]).")
 
 
 if __name__ == "__main__":

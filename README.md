@@ -16,7 +16,7 @@ Quem cria sistemas com IA no fluxo de vibecoding conhece bem o ciclo da loucura:
 4. **O Chute Aleatório no Debug:** O servidor dá erro 500 e a IA tenta 7 chutes no escuro, quebrando o banco, o contrato front-back e a sua paciência.
 5. **A Vitória Teatral (Falso-Verde):** A IA afirma que "todos os testes passaram com 100% de sucesso", mas quando você vai ver, ela escreveu testes sem nenhuma asserção real (`assertless`), criou mocks circulares ou usou truques de CSS (`.sr-only`) para forçar o teste a passar.
 
-A **Suíte Henke v4.0** nasceu para aniquilar esses 5 problemas combinando **58 Macro-Skills especializadas**, a **CLI unificada `henke`** (`scripts/henke_cli.py`) e **13 Portões Mecânicos determinísticos (fail-closed exit code)**.
+A **Suíte Henke v4.0** nasceu para aniquilar esses 5 problemas combinando **58 Macro-Skills especializadas**, a **CLI unificada `henke`** (`scripts/henke_cli.py`) e **14 Portões Mecânicos determinísticos (fail-closed exit code)**.
 
 ---
 
@@ -57,7 +57,7 @@ Texto em prosa não segura agente de IA sob pressão. O que protege código de v
 
 | Portão Mecânico | Script | O que ele barra fisicamente |
 |---|---|---|
-| **CLI Global & Runner Auditado** | [`henke_cli.py`](./scripts/henke_cli.py) | **Execução sem prova (`henke exec`)**: roda os testes reais, extrai contagem, calcula `stdout_sha256` e grava em `.henke/exec_log.jsonl` (hash-encadeado) e `.henke/LEDGER.json`. Orquestra `init`, `doctor`, `route`, `exec`, `check`, `gate`, `approve`, `scope` e `goldfish`. |
+| **CLI Global & Runner Auditado** | [`henke_cli.py`](./scripts/henke_cli.py) | **Execução sem prova (`henke exec`)**: roda os testes reais, extrai contagem, calcula `stdout_sha256` e grava em `.henke/exec_log.jsonl` (hash-encadeado) e `.henke/LEDGER.json`. Orquestra `init`, `doctor`, `route`, `exec`, `check`, `gate`, `approve`, `scope`, `goldfish`, `run`, `report`, `status`, `setup` e `auto`. |
 | **Máquina de Estados por Run** | [`run_state.py`](./scripts/run_state.py) | **Auto-atestado de vitória (`STATE-DERIVED-CONFLICT`)**: gerencia `.henke/runs/<run_id>.json` e deriva `outcome` (`verified\|failed\|blocked`) mecanicamente dos portões e do `exec_log.jsonl`. |
 | **Fechamento de Contrato** | [`contract_closure.py`](./scripts/metricas/contract_closure.py) | **Código de menos**: barra arquivos declarados ausentes, traversal em pontes (`PATH-TRAVERSAL-BRIDGE`) e pontes quebradas (símbolos sem export/import real `BROKEN-BRIDGE-IMPORT`, canais IPC literais `"clips:bake"` ou rotas `ROUTE:METHOD /path`). |
 | **Deriva de Especificação** | [`spec_drift.py`](./scripts/spec_drift.py) | **Código a mais / à toa**: barra qualquer arquivo alterado no `git status` que não conste na seção `## 4. Escopo Declarado` da spec, bloqueando escopos curingas (`WILDCARD-SCOPE-FORBIDDEN`). |
@@ -205,12 +205,21 @@ python3 -m pip install -r requirements.txt
 chmod +x install.sh && ./install.sh
 ```
 
+### Alternativa via `pipx` / `pip` (CLI `henke` direto no PATH):
+```bash
+cd henke-skills-vibecoding
+pipx install .        # ou: python -m pip install .
+henke doctor          # entrypoint [project.scripts] -> scripts.henke_cli:main
+```
+
 > **O que o instalador faz:**  
-> Ele valida a estrutura de todas as 58 skills, instala os scripts, o `docs/designs/TEMPLATE.md`, os wrappers `bin/henke` / `bin/henke.cmd` e os portões mecânicos em `scripts/`, publicando atomicamente nos 4 diretórios canônicos de agentes:
+> Ele valida a estrutura de todas as 58 skills, instala os scripts, o `docs/designs/TEMPLATE.md`, os wrappers `bin/henke` (sh) e `bin/henke.cmd` (Windows) e os portões mecânicos em `scripts/`, publicando atomicamente nos 4 diretórios canônicos de agentes:
 > - `~/.gemini/config/skills` (Google Antigravity e Gemini CLI)
 > - `~/.claude/skills` (Anthropic Claude Code)
 > - `~/.agents/skills` (OpenAI Codex / Padrão Aberto)
 > - `~/.gemini/skills` (Mirror de Compatibilidade)
+>
+> Os wrappers ficam em `<destino>/bin/` e resolvem `<destino>/scripts/henke_cli.py` automaticamente. **Ao final, o instalador imprime a instrução de PATH** — adicione um dos diretórios `bin/` listados ao `PATH` para chamar `henke` de qualquer lugar (ou use a alternativa `pipx install .` acima, que registra o entrypoint automaticamente).
 
 ---
 

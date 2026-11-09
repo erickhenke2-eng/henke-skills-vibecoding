@@ -10,6 +10,10 @@ Inspirado na disciplina do `nvidia-skill-finder` (NVIDIA/skills):
 - Usa tabela declarativa de desambiguação negativa (`NEGATIVE_DISAMBIGUATION`).
 - Permite `skills: []` (`confidence: "none"`, exit 0) quando o pedido não pertence ao
   catálogo Henke — nunca força pipeline fixo (§8).
+- Matching de gatilhos com flexão morfológica PT simples (`_has_flex_signal`):
+  gênero (o/a), número (s/es), artigos (um/uma/o/a) e -ão/-m/-l/-r.
+- Fallback de engenharia: prompt técnico sem match recebe a skill coringa do modo
+  (`FALLBACK_SKILL_BY_MODE`) sem inflar `confidence` — fica none/low, honesto.
 
 Códigos de saída:
   0  roteamento concluído (inclui 0 skills quando fora de escopo)
@@ -18,6 +22,7 @@ Códigos de saída:
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import json
 from pathlib import Path
 import re
@@ -50,6 +55,82 @@ def _has_signal(text: str, sig: str) -> bool:
     return bool(re.search(prefix + re.escape(sig_clean) + suffix, text))
 
 
+# Flexão morfológica PT para matching de gatilhos (sem libs externas).
+# Artigos viram uma única classe (cobre um/uma/o/a) e substantivos/adjetivos
+# ganham variantes de gênero e número por sufixo.
+_FLEX_ARTICLES = frozenset({
+    "o", "a", "os", "as", "um", "uma", "uns", "umas",
+    "do", "da", "dos", "das", "no", "na", "nos", "nas", "ao", "aos",
+})
+_FLEX_ARTICLE_RE = r"(?:os?|as?|um|uma|uns|umas|d[oa]s?|n[oa]s?|a[oa]s?)"
+
+# Finais que indicam adjetivo em PT — únicos onde o<->a é seguro flexionar.
+_FLEX_GENDER_SUF = (
+    "ivo", "iva", "oso", "osa", "ado", "ada", "ido", "ida", "ito", "ita",
+    "eiro", "eira", "orio", "oria", "ario", "aria", "ento", "enta",
+    "ovo", "ova", "ilo", "ila",
+)
+
+
+def _flex_word(tok: str) -> str:
+    if len(tok) < 3:
+        return re.escape(tok)
+    if tok in _FLEX_ARTICLES:
+        return _FLEX_ARTICLE_RE
+    if tok.endswith(("oes", "aes")):
+        return re.escape(tok[:-3]) + r"(?:ao|oes|aes)"
+    if tok.endswith("ao"):
+        return re.escape(tok[:-2]) + r"(?:ao|oes|aes)"
+    if len(tok) >= 5 and tok.endswith("eis"):
+        return re.escape(tok[:-3]) + r"(?:el|eis)"
+    if len(tok) >= 5 and tok.endswith("ais"):
+        return re.escape(tok[:-3]) + r"(?:al|ais)"
+    # Troca de gênero o<->a só em final adjetival ('responsivo'->responsiv[oa]);
+    # nunca em substantivo ('bola' não pode casar 'bolo' — canário M45).
+    for suf in _FLEX_GENDER_SUF:
+        if tok.endswith(suf):
+            return re.escape(tok[: -len(suf)] + suf[:-1]) + r"[oa]s?"
+        if len(tok) > len(suf) + 1 and tok.endswith(suf + "s"):
+            return re.escape(tok[: -len(suf) - 1] + suf[:-1]) + r"[oa]s?"
+    if tok.endswith("es"):
+        return re.escape(tok[:-2]) + r"es?"
+    if tok.endswith("m"):
+        return re.escape(tok[:-1]) + r"(?:m|ns)"
+    if tok.endswith("l"):
+        return re.escape(tok[:-1]) + r"(?:l|is)"
+    if tok.endswith(("r", "z")):
+        return re.escape(tok) + r"es?"
+    if tok.endswith("s"):
+        return re.escape(tok[:-1]) + r"s?"
+    if tok.endswith("x"):
+        return re.escape(tok)
+    return re.escape(tok) + r"s?"
+
+
+@lru_cache(maxsize=1024)
+def _flex_pattern(sig: str) -> str:
+    parts = []
+    for chunk in re.findall(r"[a-z0-9_]+|[^a-z0-9_]+", sig):
+        if re.fullmatch(r"[a-z0-9_]+", chunk):
+            parts.append(_flex_word(chunk))
+        elif chunk.isspace():
+            parts.append(r"\s+")
+        else:
+            parts.append(re.escape(chunk))
+    pat = "".join(parts)
+    if not pat:
+        return ""
+    prefix = r"\b" if sig[0].isalnum() else ""
+    suffix = r"\b" if sig[-1].isalnum() else ""
+    return prefix + pat + suffix
+
+
+def _has_flex_signal(text: str, sig: str) -> bool:
+    """_has_signal com variantes flexivas PT — usado só no matching de gatilhos."""
+    pat = _flex_pattern(sig.strip())
+    return bool(pat) and bool(re.search(pat, text))
+
+
 # Vocabulário destrutivo e PUBLISH (PROTOCOLO §1) — exige autorização humana explícita
 DESTRUCTIVE_SIGNALS = (
     "deleta", "deletar", "deleto", "deletamos", "delete", "exclui", "excluir",
@@ -63,6 +144,7 @@ _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 
 PUBLISH_SIGNALS = (
     "deploy", "publica", "publicar", "producao", "production",
+    "sobe", "subir", "pro ar", "no ar", "em producao",
     "faxina", "limpa o repo", "apaga arquivos", "reversao", "reverte", "rollback",
 ) + DESTRUCTIVE_SIGNALS
 _PUBLISH_SIGNALS = PUBLISH_SIGNALS
@@ -99,7 +181,10 @@ EXEC_SIGNALS = (
     "implementa", "cria", "construa", "corrige", "conserta", "edita",
     "adiciona", "refatora", "desmembra", "renomeia", "integra", "protege",
     "prepara o projeto", "inicia o henke", "mudanca", "muda", "alinha", "ajusta",
-    "atualiza", "aplica", "deleta", "deletar", "delete", "exclui", "excluir",
+    "atualiza", "aplica", "faz", "faze", "fazer", "mete", "bota", "botar",
+    "arruma", "arrumar",
+    "deploy", "publica", "publicar", "sobe", "subir", "pro ar", "no ar",
+    "em producao", "deleta", "deletar", "delete", "exclui", "excluir",
     "drop", "wipe", "truncate", "destroy", "purge",
     "implement", "create", "build", "fix", "patch", "edit", "add", "refactor",
     "split", "rename", "integrate", "protect", "update", "align", "adjust", "apply",
@@ -123,6 +208,20 @@ GENERIC_SINGLE_TRIGGERS = {
     "testa", "testar", "arruma", "arrumar", "corrige", "corrigir", "ajusta", "ajustar",
     "muda", "mudar", "adiciona", "adicionar", "verifica", "verificar", "checa", "checar",
     "melhora", "melhorar", "organiza", "organizar", "explica", "explicar",
+    "faz", "faze", "fazer", "mete", "bota", "botar", "sobe", "subir",
+    "deploy", "publica", "publicar",
+}
+
+# Termos de engenharia que ligam o fallback honesto por modo.
+_ENGINEERING_TERMS = re.compile(
+    r"\b(?:bugs?|erros?|telas?|logins?|apis?|bancos?|testes?|builds?|quebr\w*|falh\w*)\b"
+)
+
+# Skill coringa por modo quando o pedido é de engenharia mas nada pontuou.
+FALLBACK_SKILL_BY_MODE = {
+    "ANALISAR": "henke-debug-raiz",
+    "EXECUTAR": "henke-code-cirurgico",
+    "PLANEJAR": "henke-plan-destrava",
 }
 
 # Tabela declarativa de desambiguação negativa (padrão nvidia-skill-finder):
@@ -399,7 +498,7 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
         # Avalia primeiro gatilhos multi-palavra e domain_boosts; gatilhos curtos genéricos de 1 palavra exigem contexto
         sorted_trigs = sorted(sk["triggers"], key=lambda t: (0 if (" " in t.strip() or t in domain_boosts) else 1, -len(t)))
         for trig in sorted_trigs:
-            if len(trig) >= 4 and _has_signal(norm_p, trig):
+            if len(trig) >= 4 and _has_flex_signal(norm_p, trig):
                 is_single_generic = (
                     trig in GENERIC_SINGLE_TRIGGERS
                     or (" " not in trig.strip() and trig not in domain_boosts and not trig.startswith("henke-"))
@@ -465,6 +564,18 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
         top = []
         confidence = "none"
 
+    # Fallback de engenharia: prompt técnico sem match útil recebe a skill coringa
+    # do modo, sem inflar confidence — fica none/low, honesto (§8).
+    if confidence in ("none", "low") and _ENGINEERING_TERMS.search(norm_p):
+        fb_name = FALLBACK_SKILL_BY_MODE.get(mode)
+        if fb_name and fb_name not in excluded and all(fb_name != n for _, n, _, _ in top):
+            fb_skill = next((sk for sk in catalog if sk["name"] == fb_name), None)
+            if fb_skill is not None and not any(
+                wn and _has_signal(norm_p, wn) for wn in fb_skill["when_not"]
+            ):
+                top = (top + [(1.9, fb_name, fb_skill["path"],
+                               f"fallback de engenharia ({mode})")])[:3]
+
     # Seleção do Arquétipo e Portões Mecânicos Obrigatórios
     lead_skill = top[0][1] if top else ""
     if is_compound_exec:
@@ -515,7 +626,7 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             {"name": name, "path": path, "score": sc, "reason": rsn}
             for sc, name, path, rsn in top
         ],
-        "gates_required": gates_required if confidence != "none" else [
+        "gates_required": gates_required if top else [
             "scripts/repo_signals.py",
             "scripts/metricas/hazard_scan.py",
         ],

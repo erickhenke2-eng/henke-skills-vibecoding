@@ -8,9 +8,24 @@ eliminando a dependência de CWD dos 14 portões mecânicos e fornecendo:
   - `henke init`     : inicialização de `.henke/`, `docs/designs/TEMPLATE.md` e baseline Git
   - `henke route`    : roteamento determinístico de prompt (`--compact` por padrão)
   - `henke exec`     : runner wrapper que executa testes reais e grava `.henke/exec_log.jsonl`
-                       (hash-chain SHA-256) e `.henke/LEDGER.json` com `stdout_sha256`
+                       (hash-chain SHA-256) e `.henke/LEDGER.json` com `stdout_sha256`;
+                       `--timeout N` > `.henke/PROJECT.json:timeout_sec` > fallback 180s
   - `henke gate`     : despacho direto para qualquer portão mecânico pelo nome curto
-  - `henke check`    : bateria agregada de portões sem abortar no primeiro erro
+  - `henke check`    : bateria agregada de portões sem abortar no primeiro erro;
+                       `--staged` restringe hazard_scan/assertless_scan aos arquivos de
+                       `git diff --cached --name-only` (a11y_scan segue no repo inteiro)
+  - `henke run`      : wrapper fino sobre `scripts/run_state.py`
+                       (init|record-gate|amend-scope|approve|verify) + `list` nativo
+  - `henke report`   : relatório markdown rastreável de uma run (`scripts/henke_report.py`)
+  - `henke status`   : lista runs de `.henke/runs/` com outcome DERIVADO (não declarado)
+  - `henke setup`    : detecção de projeto (`scripts/henke_detect.py`) + stubs `.henke/`
+                       criados sem sobrescrever os existentes
+  - `henke auto`     : modo automático via `scripts/henke_auto.py` (import lazy; exit 2
+                       honesto quando o módulo não está instalado)
+  - `henke goldfish` : com `--driver <cmd>` gera envelope de revisão isolada (spec+diff,
+                       SEM transcript) em `.henke/runs/<id>.goldfish.json` e sai 0;
+                       sem `--driver` grava `review_status=goldfish_unavailable` na run
+                       (quando `--run` informado) e sai 2 — nunca despacha para `check`
   - `henke approve`  : aprovação humana auditada de uma run (`.henke/runs/<id>.json`)
   - `henke scope`    : emenda de escopo justificada em uma run ativa
 
@@ -78,6 +93,21 @@ _CARGO_TEST_RE = re.compile(
 _GO_TEST_OK_RE = re.compile(r"(?m)^ok\s+\S+")
 _GO_TEST_FAIL_RE = re.compile(r"(?m)^FAIL\s+\S+")
 _CANARY_RE = re.compile(r"(\d+)/(\d+)\s+can[aá]rios\s+aprovados", flags=re.I)
+
+# Arquivo staged que "parece" de teste (para restringir o assertless_scan em --staged)
+_TEST_FILE_RE = re.compile(
+    r"(?i)(^test_.*\.py$|.*_test\.py$|.*[.\-_](test|spec)\.[jt]sx?$|.*\.(test|spec)\.[jt]sx?$)"
+)
+
+# Conteúdo EXATO do stub .henke/POLICY.json criado por `henke setup`
+_POLICY_STUB_JSON = (
+    '{"policy":"balanced","always_ask":["publish","destructive","metaconfig"],'
+    '"auto_approve":["non-publish"],"allowed_cmds":[]}'
+)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def parse_test_runner_output(stdout: str, stderr: str) -> tuple[int, int]:
@@ -301,11 +331,41 @@ def is_test_command(cmd_tokens: list[str], cmd_str: str) -> bool:
     return False
 
 
-def _cmd_exec(repo_root: Path, ledger_path: Path, exec_log_path: Path, cmd_tokens: list[str]) -> int:
+def _resolve_exec_timeout(repo_root: Path, cli_timeout: float | None) -> float:
+    """Resolve o teto de timeout do `henke exec`.
+
+    Ordem de precedência honesta:
+      1. flag `--timeout N` (quando > 0);
+      2. campo `timeout_sec` de `.henke/PROJECT.json` (quando numérico e > 0);
+      3. fallback fixo de 180s.
+    """
+    if cli_timeout is not None and cli_timeout > 0:
+        return float(cli_timeout)
+    project_json = repo_root / ".henke" / "PROJECT.json"
+    try:
+        pdata = json.loads(project_json.read_text(encoding="utf-8"))
+        val = pdata.get("timeout_sec") if isinstance(pdata, dict) else None
+        if isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0:
+            return float(val)
+    except Exception:
+        pass  # PROJECT.json ausente/inválido -> fallback silencioso para 180s
+    return 180.0
+
+
+def _cmd_exec(
+    repo_root: Path,
+    ledger_path: Path,
+    exec_log_path: Path,
+    cmd_tokens: list[str],
+    cli_timeout: float | None = None,
+) -> int:
     if cmd_tokens and cmd_tokens[0] == "--":
         cmd_tokens = cmd_tokens[1:]
     if not cmd_tokens:
         print("ERRO: informe o comando a executar após 'henke exec -- <comando>'.", file=sys.stderr)
+        return 2
+    if cli_timeout is not None and cli_timeout <= 0:
+        print("ERRO: --timeout deve ser um número positivo de segundos.", file=sys.stderr)
         return 2
 
     cmd_str = " ".join(cmd_tokens).strip()
@@ -319,7 +379,7 @@ def _cmd_exec(repo_root: Path, ledger_path: Path, exec_log_path: Path, cmd_token
     child_env = os.environ.copy()
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
-    timeout_sec = 180.0
+    timeout_sec = _resolve_exec_timeout(repo_root, cli_timeout)
 
     try:
         res = subprocess.run(
@@ -365,7 +425,7 @@ def _cmd_exec(repo_root: Path, ledger_path: Path, exec_log_path: Path, cmd_token
     entry_hash = hashlib.sha256(chain_payload.encode("utf-8")).hexdigest()
 
     log_entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": _now_iso(),
         "cmd": cmd_str,
         "exit": res.returncode,
         "testes_descobertos": discovered,
@@ -426,14 +486,79 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
     return res.returncode
 
 
-def _cmd_check(repo_root: Path, spec_path: str | None = None, as_json: bool = False) -> int:
-    checks_to_run: list[tuple[str, list[str]]] = [
-        ("hazard_scan", [sys.executable, str(GATE_MAP["hazard"]), str(repo_root)]),
-    ]
-    tests_dir = repo_root / "tests"
-    if tests_dir.is_dir():
-        checks_to_run.append(("assertless_scan", [sys.executable, str(GATE_MAP["assertless"]), str(tests_dir)]))
-    checks_to_run.append(("a11y_scan", [sys.executable, str(GATE_MAP["a11y"]), str(repo_root)]))
+def _git_staged_files(repo_root: Path) -> list[str] | None:
+    """Retorna os caminhos staged (`git diff --cached --name-only`) ou None se indisponível.
+
+    Usa `-z` para não quebrar em nomes com espaço/acentos; bytes decodificados em utf-8.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "diff", "--cached", "--name-only", "-z"],
+            capture_output=True,
+        )
+    except OSError:
+        return None
+    if res.returncode != 0:
+        return None
+    raw = res.stdout if isinstance(res.stdout, bytes) else str(res.stdout).encode("utf-8")
+    text = raw.decode("utf-8", errors="replace")
+    return [p for p in text.split("\0") if p.strip()]
+
+
+def _is_test_file(path: Path) -> bool:
+    """Heurística honesta de 'arquivo de teste' para o escopo --staged do assertless_scan."""
+    if _TEST_FILE_RE.match(path.name):
+        return True
+    return "tests" in path.parts or "test" in path.parts
+
+
+def _cmd_check(
+    repo_root: Path,
+    spec_path: str | None = None,
+    as_json: bool = False,
+    staged: bool = False,
+) -> int:
+    """Bateria agregada de portões.
+
+    Com `staged=True`, hazard_scan e assertless_scan são restritos aos arquivos
+    listados por `git diff --cached --name-only` (honesto: nada staged -> portão
+    marcado como SKIP, nunca varredura silenciosa do repo inteiro). O a11y_scan
+    segue no repo inteiro, pois seu escopo é a árvore de UI e não o diff.
+    """
+    checks_to_run: list[tuple[str, list[str]]] = []
+    skipped: list[tuple[str, str]] = []
+
+    if staged:
+        staged_rel = _git_staged_files(repo_root)
+        if staged_rel is None:
+            print(
+                "ERRO: '--staged' requer um repositório Git legível "
+                "(falha em 'git diff --cached --name-only').",
+                file=sys.stderr,
+            )
+            return 2
+        staged_abs = [
+            str(repo_root / rel) for rel in staged_rel
+            if (repo_root / rel).is_file()
+        ]
+        if staged_abs:
+            checks_to_run.append(("hazard_scan", [sys.executable, str(GATE_MAP["hazard"]), *staged_abs]))
+        else:
+            skipped.append(("hazard_scan", "nenhum arquivo staged existente em disco"))
+        staged_tests = [p for p in staged_abs if _is_test_file(Path(p))]
+        if staged_tests:
+            checks_to_run.append(("assertless_scan", [sys.executable, str(GATE_MAP["assertless"]), *staged_tests]))
+        else:
+            skipped.append(("assertless_scan", "nenhum arquivo de teste staged"))
+        # a11y_scan: escopo é a árvore de UI do repo, não o diff — permanece integral.
+        checks_to_run.append(("a11y_scan", [sys.executable, str(GATE_MAP["a11y"]), str(repo_root)]))
+    else:
+        checks_to_run.append(("hazard_scan", [sys.executable, str(GATE_MAP["hazard"]), str(repo_root)]))
+        tests_dir = repo_root / "tests"
+        if tests_dir.is_dir():
+            checks_to_run.append(("assertless_scan", [sys.executable, str(GATE_MAP["assertless"]), str(tests_dir)]))
+        checks_to_run.append(("a11y_scan", [sys.executable, str(GATE_MAP["a11y"]), str(repo_root)]))
+
     if spec_path:
         checks_to_run.append((
             "contract_closure",
@@ -441,6 +566,15 @@ def _cmd_check(repo_root: Path, spec_path: str | None = None, as_json: bool = Fa
         ))
 
     results: list[dict] = []
+    for gate_name, motivo in skipped:
+        results.append({
+            "gate": gate_name,
+            "exit_code": None,
+            "passed": True,
+            "skipped": True,
+            "output": f"pulado: {motivo}",
+        })
+
     overall_ok = True
     for name, cmd in checks_to_run:
         res = subprocess.run(
@@ -458,19 +592,22 @@ def _cmd_check(repo_root: Path, spec_path: str | None = None, as_json: bool = Fa
             "gate": name,
             "exit_code": res.returncode,
             "passed": passed,
+            "skipped": False,
             "output": ((res.stdout or "") + (res.stderr or "")).strip(),
         })
 
     if as_json:
         print(json.dumps({
             "repo": str(repo_root),
+            "staged": staged,
             "passed": overall_ok,
             "gates": results,
         }, ensure_ascii=False, indent=2))
     else:
         for item in results:
-            badge = "PASS" if item["passed"] else "FAIL"
-            print(f"[{badge}] {item['gate']} (exit {item['exit_code']})")
+            badge = "SKIP" if item.get("skipped") else ("PASS" if item["passed"] else "FAIL")
+            exit_txt = "-" if item.get("skipped") else str(item["exit_code"])
+            print(f"[{badge}] {item['gate']} (exit {exit_txt})")
             if item["output"]:
                 for ln in item["output"].splitlines():
                     print(f"  {ln}")
@@ -478,12 +615,453 @@ def _cmd_check(repo_root: Path, spec_path: str | None = None, as_json: bool = Fa
     return 0 if overall_ok else 1
 
 
+def _iter_run_files(repo_root: Path) -> list[Path]:
+    """Lista `.henke/runs/*.json`, excluindo envelopes (`*.envelope.json`, `*.goldfish.json`)."""
+    runs_dir = repo_root / ".henke" / "runs"
+    if not runs_dir.is_dir():
+        return []
+    return sorted(
+        p for p in runs_dir.glob("*.json")
+        if p.is_file()
+        and not p.name.endswith(".goldfish.json")
+        and not p.name.endswith(".envelope.json")
+    )
+
+
+def _derive_outcome_safe(run_path: Path, run_data: dict) -> str:
+    """Outcome DERIVADO mecanicamente (nunca o declarado no arquivo).
+
+    Tenta `scripts.run_state.derive_run_outcome` via import; se o módulo não
+    estiver importável, cai para subprocess `run_state.py verify --json`.
+    """
+    try:
+        from scripts.run_state import derive_run_outcome
+    except ImportError:
+        derive_run_outcome = None
+    if derive_run_outcome is not None:
+        try:
+            derived, _ = derive_run_outcome(run_data)
+            return str(derived)
+        except Exception:
+            pass
+    try:
+        res = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "run_state.py"), "verify", "--json", str(run_path)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        payload = json.loads(res.stdout or "{}")
+        derived = payload.get("derived_outcome")
+        if derived:
+            return str(derived)
+    except Exception:
+        pass
+    return "desconhecido"
+
+
+def _cmd_list_runs(repo_root: Path, as_json: bool = False) -> int:
+    """Lista runs de `.henke/runs/` com outcome DERIVADO (via run_state), não declarado."""
+    rows: list[dict] = []
+    for rp in _iter_run_files(repo_root):
+        try:
+            data = json.loads(rp.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        rows.append({
+            "run_id": str(data.get("run_id") or rp.stem),
+            "mode": str(data.get("mode") or "não registrado"),
+            "archetype": str(data.get("archetype") or "não registrado"),
+            "outcome_derived": _derive_outcome_safe(rp, data),
+            "outcome_declared": str(data.get("outcome") or "não registrado"),
+            "review_status": str(data.get("review_status") or "não registrado"),
+            "updated_at": str(data.get("updated_at") or "não registrado"),
+        })
+
+    if as_json:
+        print(json.dumps({"repo": str(repo_root), "runs": rows}, ensure_ascii=False, indent=2))
+        return 0
+
+    runs_dir = repo_root / ".henke" / "runs"
+    if not rows:
+        print(f"Nenhuma run registrada em {runs_dir}.")
+        return 0
+
+    print(f"Runs em {runs_dir} (outcome DERIVADO, não declarado):")
+    header = f"{'RUN_ID':<28} {'MODO':<10} {'DERIVADO':<10} {'DECLARADO':<10} {'REVIEW':<22} ATUALIZADO"
+    print(header)
+    print("-" * len(header))
+    for r in rows:
+        print(
+            f"{r['run_id'][:28]:<28} {r['mode'][:10]:<10} {r['outcome_derived'][:10]:<10} "
+            f"{r['outcome_declared'][:10]:<10} {r['review_status'][:22]:<22} {r['updated_at']}"
+        )
+    return 0
+
+
+def _cmd_run(argv_list: list[str]) -> int:
+    """Wrapper fino sobre `scripts/run_state.py` (mesmos exit codes) + `list` nativo."""
+    usage = (
+        "Uso: henke run <init|record-gate|amend-scope|approve|verify|list> [args...]\n"
+        "  init|record-gate|amend-scope|approve|verify  repassados a scripts/run_state.py\n"
+        "  list [--repo D] [--json]                     lista .henke/runs/ com outcome derivado"
+    )
+    if not argv_list:
+        print(usage, file=sys.stderr)
+        return 2
+    if argv_list[0] in ("-h", "--help"):
+        print(usage)
+        return 0
+
+    if argv_list[0] == "list":
+        ap = argparse.ArgumentParser(
+            prog="henke run list",
+            description="Lista runs de .henke/runs/ com outcome DERIVADO.",
+        )
+        ap.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+        ap.add_argument("--json", action="store_true", help="Saída em JSON")
+        try:
+            ns = ap.parse_args(argv_list[1:])
+        except SystemExit as exc:
+            return exc.code if isinstance(exc.code, int) else 2
+        return _cmd_list_runs(ns.repo.resolve(), as_json=ns.json)
+
+    # Delegação: import limpo quando possível (run_state é stdlib pura);
+    # senão, subprocess preservando os mesmos exit codes.
+    try:
+        from scripts.run_state import main as run_state_main
+    except ImportError:
+        run_state_main = None
+    if run_state_main is not None:
+        return run_state_main(argv_list)
+    res = subprocess.run([sys.executable, str(SCRIPTS_DIR / "run_state.py"), *argv_list])
+    return res.returncode
+
+
+def _resolve_run_ref(repo_root: Path, run_ref: str | None) -> Path | None:
+    """Resolve `--run`/`<run_id>` para um caminho `.henke/runs/<id>.json` existente."""
+    if not run_ref:
+        return None
+    cand = Path(run_ref)
+    if cand.is_file():
+        return cand
+    runs_dir = repo_root / ".henke" / "runs"
+    name = run_ref if run_ref.endswith(".json") else f"{run_ref}.json"
+    path = runs_dir / name
+    return path if path.is_file() else None
+
+
+def _git_diff_snapshot(repo_root: Path) -> tuple[str | None, str]:
+    """Captura o diff de trabalho para o envelope Goldfish (staged + unstaged vs HEAD).
+
+    Retorna (texto_ou_None, origem_honesta): nunca inventa diff — quando o git
+    falha ou não há HEAD, declara a origem exata do que foi capturado.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "diff", "HEAD"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout, "git diff HEAD"
+        res2 = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if res2.returncode == 0:
+            if res2.stdout.strip():
+                return res2.stdout, "git status --porcelain (diff indisponível: sem HEAD ou vazio)"
+            return "", "git diff HEAD (vazio — nada alterado a revisar)"
+        motivo = (res.stderr or res2.stderr or "").strip() or "git falhou"
+        return None, f"indisponível: {motivo}"
+    except OSError as exc:
+        return None, f"indisponível: {exc}"
+
+
+def _cmd_goldfish(
+    repo_root: Path,
+    spec_path: str | None = None,
+    driver: str | None = None,
+    run_ref: str | None = None,
+    as_json: bool = False,
+) -> int:
+    """Certificação Goldfish honesta (PROTOCOLO §3.2 — revisão isolada em contexto zerado).
+
+    - COM `--driver <cmd>`: grava envelope de revisão isolada (spec + diff, SEM
+      transcript) em `.henke/runs/<id>.goldfish.json` e retorna 0. O envelope é
+      o dossiê a ser submetido ao revisor externo; este comando NÃO executa a
+      revisão em si.
+    - SEM `--driver`: HARD STOP honesto — registra `review_status=goldfish_unavailable`
+      na run (quando `--run` informado) e retorna 2.
+    """
+    run_path = _resolve_run_ref(repo_root, run_ref) if run_ref else None
+    if run_ref and run_path is None:
+        print(f"ERRO: run '{run_ref}' não encontrada em {repo_root / '.henke' / 'runs'}.", file=sys.stderr)
+        return 2
+
+    if not driver:
+        if run_path is not None:
+            try:
+                data = json.loads(run_path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("raiz do JSON da run não é um objeto")
+                data["review_status"] = "goldfish_unavailable"
+                data["updated_at"] = _now_iso()
+                try:
+                    from scripts.run_state import derive_run_outcome
+                    derived, reasons = derive_run_outcome(data)
+                    data["outcome"] = derived
+                    data["reasons"] = reasons
+                except Exception:
+                    pass  # mantém outcome anterior se a derivação estiver indisponível
+                _atomic_write_json(run_path, data)
+                print(f"Registrado review_status='goldfish_unavailable' em {run_path}")
+            except Exception as exc:
+                print(f"ERRO: não foi possível atualizar a run '{run_path}': {exc}", file=sys.stderr)
+                return 2
+        print(
+            "INDISPONÍVEL: certificação Goldfish não executada — nenhum --driver informado.\n"
+            "A revisão Goldfish exige um revisor externo em contexto zerado (sem transcript).\n"
+            "Para certificar: henke goldfish --driver \"<comando do revisor>\" [--spec <spec>] [--run <id>]\n"
+            "Sem driver externo, resta apenas revisão same-context preliminar — "
+            "e ela NÃO é certificação Goldfish.",
+            file=sys.stderr,
+        )
+        return 2
+
+    diff_text, diff_origem = _git_diff_snapshot(repo_root)
+    spec_text: str | None = None
+    spec_status = "não informado"
+    if spec_path:
+        sp = Path(spec_path)
+        if not sp.is_absolute():
+            sp = repo_root / spec_path
+        if sp.is_file():
+            try:
+                spec_text = sp.read_text(encoding="utf-8", errors="replace")
+                spec_status = "lido"
+            except OSError as exc:
+                spec_status = f"ilegível: {exc}"
+        else:
+            spec_status = f"não encontrado: {spec_path}"
+
+    run_id = run_path.stem if run_path else f"goldfish-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    envelope = {
+        "version": 1,
+        "tipo": "goldfish_review_envelope",
+        "run_id": run_id,
+        "created_at": _now_iso(),
+        "repo": str(repo_root),
+        "driver": driver,
+        "spec_path": spec_path,
+        "spec_status": spec_status,
+        "spec": spec_text,
+        "diff": diff_text,
+        "diff_origem": diff_origem,
+        "transcript": "omitido intencionalmente — a revisão Goldfish exige contexto zerado (PROTOCOLO §3.2)",
+        "instrucoes": (
+            "Submeta este envelope a um revisor externo em sessão zerada via o driver informado. "
+            "NÃO inclua o transcript desta sessão. Registre o veredito com "
+            "'henke run record-gate <run> --gate goldfish_review --exit-code <0|1>'."
+        ),
+    }
+    env_path = repo_root / ".henke" / "runs" / f"{run_id}.goldfish.json"
+    _atomic_write_json(env_path, envelope)
+
+    if as_json:
+        print(json.dumps({
+            "envelope": str(env_path),
+            "run_id": run_id,
+            "driver": driver,
+            "revisao_executada": False,
+        }, ensure_ascii=False, indent=2))
+    else:
+        print(f"OK: envelope Goldfish gravado em {env_path}")
+        print(f"Driver registrado: {driver}")
+        print(
+            "NOTA: este comando gerou o envelope (spec + diff, sem transcript); "
+            "a revisão isolada em si NÃO foi executada aqui."
+        )
+    return 0
+
+
+def _cmd_setup(target_dir: Path) -> int:
+    """`henke setup [dir]`: detecção via henke_detect + stubs .henke/ sem sobrescrever."""
+    target_dir = target_dir.resolve()
+    if not target_dir.is_dir():
+        print(f"ERRO: diretório inexistente: {target_dir}", file=sys.stderr)
+        return 2
+    try:
+        from scripts import henke_detect
+    except ImportError:
+        print(
+            "ERRO: módulo 'scripts/henke_detect.py' indisponível — a detecção de projeto\n"
+            "(detect_project/write_project) não está instalada neste pacote.\n"
+            "Setup abortado sem escrever nada.",
+            file=sys.stderr,
+        )
+        return 2
+    detect_project = getattr(henke_detect, "detect_project", None)
+    write_project = getattr(henke_detect, "write_project", None)
+    if not callable(detect_project) or not callable(write_project):
+        print(
+            "ERRO: 'scripts/henke_detect.py' não expõe detect_project(root)/write_project(root, data).",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        data = detect_project(str(target_dir))
+        project_path = write_project(str(target_dir), data)
+    except Exception as exc:
+        print(f"ERRO na detecção do projeto: {exc}", file=sys.stderr)
+        return 2
+
+    henke_dir = target_dir / ".henke"
+    (henke_dir / "runs").mkdir(parents=True, exist_ok=True)
+
+    linguagens = data.get("linguagens") if isinstance(data, dict) else None
+    if isinstance(linguagens, list) and linguagens:
+        stack_txt = ", ".join(map(str, linguagens))
+    elif isinstance(data, dict) and data.get("framework"):
+        stack_txt = str(data.get("framework"))
+    else:
+        stack_txt = "detectada automaticamente"
+    nome = target_dir.name or "PROJETO"
+
+    stubs: dict[str, str] = {
+        "DIARIO.md": (
+            f"# DIÁRIO DE BORDO VIVO — {nome}\n\n"
+            f"## [{_now_iso()}] — Inicialização via `henke setup`\n"
+            "- **Autor:** Suíte Henke (`henke setup`)\n"
+            "- **Ações Realizadas:**\n"
+            "  1. Estrutura `.henke/` inicializada; detecção gravada em `.henke/PROJECT.json`.\n"
+            "- **Próximos Passos:**\n"
+            "  - Registrar aqui a jornada de desenvolvimento.\n"
+        ),
+        "DECISOES.md": (
+            f"# COFRE DE DECISÕES ARQUITETURAIS — {nome}\n\n"
+            "Este documento registra as decisões técnicas fundamentais para impedir "
+            "que intervenções futuras de agentes desfaçam escolhas aprovadas.\n\n"
+            "| ID | Data | Contexto / Decisão | Justificativa Técnica | Status |\n"
+            "|---|---|---|---|---|\n"
+        ),
+        "CONFIG.json": json.dumps({
+            "versao_protocolo": "4.0",
+            "stack": stack_txt,
+            "economia_tokens": {
+                "caveman": "auto",
+                "ponytail": "auto",
+                "perguntar_novamente": True,
+            },
+            "auditoria_adversarial": {
+                "exigir_ledger_comandos": True,
+                "proibir_sr_only_hacks": True,
+            },
+        }, ensure_ascii=False, indent=2) + "\n",
+        "POLICY.json": _POLICY_STUB_JSON + "\n",
+    }
+
+    criados: list[str] = []
+    preservados: list[str] = []
+    for stub_name, conteudo in stubs.items():
+        destino = henke_dir / stub_name
+        if destino.exists():
+            preservados.append(stub_name)
+            continue
+        destino.write_text(conteudo, encoding="utf-8")
+        criados.append(stub_name)
+
+    print(f"OK: detecção gravada em {project_path}")
+    if isinstance(data, dict):
+        partes = []
+        for campo in ("linguagens", "framework", "test_cmd", "build_cmd", "lint_cmd", "source"):
+            val = data.get(campo)
+            if val:
+                if isinstance(val, list):
+                    val = ", ".join(map(str, val))
+                partes.append(f"{campo}={val}")
+        if partes:
+            print("Detectado: " + "; ".join(partes))
+    print("Criados: " + (", ".join(criados) if criados else "nenhum"))
+    print("Preservados (já existiam): " + (", ".join(preservados) if preservados else "nenhum"))
+    return 0
+
+
+def _cmd_auto(
+    prompt: str,
+    repo: Path,
+    driver: str | None,
+    dry_run: bool,
+    yes: bool,
+    policy: str,
+    timeout: float | None,
+) -> int:
+    """`henke auto`: despacha para `scripts/henke_auto.py:run_auto` (import lazy)."""
+    try:
+        from scripts import henke_auto
+    except ImportError:
+        print(
+            "ERRO: módulo 'scripts/henke_auto.py' indisponível — o modo automático\n"
+            "não está instalado neste pacote. Nada foi executado.",
+            file=sys.stderr,
+        )
+        return 2
+    run_auto = getattr(henke_auto, "run_auto", None)
+    if not callable(run_auto):
+        print("ERRO: 'scripts/henke_auto.py' não expõe run_auto(args).", file=sys.stderr)
+        return 2
+    ns = argparse.Namespace(
+        prompt=prompt,
+        repo=str(repo.resolve()),
+        driver=driver,
+        dry_run=bool(dry_run),
+        yes=bool(yes),
+        policy=policy,
+        timeout=timeout,
+    )
+    try:
+        return int(run_auto(ns))
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 2
+
+
+def _cmd_report(repo_root: Path, run_ref: str) -> int:
+    """`henke report <run_id>`: renderiza o relatório markdown via scripts/henke_report.py."""
+    henke_report = None
+    try:
+        from scripts import henke_report as _hr
+        henke_report = _hr
+    except ImportError:
+        # Fallback: carrega o arquivo diretamente do diretório de scripts instalado.
+        try:
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location("henke_report", SCRIPTS_DIR / "henke_report.py")
+            if spec is None or spec.loader is None:
+                raise ImportError("spec indisponível")
+            henke_report = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(henke_report)
+        except Exception:
+            henke_report = None
+    if henke_report is None or not callable(getattr(henke_report, "render_run_report", None)):
+        print(
+            "ERRO: módulo 'scripts/henke_report.py' indisponível — relatório não pode ser gerado.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        print(henke_report.render_run_report(repo_root, run_ref))
+        return 0
+    except (FileNotFoundError, ValueError, OSError, json.JSONDecodeError) as exc:
+        print(f"ERRO: {exc}", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if not raw_argv:
         raw_argv = ["--help"]
 
-    # Subcomandos que encaminham argumentos livres (exec, gate)
+    # Subcomandos que encaminham argumentos livres (exec, gate, run)
     head = raw_argv[0]
     if head == "gate":
         if len(raw_argv) < 2 or raw_argv[1] in ("-h", "--help"):
@@ -496,6 +1074,10 @@ def main(argv: list[str] | None = None) -> int:
         ap_exec.add_argument("--repo", type=Path, default=Path("."), help="Diretório do repositório")
         ap_exec.add_argument("--ledger", type=Path, default=None, help="Caminho para LEDGER.json")
         ap_exec.add_argument("--exec-log", type=Path, default=None, help="Caminho para exec_log.jsonl")
+        ap_exec.add_argument(
+            "--timeout", type=float, default=None, metavar="N",
+            help="Teto em segundos (default: timeout_sec de .henke/PROJECT.json, senão 180)",
+        )
         ap_exec.add_argument("cmd", nargs=argparse.REMAINDER, help="Comando a executar (precedido por --)")
         try:
             ns = ap_exec.parse_args(raw_argv[1:])
@@ -504,9 +1086,17 @@ def main(argv: list[str] | None = None) -> int:
         repo_root = ns.repo.resolve()
         ledger_p = ns.ledger.resolve() if ns.ledger else (repo_root / ".henke" / "LEDGER.json")
         exec_log_p = ns.exec_log.resolve() if ns.exec_log else (repo_root / ".henke" / "exec_log.jsonl")
-        return _cmd_exec(repo_root, ledger_p, exec_log_p, ns.cmd)
+        return _cmd_exec(repo_root, ledger_p, exec_log_p, ns.cmd, cli_timeout=ns.timeout)
 
-    parser = argparse.ArgumentParser(prog="henke", description="CLI Global Unificada da Suíte Henke (v4.0).")
+    if head == "run":
+        return _cmd_run(raw_argv[1:])
+
+    parser = argparse.ArgumentParser(
+        prog="henke",
+        description="CLI Global Unificada da Suíte Henke (v4.0).",
+        epilog="Também disponíveis: 'henke exec [--timeout N] -- <cmd>', 'henke gate <portão>', "
+               "'henke run <init|record-gate|amend-scope|approve|verify|list>'.",
+    )
     sub = parser.add_subparsers(dest="subcmd", required=True)
 
     p_doc = sub.add_parser("doctor", help="Verifica ambiente, scripts e skills instaladas")
@@ -522,11 +1112,16 @@ def main(argv: list[str] | None = None) -> int:
     p_route.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
     p_route.add_argument("--compact", action="store_true", default=False, help="Saída compacta em 1 linha")
     p_route.add_argument("--full", action="store_true", default=False, help="Saída JSON detalhada")
+    p_route.add_argument("--json", action="store_true", default=False, help="Alias de --full (contrato consumido por 'henke auto')")
 
     p_check = sub.add_parser("check", help="Executa bateria unificada de portões sem abortar no primeiro erro")
     p_check.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
     p_check.add_argument("--spec", default=None, help="Spec de referência para contract_closure")
-    p_check.add_argument("--staged", action="store_true", help="Inspeciona estado atual/staged")
+    p_check.add_argument(
+        "--staged", action="store_true",
+        help="Restringe hazard_scan/assertless_scan aos arquivos de 'git diff --cached' "
+             "(a11y_scan segue no repo inteiro)",
+    )
     p_check.add_argument("--json", action="store_true", help="Saída em JSON")
 
     p_app = sub.add_parser("approve", help="Aprova uma run pendente de autorização humana")
@@ -540,11 +1135,32 @@ def main(argv: list[str] | None = None) -> int:
     p_amend.add_argument("file_rel", help="Caminho relativo do arquivo")
     p_amend.add_argument("--reason", required=True, help="Justificativa técnica (>= 5 chars)")
 
-    p_gf = sub.add_parser("goldfish", help="Executa verificação adversarial em contexto limpo")
+    p_gf = sub.add_parser("goldfish", help="Certificação Goldfish: envelope isolado (--driver) ou HARD STOP honesto")
     p_gf.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
-    p_gf.add_argument("--spec", default=None, help="Spec de referência")
-    p_gf.add_argument("--check", action="store_true", help="Executa bateria completa de portões em contexto limpo")
+    p_gf.add_argument("--spec", default=None, help="Spec de referência embutida no envelope")
+    p_gf.add_argument("--driver", default=None, help="Comando do revisor externo (sessão zerada)")
+    p_gf.add_argument("--run", dest="run_ref", default=None, help="Run alvo (id ou caminho .henke/runs/<id>.json)")
     p_gf.add_argument("--json", action="store_true", help="Saída em JSON")
+
+    p_report = sub.add_parser("report", help="Relatório markdown rastreável de uma run (5 seções fixas)")
+    p_report.add_argument("run_id", help="ID da run ou caminho do arquivo .henke/runs/<id>.json")
+    p_report.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+
+    p_status = sub.add_parser("status", help="Lista runs de .henke/runs/ com outcome DERIVADO")
+    p_status.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_status.add_argument("--json", action="store_true", help="Saída em JSON")
+
+    p_setup = sub.add_parser("setup", help="Detecta o projeto e cria stubs .henke/ sem sobrescrever existentes")
+    p_setup.add_argument("dir", nargs="?", type=Path, default=Path("."), help="Diretório do projeto (default: cwd)")
+
+    p_auto = sub.add_parser("auto", help="Modo automático (scripts/henke_auto.py) com política de aprovação")
+    p_auto.add_argument("prompt", nargs="+", help="Prompt da tarefa a executar")
+    p_auto.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_auto.add_argument("--driver", default=None, help="Driver/executor externo")
+    p_auto.add_argument("--dry-run", action="store_true", help="Simula sem escrever nada")
+    p_auto.add_argument("--yes", action="store_true", help="Aprova automaticamente o permitido pela policy")
+    p_auto.add_argument("--policy", choices=("strict", "balanced", "yolo"), default="balanced", help="Política de aprovação")
+    p_auto.add_argument("--timeout", type=float, default=None, metavar="N", help="Teto em segundos")
 
     try:
         args = parser.parse_args(raw_argv)
@@ -562,11 +1178,40 @@ def main(argv: list[str] | None = None) -> int:
         if not prompt_val:
             print("ERRO: informe o prompt em 'henke route \"<prompt>\"'.", file=sys.stderr)
             return 2
-        is_compact = args.compact or not args.full
+        is_compact = args.compact or not (args.full or args.json)
         return _cmd_route(prompt_val, args.repo.resolve(), compact=is_compact)
 
-    if args.subcmd == "check" or args.subcmd == "goldfish":
-        return _cmd_check(args.repo.resolve(), spec_path=args.spec, as_json=args.json)
+    if args.subcmd == "check":
+        return _cmd_check(args.repo.resolve(), spec_path=args.spec, as_json=args.json, staged=args.staged)
+
+    if args.subcmd == "goldfish":
+        return _cmd_goldfish(
+            args.repo.resolve(),
+            spec_path=args.spec,
+            driver=args.driver,
+            run_ref=args.run_ref,
+            as_json=args.json,
+        )
+
+    if args.subcmd == "report":
+        return _cmd_report(args.repo.resolve(), args.run_id)
+
+    if args.subcmd == "status":
+        return _cmd_list_runs(args.repo.resolve(), as_json=args.json)
+
+    if args.subcmd == "setup":
+        return _cmd_setup(args.dir)
+
+    if args.subcmd == "auto":
+        return _cmd_auto(
+            " ".join(args.prompt),
+            args.repo,
+            driver=args.driver,
+            dry_run=args.dry_run,
+            yes=args.yes,
+            policy=args.policy,
+            timeout=args.timeout,
+        )
 
     if args.subcmd == "approve":
         from scripts.run_state import main as run_state_main
