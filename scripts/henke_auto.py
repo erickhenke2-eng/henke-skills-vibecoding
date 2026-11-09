@@ -599,18 +599,25 @@ def _dispatch_driver(
             return None, err, 1  # driver executou e falhou: falha mecânica, não uso
         return result, "", 0
 
-    if isinstance(driver, str) and driver.split(":", 1)[0] == "opencode":
-        model = driver.split(":", 1)[1] if ":" in driver else "opencode/deepseek-v4.1-flash-free"
-        adapter = SCRIPTS_DIR / "henke_driver_opencode.py"
+    if isinstance(driver, str) and driver.split(":", 1)[0] in ("opencode", "agent"):
+        # agent:<cli>[:model] → adapter genérico; 'opencode' é atalho de 'agent:opencode'.
+        spec = driver.split(":", 1)[1] if driver.startswith("agent:") else (
+            "opencode:" + driver.split(":", 1)[1] if ":" in driver else "opencode"
+        )
+        parts = spec.split(":", 1)
+        cli_name, model = parts[0], (parts[1] if len(parts) > 1 else "")
+        adapter = SCRIPTS_DIR / "henke_driver_agent.py"
         result, err = _call_cmd_driver(
-            f'"{sys.executable}" "{adapter}" {model}', envelope, repo_root, timeout_sec
+            f'"{sys.executable}" "{adapter}" {cli_name} {model}'.strip(),
+            envelope, repo_root, timeout_sec,
         )
         if err:
             return None, err, 1
         return result, "", 0
 
     return None, (
-        f"driver desconhecido '{driver}'. Use echo | stdin | opencode[:model] | cmd:<template>."
+        f"driver desconhecido '{driver}'. Use echo | stdin | agent:<cli>[:model] "
+        "| opencode[:model] | cmd:<template>."
     ), 2
 
 
@@ -979,7 +986,7 @@ def run_auto(args: argparse.Namespace) -> int:
     gates_timeout = float(timeout_opt) if timeout_opt else 300.0
     gres: dict | None = None
     rework_attempts = 0
-    real_driver = isinstance(driver, str) and driver.startswith(("cmd:", "opencode"))
+    real_driver = isinstance(driver, str) and driver.startswith(("cmd:", "opencode", "agent:"))
 
     if not gates_required:
         _record_stage(run_path, "gates", "nenhum portão obrigatório declarado pelo route")
