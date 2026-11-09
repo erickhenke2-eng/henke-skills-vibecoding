@@ -786,6 +786,23 @@ def _gates_max_rework() -> int:
     return MAX_REWORK
 
 
+def _discover_spec(repo_root: Path) -> Path | None:
+    """Spec ativa do projeto (docs/designs/*.md mais recente) — alimenta
+    `init_run.spec_path` (lido por run_gates) e o preflight. Sem spec, os
+    portões de contrato/drift são corretamente inviáveis → bloqueio fail-closed."""
+    try:
+        from scripts.spec_drift import discover_latest_spec
+    except ImportError:
+        try:
+            from spec_drift import discover_latest_spec
+        except ImportError:
+            return None
+    try:
+        return discover_latest_spec(repo_root)
+    except Exception:
+        return None
+
+
 def _preflight_gates(
     repo_root: Path, gates: list[str], spec_path: str | None = None
 ) -> tuple[bool, list[str]]:
@@ -1078,6 +1095,7 @@ def run_auto(args: argparse.Namespace) -> int:
         scopes, policy_doc, policy_name, str(route.get("mode", "")), yes
     )
     sensitive_hit = bool(scopes & (set(HARD_ALWAYS_ASK) | set(policy_doc.get("always_ask") or [])))
+    spec_path = _discover_spec(repo_root)
 
     if resumed is not None:
         run_id = cand.stem
@@ -1095,7 +1113,7 @@ def run_auto(args: argparse.Namespace) -> int:
             run_id,
             mode=str(route.get("mode", "ANALISAR")),
             archetype=str(route.get("archetype", "SHERLOCK")),
-            spec_path=None,
+            spec_path=str(spec_path) if spec_path else None,
             requires_human_auth=sensitive_hit,
             # run bloqueada por auth não declara mandatory_gates (nunca rodarão)
             mandatory_gates=None if sensitive_hit else list(route.get("gates_required") or []),
@@ -1192,7 +1210,9 @@ def run_auto(args: argparse.Namespace) -> int:
         # Portão obrigatório inviável (sem spec/baseline/HEAD/args) nunca vira
         # verde: bloquear aqui evita "agente editou e a run falhou depois".
         if gates_required:
-            pf_ok, pf_problems = _preflight_gates(repo_root, gates_required)
+            pf_ok, pf_problems = _preflight_gates(
+                repo_root, gates_required, str(spec_path) if spec_path else None
+            )
             if not pf_ok:
                 detail = "; ".join(pf_problems)
                 _record_stage(

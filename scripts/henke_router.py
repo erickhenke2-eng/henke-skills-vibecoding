@@ -663,7 +663,10 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
             {"name": name, "path": path, "score": sc, "reason": rsn}
             for sc, name, path, rsn in top
         ],
-        "gates_required": gates_required if top else list(MINIMAL_GATES),
+        # Fallback minimal só vale para modos não-mutantes: EXECUTAR sem skill
+        # mantém a matriz completa — escopo (spec_drift) e custódia não são
+        # negociáveis quando um driver vai editar o repo (Kimi #2).
+        "gates_required": gates_required if (top or mode == "EXECUTAR") else list(MINIMAL_GATES),
         "scope_paths": scope_paths,
         "negative_rules_triggered": matched_negatives,
         "unrouted_catalog_skills": unrouted,

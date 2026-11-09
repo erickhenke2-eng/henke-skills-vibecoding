@@ -183,7 +183,13 @@ def get_touched_files(git_root: Path, against: str | None = None, active_spec: P
 
     clean_touched = set()
     for p in touched:
-        if p.startswith(".git/") or p.startswith(".henke/runs/"):
+        if (p.startswith(".git/") or p.startswith(".henke/runs/")
+                or p.startswith(".henke/evidence/")):
+            continue
+        # Locks transitórios de runtime (auto-writer, install, *-state) —
+        # artefatos commitados de .henke/ (fence.json, baseline, PROJECT.json)
+        # NÃO são excluídos: adulterá-los continua sendo drift.
+        if p.startswith(".henke/") and p.endswith(".lock"):
             continue
         if p.startswith(".agents/") or p.startswith(".agents\\") or p == ".agents":
             continue

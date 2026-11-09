@@ -85,6 +85,11 @@ MAX_REWORK = 2  # máximo de ciclos de reparo do loop M3 (contrato público)
 
 _STDERR_TAIL_CHARS = 4000
 _GATES_COM_REPO_ARG = ("hazard", "a11y")
+# Portões que consomem artefatos gerados (ratchet←metrics TSV, fence←edges.json):
+# o cmd resolvido aponta para gate_pipeline.py (coletor→portão), mas o id
+# canônico continua sendo o do portão real — mandatory_gates casa com a matriz.
+_PIPELINE_GATES = {"ratchet", "fence"}
+_PIPELINE_SCRIPT = SCRIPTS_DIR / "gate_pipeline.py"
 
 
 def _safe_run_id(run_id: str) -> str:
@@ -107,8 +112,8 @@ def _git_has_head(repo_root: Path) -> bool:
 
 
 _SKIP_REASONS = {
-    "ratchet": "exige --baseline/--current (TSVs de referência) — não autoexecutável sem baseline registrado",
-    "fence_check": "exige JSONs de contrato gerados pelo pipeline — não autoexecutável fora dele",
+    "ratchet": "exige .henke/ratchet-baseline.tsv — capture o baseline de métricas do projeto uma vez (repo_signals.py metrics --root .)",
+    "fence_check": "exige .henke/fence.json — declare o modelo de camadas/módulos do projeto",
     "coverage_ledger": "exige ledger de cobertura — rode `coverage_ledger.py init` antes",
     "spec_drift": "exige spec de referência — a run não declarou `spec_path`",
     "contract_closure": "exige spec de referência — a run não declarou `spec_path`",
@@ -125,7 +130,7 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
         tests_dir = repo_root / "tests"
         return [str(tests_dir)] if tests_dir.is_dir() else [str(repo_root)]
     if name == "metaconfig":
-        return ["--against", "HEAD"] if _git_has_head(repo_root) else None
+        return ["--repo", str(repo_root), "--against", "HEAD"] if _git_has_head(repo_root) else None
     if name == "signals":
         return ["metrics", "--root", str(repo_root)]
     if name == "drift":
@@ -138,8 +143,12 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
     if name == "coverage":
         led = repo_root / ".henke" / "coverage-ledger.json"
         return ["verify", str(led)] if led.is_file() else None
-    if name in ("ratchet", "fence"):
-        return None
+    if name == "ratchet":
+        base = repo_root / ".henke" / "ratchet-baseline.tsv"
+        return ["ratchet", "--repo", str(repo_root), "--baseline", str(base)] if base.is_file() else None
+    if name == "fence":
+        fenc = repo_root / ".henke" / "fence.json"
+        return ["fence", "--repo", str(repo_root), "--fence", str(fenc)] if fenc.is_file() else None
     return []
 
 
@@ -153,7 +162,11 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None) ->
         if not script.is_file():
             return None
         args = _default_gate_args(token, repo_root, spec_path)
-        return script.stem, ([sys.executable, str(script), *args] if args is not None else None)
+        if args is None:
+            return script.stem, None
+        if script.stem in _PIPELINE_GATES:
+            return script.stem, [sys.executable, str(_PIPELINE_SCRIPT), *args]
+        return script.stem, [sys.executable, str(script), *args]
     if not _looks_like_path(token):
         return None
     cand = Path(token)
@@ -172,6 +185,8 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None) ->
     args = _default_gate_args(name, repo_root, spec_path) if name else [str(repo_root)]
     if args is None:
         return resolved.stem, None
+    if name in _PIPELINE_GATES:
+        return resolved.stem, [sys.executable, str(_PIPELINE_SCRIPT), *args]
     return resolved.stem, [sys.executable, str(resolved), *args]
 
 
