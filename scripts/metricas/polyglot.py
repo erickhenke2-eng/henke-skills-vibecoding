@@ -72,11 +72,20 @@ def mask_c_like(text: str, lang: str = "") -> str:
             i = j
         elif c == "/" and nxt == "*":
             j = text.find("*/", i + 2)
-            j = n - 2 if j == -1 else j
-            for k in range(i, j + 2):
-                if out[k] != "\n":
+            if j == -1:
+                # `/*` sem fechamento (p.ex. dentro de regex `/ab\/*/` em
+                # início de linha, lido como divisão) NÃO mascara até o EOF —
+                # engolia todo o arquivo seguinte (falso-verde, banca v10 A3).
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                for k in range(i, j):
                     out[k] = " "
-            i = j + 2
+                i = j
+            else:
+                for k in range(i, j + 2):
+                    if out[k] != "\n":
+                        out[k] = " "
+                i = j + 2
         elif text.startswith("<!--", i):
             if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
                 # Annex B: `<!--` em JS é comentário de LINHA — tratá-lo como
@@ -232,11 +241,20 @@ def mask_comments_only(text: str, lang: str = "") -> str:
             i = j
         elif c == "/" and nxt == "*":
             j = text.find("*/", i + 2)
-            j = n - 2 if j == -1 else j
-            for k in range(i, j + 2):
-                if out[k] != "\n":
+            if j == -1:
+                # `/*` sem fechamento (p.ex. dentro de regex `/ab\/*/` em
+                # início de linha, lido como divisão) NÃO mascara até o EOF —
+                # engolia todo o arquivo seguinte (falso-verde, banca v10 A3).
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                for k in range(i, j):
                     out[k] = " "
-            i = j + 2
+                i = j
+            else:
+                for k in range(i, j + 2):
+                    if out[k] != "\n":
+                        out[k] = " "
+                i = j + 2
         elif text.startswith("<!--", i):
             if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
                 j = text.find("\n", i)

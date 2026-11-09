@@ -23,6 +23,8 @@ Exit codes:
   2  erro de uso / ref inválida / repo ilegível
 """
 from pathlib import Path
+import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 import argparse
 import json
 import re
@@ -364,7 +366,11 @@ def main() -> int:
     ap.add_argument("--against", type=str, required=True, help="ref git de comparação (ex.: HEAD, main)")
     ap.add_argument("--spec", type=str, default=None, help="spec cujo '## 4. Escopo Declarado' autoriza arquivos")
     ap.add_argument("--json", action="store_true")
-    args = ap.parse_args()
+    try:
+        args = ap.parse_args()
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
 
     repo = Path(args.repo)
     # `--against` vai ao argv do git: valor começando com '-' vira opção

@@ -496,7 +496,11 @@ def main() -> None:
     ap.add_argument("--repo", default=".", help="Raiz do repositório Git")
     ap.add_argument("--against", default=None, help="Commit base opcional para --require-touched")
     ap.add_argument("--require-touched", action="store_true", help="Exige que todo arquivo declarado tenha sido tocado no diff")
-    args = ap.parse_args()
+    try:
+        args = ap.parse_args()
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
 
     spec_path = Path(args.spec).resolve()
     repo_root = Path(args.repo).resolve()

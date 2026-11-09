@@ -146,10 +146,12 @@ class GateTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_cli_exit_codes(self):
-        """--help funciona; baseline+check via CLI retornam 0/1 nos caminhos certos."""
+        """--help sai 2 (portão sem veredito nunca é verde — banca v10 A1);
+        baseline+check via CLI retornam 0/1 nos caminhos certos."""
         script = ROOT / "scripts" / "henke_gate.py"
         help_res = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, encoding="utf-8", errors="replace")
-        self.assertEqual(help_res.returncode, 0)
+        self.assertEqual(help_res.returncode, 2)
+        self.assertIn("usage:", (help_res.stdout or "") + (help_res.stderr or ""))
         out = self.repo / ".gate.json"
         res = subprocess.run(
             [sys.executable, str(script), "baseline", "--out", str(out)],

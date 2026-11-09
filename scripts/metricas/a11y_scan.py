@@ -270,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 2
+        return exc.code if isinstance(exc.code, int) and exc.code != 0 else 2
 
     if not args.path.exists():
         print(f"ERRO: caminho inexistente: {args.path}", file=sys.stderr)

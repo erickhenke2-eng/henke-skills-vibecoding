@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess

@@ -8,6 +8,8 @@ Anti-TOCTOU: a spec é lida UMA única vez (bytes) e tanto o sha256 quanto o esc
 declarado são derivados do MESMO buffer — impossível combinar hash antigo com
 escopo novo se o arquivo for adulterado entre leituras.
 """
+import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 import argparse
 import fnmatch
 import hashlib
@@ -393,7 +395,11 @@ def main():
     parser.add_argument("--expected-hash", type=str, help="Hash SHA256 esperado da spec pré-aprovada")
     parser.add_argument("--against", type=str, default=None, help="Commit/Ref do git para comparação do diff")
     parser.add_argument("--repo", type=Path, default=None, help="Raiz do repositório Git")
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
 
     git_root = (args.repo or get_git_root(Path.cwd())).resolve()
 

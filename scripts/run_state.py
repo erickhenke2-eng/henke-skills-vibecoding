@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 from pathlib import Path
 import subprocess
 import sys
@@ -274,7 +275,12 @@ def _load_evidence_manifest(run_id: str) -> dict | None:
 # para lavar o próprio veredito (banca v7 — F-03): o sidecar guarda o valor
 # de nascimento e verify_run_file re-ancora antes de confiar.
 _ANCHORED_FIELDS = ("mode", "mandatory_gates", "requires_human_auth",
-                    "gates_required", "driver", "spec_path", "ignored_start")
+                    "gates_required", "driver", "spec_path", "ignored_start",
+                    "prompt", "route_snapshot")
+# `approval_binding` fica de fora de propósito: approve_run o muta
+# legitimamente (re-ancora head). O que o binding cobre (prompt/route/driver
+# via scope_sha256) já está ancorado pelos campos acima — divergência neles é
+# detectada antes do dispatch, não só no verify pós-execução.
 
 
 def write_anchor_sidecar(run_id: str, spec_path: str | None,
@@ -428,6 +434,12 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
         if isinstance(ec, int) and not isinstance(ec, bool) and ec not in (0, 3):
             manual_failures.append(
                 f"GATE-FAILED: {gate_name} (exit {ec} — atestação sem evidência física)"
+            )
+        elif not isinstance(ec, int) or isinstance(ec, bool):
+            # A1 (banca v10): exit_code adulterado para "2"/2.0/true era
+            # DESCARTADO do cômputo — atestação de tipo confuso lava o vermelho.
+            manual_failures.append(
+                f"GATE-FAILED: {gate_name} (exit_code de tipo inválido {ec!r})"
             )
 
     if not physical_gates:
@@ -670,16 +682,23 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
                 "manifesto local (plantado ou gravado fora de record_gate)"
             )
             continue
-        try:
-            m_exit = int(m.get("exit_code"))
-            r_exit = int(g_info.get("exit_code"))
-        except (TypeError, ValueError):
-            m_exit, r_exit = -1, -2
-        if m_exit != r_exit:
+        # A1 (banca v10): comparação por coerção int() deixava "2"==2 passar
+        # enquanto o derive ignorava o valor não-int — veredito vermelho
+        # lavável por confusão de tipo. Exige identidade tipo+valor.
+        m_exit, r_exit = m.get("exit_code"), g_info.get("exit_code")
+        if not (type(m_exit) is type(r_exit) and m_exit == r_exit):
             tampered.append(
                 f"GATE-VERDICT-TAMPERED: {g_name} — exit_code na run "
                 f"({g_info.get('exit_code')}) diverge do manifesto local "
                 f"({m.get('exit_code')})"
+            )
+            continue
+        # A6 (banca v10): `command` é texto forense — divergência do manifesto
+        # = trilha adulterada (manifesto legado sem o campo não bloqueia).
+        if m.get("command") is not None and m.get("command") != g_info.get("command"):
+            tampered.append(
+                f"GATE-COMMAND-TAMPERED: {g_name} — 'command' na run diverge "
+                "do manifesto local"
             )
             continue
         if bool(m.get("manual")) != bool(g_info.get("manual")):
@@ -1022,6 +1041,20 @@ def approve_run(run_path: Path, approver: str = "human") -> dict:
     """
     with _file_lock(run_path):
         data = _load_run(run_path)
+        # A1 (banca v10): approve sem checagem = token sobre binding adulterado.
+        # O fingerprint é determinístico (recomputável por quem edita o JSON) —
+        # a prova real é a âncora LOCAL: campos de decisão divergentes do
+        # sidecar = run adulterada, aprovação recusada antes do dispatch.
+        _sc = load_anchor_sidecar(
+            str(data.get("run_id") or run_path.stem),
+            repo_root=_repo_root_for_run(run_path))
+        _sc_fields = (_sc or {}).get("fields") or {}
+        _drift = [f for f in _ANCHORED_FIELDS
+                  if f in _sc_fields and _sc_fields[f] != data.get(f)]
+        if _drift:
+            raise ValueError(
+                "ANCHOR-DRIFT: campos da run divergem do sidecar local "
+                f"({', '.join(_drift)}) — aprovação recusada")
         data["review_status"] = "approved"
         data["approved_by"] = approver.strip() or "human"
         data["approved_at"] = _now_iso()
@@ -1031,9 +1064,11 @@ def approve_run(run_path: Path, approver: str = "human") -> dict:
         # Re-ancora o vínculo executável ao HEAD que o humano está aprovando
         # AGORA — sem isso, um commit legítimo entre aprovação e --resume
         # tornava a run irrecuperável para sempre (approve→commit→resume→stale→loop).
+        # `driver` NÃO é re-ancorado: re-ancorar ao valor possivelmente
+        # adulterado lavaria a troca de driver (banca v10 A1) — o valor de
+        # nascimento já está no sidecar; divergência aborta acima.
         if isinstance(data.get("approval_binding"), dict):
             data["approval_binding"]["head"] = approved_head
-            data["approval_binding"]["driver"] = data.get("driver")
         derived, reasons = derive_run_outcome(data)
         data["outcome"] = derived
         data["reasons"] = reasons

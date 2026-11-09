@@ -65,7 +65,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", required=True, type=Path)
     ap.add_argument("--baseline", type=Path, default=None, help="TSV baseline (ratchet)")
     ap.add_argument("--fence", type=Path, default=None, help="fence.json de camadas (fence)")
-    args = ap.parse_args(argv)
+    try:
+        args = ap.parse_args(argv)
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
 
     repo = args.repo.resolve()
     gate = args.gate

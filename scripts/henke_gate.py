@@ -11,6 +11,8 @@ pré-existente do usuário permanece intacta e toda mutação nova pertence ao
 escopo declarado; bloqueia (exit 1) em mutação inexplicada, commit não
 autorizado sobre o baseline, histórico reescrito ou worktree/branch violada.
 """
+import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 import argparse
 import hashlib
 import json
@@ -293,7 +295,11 @@ def main(argv=None):
                          help="Padrões de path permitidos (ex.: 'scripts/*', 'tests/**', 'PROTOCOLO.md')")
     p_check.add_argument("--allow-commit", action="store_true",
                          help="Permite commits novos desde o baseline (descendentes, dentro do escopo)")
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
 
     cwd = Path(getattr(args, "repo", Path.cwd())).resolve()
     try:

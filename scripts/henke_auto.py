@@ -133,6 +133,12 @@ DESTRUCTIVE_VERBS = (
     # Paráfrases indiretas PT (banca v9 — A6)
     "esvazia", "esvaziar", "some com", "varre", "varrer", "tira tudo",
     "tirar tudo", "limpa tudo", "apaga tudo",
+    # Particípios EN + comandos bare/colados/drives (banca v10 — A5)
+    "deleted", "removed", "dropped", "wiped", "destroyed", "purged",
+    "erased", "truncated", "uninstall", "uninstalled", "desinstalou",
+    "rm", "rd", "del", "dd of=", "dropdb", "dropuser", "drop database",
+    "checkout --", "git restore", "restore --", "branch -d", "format e:",
+    "format f:", "format a:", "format b:", "format g:", "sdelete64",
 )
 METACONFIG_SIGNALS = (
     "package.json", "package-lock", "lockfile", "requirements", "pyproject",
@@ -164,6 +170,9 @@ _HOMOGLYPHS = str.maketrans({
     "ρ": "p", "τ": "t", "υ": "u", "χ": "x", "ω": "w", "ϲ": "c", "ϳ": "j",
     "А": "a", "В": "b", "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
     "Р": "p", "С": "c", "Т": "t", "Х": "x", "І": "i",
+    # Latim estendido/armênio/IPA que a tabela não cobria (banca v10 — A5):
+    "ɑ": "a", "ɛ": "e", "ı": "i", "ե": "e", "ռ": "r", "ʀ": "r",
+    "ɢ": "g", "ʟ": "l", "ɴ": "n", "ɵ": "o", "ɸ": "o", "χ": "x",
 })
 
 
@@ -602,6 +611,13 @@ def _build_envelope(
         name = str(sk.get("name", "")).strip()
         raw_path = str(sk.get("path", "")).strip()
         skill_path = Path(raw_path) if raw_path else (SUITE_ROOT / name / "SKILL.md")
+        # A1 (banca v10): route_snapshot do resume é texto do repo adulterável —
+        # skill apontando p/ ~/.ssh/id_rsa exfiltrava conteúdo no envelope.
+        # Toda SKILL.md precisa resolver DENTRO da suíte.
+        try:
+            skill_path.resolve().relative_to(SUITE_ROOT.resolve())
+        except ValueError:
+            return None, f"SKILL-PATH-ESCAPE: '{name}' aponta fora da suíte: {skill_path}"
         if not skill_path.is_file():
             return None, f"SKILL.md ilegível para a skill roteada '{name}': {skill_path}"
         try:
@@ -1301,12 +1317,17 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             # A2 (banca v9): resume NUNCA regrava o sidecar a partir do JSON
             # adulterável — regravar lavaria head_start/spec_sha256 movidos
             # pelo atacante entre a criação e o approve. Divergência = falha.
-            from scripts.run_state import load_anchor_sidecar as _las
+            from scripts.run_state import (
+                load_anchor_sidecar as _las, _ANCHORED_FIELDS)
             _sc = _las(str(_run_now.get("run_id") or run_id), repo_root=repo_root)
             _drift = ["sidecar ausente"] if not isinstance(_sc, dict) else [
                 f for f in ("spec_path", "spec_sha256", "head_start")
                 if _sc.get(f) != _run_now.get(f)
-            ]
+            ] + [
+                f for f in _ANCHORED_FIELDS
+                if f in ((_sc or {}).get("fields") or {})
+                and (_sc["fields"][f] != _run_now.get(f))
+            ] if isinstance(_sc, dict) else []
             if _drift:
                 raise RuntimeError(
                     "ANCHOR-DRIFT: âncoras da run divergem do sidecar local "
@@ -1458,9 +1479,18 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                     str(f).replace("\\", "/").strip().removeprefix("./")
                     for f in declared_changes
                 }
+                # A3 (banca v10): excluir TODO .henke/ deixava o driver
+                # regravar ratchet-baseline/fence/coverage-ledger mid-run sem
+                # o audit ver — só o estado MUTÁVEL da máquina é isento.
+                _henke_mutable = (
+                    ".henke/runs/", ".henke/evidence/", ".henke/exec_log.jsonl",
+                    ".henke/gate-baseline.json", ".henke/install-manifest.json",
+                )
                 undeclared = sorted(
                     t for t in touched
-                    if t not in declared and not t.startswith(".henke/")
+                    if t not in declared and not (
+                        t.startswith(".henke/")
+                        and any(t.startswith(m) or t == m for m in _henke_mutable))
                 )
                 # F2 (banca v8): escrita em path IGNORADO é invisível a todo
                 # portão de diff — só o snapshot de nascimento (ancorado no
@@ -1489,6 +1519,14 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                             p for p in cur_ig - set(_ign_start or [])
                             if not p.startswith(".henke/") and p not in declared
                         )
+                        # A3 (banca v10): DELETAR ignorado pré-existente
+                        # (.env, dist/payload) também some do conjunto —
+                        # simetricamente invisível ao diff.
+                        gone_ignored = sorted(
+                            p for p in set(_ign_start or []) - cur_ig
+                            if not p.startswith(".henke/") and p not in declared
+                        )
+                        new_ignored += [f"{p} (deletado)" for p in gone_ignored]
                 # Arquivo gitignored é INVISÍVEL ao diff (status -uall não lista
                 # ignorados): declarar `dist/x.js` ou `.env` permite esconder a
                 # edição de todos os portões baseados em diff — inconclusivo.
@@ -1628,9 +1666,12 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         # preenchida, test_cmd fora da allowlist é recusado em vez de rodar
         # um comando arbitrário do PROJECT.json do repo.
         _allowed = policy_efetiva.get("allowed_cmds") or []
-        if _allowed and not any(
-                str(test_cmd).strip().startswith(str(p).strip())
-                for p in _allowed if str(p).strip()):
+        if isinstance(_allowed, str):
+            _allowed = [_allowed]  # string solta não vira prefixo-por-caractere
+        # A4 (banca v10): startswith deixava 'npm test-pwn' passar sob
+        # 'npm test' — allowlist é match EXATO com whitespace normalizado.
+        _allowed_set = {" ".join(str(p).split()) for p in _allowed if str(p).strip()}
+        if _allowed_set and " ".join(str(test_cmd).split()) not in _allowed_set:
             t_exit, t_out = 2, (
                 f"ALLOWED-CMDS-REJECTED: test_cmd '{test_cmd}' fora da "
                 "allowlist de POLICY.json"

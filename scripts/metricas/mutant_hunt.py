@@ -33,6 +33,7 @@ import ast
 import copy
 import json
 import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 from pathlib import Path
 import re
 import shlex
@@ -526,7 +527,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", type=Path, default=Path("."),
                         help="Raiz do repo git no modo --auto-diff (default: cwd)")
     parser.add_argument("--max-mutants", type=int, default=15, help="Máximo de mutantes gerados (default: 15)")
-    parser.add_argument("--min-kill-rate", type=float, default=0.0, help="Taxa mínima de abate em %% (ex: 80.0 ou 0.80)")
+    # A13 (banca v10): default 0.0 tornava `kill_rate >= min` tautologicamente
+    # verde sem a flag — portão que sempre passa não é portão.
+    parser.add_argument("--min-kill-rate", type=float, default=None, help="Taxa mínima de abate em %% (ex: 80.0 ou 0.80) — obrigatória")
     parser.add_argument(
         "--diff-against",
         "--diff",
@@ -542,7 +545,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 2
+        return exc.code if isinstance(exc.code, int) and exc.code != 0 else 2
+
+    if args.min_kill_rate is None:
+        print("ERRO: --min-kill-rate é obrigatória — portão sem critério de "
+              "abate é verde tautológico.", file=sys.stderr)
+        return 2
 
     if args.auto_diff:
         return _main_auto_diff(args)

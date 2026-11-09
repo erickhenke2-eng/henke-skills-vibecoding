@@ -38,6 +38,7 @@ import fnmatch
 import io
 import json
 import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 from pathlib import Path
 import re
 import subprocess
@@ -150,8 +151,8 @@ _JS_SHELL_OBJ_RE = re.compile(
     r"|\b(?:execFile|execFileSync|spawn|spawnSync)\s*\(\s*(?:\+|[A-Za-z_$])"
     r"|\bvm\.(?:runIn|Script)\w*\s*\("
     r"|\b(?:setTimeout|setInterval)\s*\(\s*[,)]"
-    r"|\brequire\s*\(\s*(?!\))"
-    r"|\bimport\s*\(\s*(?!\))"
+    r"|\brequire\s*\(\s*(?!\s*\))"
+    r"|\bimport\s*\(\s*(?!\s*\))"
     r"|(?<![.\w$])eval\s*\(|\.eval\s*\("
 )
 _RS_SHELL_RE = re.compile(r'Command::new\s*\(\s*\)\s*|\bCommand::new\s*\([^)]*\)\s*\.\s*arg\s*\(\s*"(?:-c|/c)"')
@@ -518,6 +519,27 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
         if isinstance(func, ast.Attribute):
             base = resolve(func.value)
             return f"{base}.{func.attr}" if base else func.attr
+        if isinstance(func, ast.Subscript):
+            # __builtins__["eval"] / vars(os)["system"] — subscript literal
+            # sobre namespace resolve como base.<literal> (banca v10 A5).
+            base = resolve(func.value)
+            sl = func.slice
+            if isinstance(sl, ast.Constant) and isinstance(sl.value, str):
+                return f"{base}.{sl.value}" if base else sl.value
+            return base
+        if isinstance(func, ast.Call):
+            # importlib.import_module("os").system(x) — o Call retorna o
+            # módulo nomeado pelo arg literal; getattr(mod, "attr") idem.
+            f = resolve(func.func)
+            if f.rsplit(".", 1)[-1] in ("import_module", "__import__") and func.args:
+                a0 = func.args[0]
+                if isinstance(a0, ast.Constant) and isinstance(a0.value, str):
+                    return a0.value
+            if f.rsplit(".", 1)[-1] == "getattr" and len(func.args) >= 2:
+                a0, a1 = resolve(func.args[0]), func.args[1]
+                if isinstance(a1, ast.Constant) and isinstance(a1.value, str):
+                    return f"{a0}.{a1.value}" if a0 else a1.value
+            return f
         return ""
 
     # Bindings de "loader" por nome — `SafeLoader = yaml.Loader` (ou
@@ -984,7 +1006,9 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
             cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
         )
         if top_res.returncode != 0:
-            return []
+            # rc!=0 silencioso = .env commitado invisível (banca v10 A7).
+            return [("ENV-CHECK-UNAVAILABLE", str(target), "git",
+                     "git rev-parse falhou — arquivos sensíveis commitados não auditados")]
         git_root = Path(top_res.stdout.strip())
         res = subprocess.run(
             ["git", "-c", "core.quotePath=false",
@@ -993,7 +1017,8 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
             cwd=str(git_root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
         )
         if res.returncode != 0:
-            return []
+            return [("ENV-CHECK-UNAVAILABLE", str(target), "git",
+                     "git ls-files falhou — arquivos sensíveis commitados não auditados")]
     except Exception:
         # Git indisponível ≠ repo limpo — falha de enumeração vira finding de
         # infraestrutura (fail-closed, banca v7 — A10).
@@ -1068,7 +1093,11 @@ def main() -> None:
                     help="Aceita EXPLICITAMENTE a lacuna de cobertura de arquivos pulados "
                          "por tamanho/legibilidade (oversize). Sem a flag, oversize>0 -> exit 2.")
     ap.add_argument("--json", action="store_true", help="Emite saída em JSON")
-    args = ap.parse_args()
+    try:
+        args = ap.parse_args()
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
 
     targets = list(args.paths)
     dist_mode = False

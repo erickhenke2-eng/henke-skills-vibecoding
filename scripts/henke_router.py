@@ -61,6 +61,9 @@ _HOMOGLYPHS = str.maketrans({
     "ρ": "p", "τ": "t", "υ": "u", "χ": "x", "ω": "w", "ϲ": "c", "ϳ": "j",
     "А": "a", "В": "b", "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
     "Р": "p", "С": "c", "Т": "t", "Х": "x", "І": "i",
+    # Latim estendido/armênio/IPA que a tabela não cobria (banca v10 — A5):
+    "ɑ": "a", "ɛ": "e", "ı": "i", "ե": "e", "ռ": "r", "ʀ": "r",
+    "ɢ": "g", "ʟ": "l", "ɴ": "n", "ɵ": "o", "ɸ": "o", "χ": "x",
 })
 
 
@@ -210,6 +213,12 @@ DESTRUCTIVE_SIGNALS = (
     "esvazia", "esvaziar", "esvazie", "some com", "suma com", "varre",
     "varrer", "limpa o banco", "limpa tudo", "tira tudo", "tirar tudo",
     "esvazia o banco", "limpa o repo", "apaga tudo",
+    # Particípios EN + comandos bare/colados/drives (banca v10 — A5):
+    "deleted", "removed", "dropped", "wiped", "destroyed", "purged",
+    "erased", "truncated", "uninstall", "uninstalled", "desinstalou",
+    "rm", "rd", "del", "dd of=", "dropdb", "dropuser", "drop database",
+    "checkout --", "git restore", "restore --", "branch -d", "format e:",
+    "format f:", "format a:", "format b:", "format g:", "sdelete64",
 )
 _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 
@@ -218,6 +227,8 @@ PUBLISH_ONLY_SIGNALS = (
     "sobe", "subir", "pro ar", "no ar", "em producao",
     "publish", "npm publish", "pypi", "release", "lanca release", "git push",
     "push na main", "push pra main", "push origin",
+    # bare push / prod (banca v10 — A5): "faz push", "mete em prod".
+    "push", "prod", "em prod", "sobe em prod",
     "faxina", "limpa o repo", "apaga arquivos", "reversao", "reverte", "rollback",
 )
 PUBLISH_SIGNALS = PUBLISH_ONLY_SIGNALS + DESTRUCTIVE_SIGNALS

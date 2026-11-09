@@ -444,6 +444,12 @@ def _cmd_exec(
                         from audit_ledger import verify_log_chain as _vlc  # type: ignore
                     except ImportError:
                         _vlc = None  # type: ignore[assignment]
+                # A4 (banca v10): import falho no caminho CANÔNICO não pode
+                # pular a checagem em silêncio — fail closed.
+                if _is_canonical and _vlc is None:
+                    print("ERRO: verify_log_chain indisponível — append no "
+                          "log canônico recusado.", file=sys.stderr)
+                    return 2
                 if _vlc is not None and _is_canonical:
                     _chain_errors, _last = _vlc(exec_log_path)
                     if _chain_errors:

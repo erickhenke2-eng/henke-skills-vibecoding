@@ -26,6 +26,7 @@ import ast
 import json
 import math
 import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 import subprocess
 import sys
 from pathlib import Path
