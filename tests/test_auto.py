@@ -49,7 +49,7 @@ def _fake_preflight_ok(repo, gates, spec_path=None):
     return True, []
 
 
-def _fake_gates_ok(repo, gates, run_id, timeout_sec):
+def _fake_gates_ok(repo, gates, run_id, timeout_sec, test_cmd=None):
     """Emula henke_gates.run_gates(record=True): grava cada portão verde na run."""
     rp = Path(repo) / ".henke" / "runs" / f"{run_id}.json"
     verdicts = []
@@ -59,7 +59,7 @@ def _fake_gates_ok(repo, gates, run_id, timeout_sec):
     return {"verdicts": verdicts, "all_green": True, "ran": len(gates)}
 
 
-def _fake_gates_red(repo, gates, run_id, timeout_sec):
+def _fake_gates_red(repo, gates, run_id, timeout_sec, test_cmd=None):
     """Emula run_gates com o primeiro portão vermelho."""
     rp = Path(repo) / ".henke" / "runs" / f"{run_id}.json"
     verdicts = []

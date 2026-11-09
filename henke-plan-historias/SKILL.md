@@ -175,7 +175,7 @@ Todo planejamento gera um arquivo de especificação estruturado em `docs/design
 **Handoff natural:** fila pronta → sugira começar pelo primeiro cartão com a skill que o cartão pede (feature de código → henke-code-cirurgico/ponte, visual → henke-ui-*).
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
-Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no [PROTOCOLO §12](../PROTOCOLO.md) — confirme cada item lá antes de declarar a tarefa concluída:
+Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no PROTOCOLO §12 — confirme cada item lá antes de declarar a tarefa concluída:
 
 - [ ] Checklist canônico de entrega do PROTOCOLO §12 cumprido (entrega real zero-stub, portão vs produto, ledger de evidência, custódia de ambiente, ressalvas transparentes).
 

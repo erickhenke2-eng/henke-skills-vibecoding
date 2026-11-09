@@ -123,6 +123,6 @@ Se encontrou divergência diário×código, mencione explicitamente — honestid
 **Handoff natural:** usuário confirma o próximo passo → a skill que resolve entra (feature → henke-code-*, bug → henke-debug-*, tarefa → henke-plan-historias).
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
-Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no [PROTOCOLO §12](../PROTOCOLO.md) — confirme cada item lá antes de declarar a tarefa concluída:
+Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no PROTOCOLO §12 — confirme cada item lá antes de declarar a tarefa concluída:
 
 - [ ] Checklist canônico de entrega do PROTOCOLO §12 cumprido (entrega real zero-stub, portão vs produto, ledger de evidência, custódia de ambiente, ressalvas transparentes).

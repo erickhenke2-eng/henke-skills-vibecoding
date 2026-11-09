@@ -13,11 +13,18 @@ Se ela já está vermelha (`baseline_broken`) ou estoura o timeout (`baseline_ti
 não existe baseline confiável — saída 2. Timeout em mutante individual é INCONCLUSIVO
 (não conta como kill) e zero mutantes gerados também é inconclusivo (saída 2), nunca 100%.
 
+Modo `--auto-diff`: em vez de `--target`, enumera sozinho os arquivos `.py`
+alterados no worktree (`git diff --name-only <ref>` + não-rastreados via
+`ls-files --others`) e caça mutantes em cada um — é o modo usado quando o
+portão entra na matriz EXECUTAR, onde o "alvo" é justamente o diff do driver.
+
 Códigos de saída:
   0  kill_rate >= --min-kill-rate
   1  kill_rate < --min-kill-rate (testes fracos / mutantes sobreviventes acima do tolerado)
   2  arquivo inválido, erro de sintaxe, parâmetros incorretos, suíte base quebrada,
      timeout de baseline ou zero mutantes (resultado inconclusivo)
+  3  NÃO-APLICÁVEL (--auto-diff): zero arquivos .py no diff — o portão rodou e
+     reportou "nada a verificar"; o runner conta 3 como n/a, nunca verde
 """
 from __future__ import annotations
 
@@ -325,11 +332,136 @@ def _split_cmd(cmd_str: str) -> list[str]:
     return [tok.strip("\"'") if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in "\"'" else tok for tok in tokens]
 
 
+def _git_z(repo: Path, *args: str) -> list[str]:
+    """Lista de paths via saída NUL-safe (`-z`) — nomes com \\n/aspas não forjam."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if res.returncode != 0:
+        return []
+    return [p for p in res.stdout.decode("utf-8", errors="replace").split("\0") if p]
+
+
+def _auto_diff_targets(repo: Path, git_ref: str) -> list[tuple[Path, bool]]:
+    """Arquivos .py do worktree diff vs `git_ref` + não-rastreados.
+
+    Retorna [(abs_path, is_new)]. `is_new` = arquivo não-rastreado (criado pelo
+    driver): sem baseline no git → caça o arquivo inteiro (diff_lines=None).
+    """
+    repo = repo.resolve()
+    seen: set[str] = set()
+    out: list[tuple[Path, bool]] = []
+    for rel in _git_z(repo, "diff", "-z", "--name-only", git_ref, "--", "*.py"):
+        seen.add(rel.replace("/", os.sep).lower())
+        p = (repo / rel).resolve()
+        if p.is_file():
+            out.append((p, False))
+    for rel in _git_z(repo, "ls-files", "-z", "--others", "--exclude-standard", "--", "*.py"):
+        norm = rel.replace("/", os.sep).lower()
+        if norm in seen:
+            continue
+        p = (repo / rel).resolve()
+        if p.is_file():
+            out.append((p, True))
+    return out
+
+
+def _main_auto_diff(args: argparse.Namespace) -> int:
+    """Modo matriz: caça mutantes em todo .py do diff vs `--diff-against` (default HEAD)."""
+    repo = Path(args.repo).resolve()
+    if not (repo / ".git").exists():
+        print(f"ERRO: --repo não é worktree git: {repo}", file=sys.stderr)
+        return 2
+    git_ref = args.diff_against or "HEAD"
+    targets = _auto_diff_targets(repo, git_ref)
+    if not targets:
+        print(
+            f"N/A: zero arquivos .py no diff vs {git_ref} (inclui não-rastreados) — "
+            "portão não aplicável (veredito n/a, não verde).",
+            file=sys.stderr,
+        )
+        return 3
+
+    cmd_list = _split_cmd(args.test_cmd or "")
+    if not cmd_list:
+        print(
+            f"ERRO: {len(targets)} alvo(s) .py no diff mas --test-cmd ausente — "
+            "inconclusivo, nunca verde.",
+            file=sys.stderr,
+        )
+        return 2
+
+    per_file: list[dict] = []
+    total = killed = survived_n = inconclusive_n = 0
+    hard_inconclusive = False
+    for target_path, is_new in sorted(targets, key=lambda t: str(t[0])):
+        diff_lines = None if is_new else extract_diff_lines(target_path, git_ref)
+        try:
+            rep = run_mutant_hunt(
+                target_path, cmd_list,
+                max_mutants=args.max_mutants,
+                diff_lines=diff_lines,
+                timeout_sec=args.timeout,
+            )
+        except (SyntaxError, OSError, UnicodeDecodeError) as exc:
+            print(f"ERRO ao processar AST de {target_path}: {exc}", file=sys.stderr)
+            hard_inconclusive = True
+            continue
+        rep["_file"] = str(target_path)
+        rep["_is_new"] = is_new
+        per_file.append(rep)
+        if rep.get("status") in ("baseline_broken", "baseline_timeout"):
+            hard_inconclusive = True
+        total += rep.get("total_mutants") or 0
+        killed += rep.get("killed") or 0
+        survived_n += rep.get("survived") or 0
+        inconclusive_n += rep.get("inconclusive") or 0
+
+    if args.json:
+        print(json.dumps({"files": per_file,
+                          "total_mutants": total, "killed": killed,
+                          "survived": survived_n, "inconclusive": inconclusive_n,
+                          "kill_rate": round(killed / total * 100.0, 1) if total else None},
+                         ensure_ascii=False, indent=2))
+    else:
+        for rep in per_file:
+            kr = rep.get("kill_rate")
+            kr_txt = f"{kr:.1f}%" if isinstance(kr, (int, float)) else rep.get("status", "?")
+            print(f"  {rep['_file']}: {rep.get('killed', 0)}/{rep.get('total_mutants', 0)} killed ({kr_txt})")
+            for surv in rep.get("survivors") or []:
+                print(f"    SURVIVED-MUTANT {rep['_file']}:{surv['line']}  {surv['mutation']}")
+        print(f"Mutant Hunt (auto-diff): {killed}/{total} killed, "
+              f"{survived_n} survived, {inconclusive_n} inconclusive em {len(per_file)} arquivo(s)")
+
+    if hard_inconclusive:
+        print("ERRO: suíte base quebrada/timeout ou AST inválida em ≥1 alvo — inconclusivo.",
+              file=sys.stderr)
+        return 2
+    if total == 0:
+        print("NÃO-VEREDITO: 0 mutantes gerados nos alvos do diff — inconclusivo.",
+              file=sys.stderr)
+        return 2
+    min_kr = args.min_kill_rate * 100.0 if 0.0 < args.min_kill_rate <= 1.0 else args.min_kill_rate
+    kill_rate = killed / total * 100.0
+    return 0 if kill_rate >= min_kr else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Motor AST de testes de mutação diff-scoped para Python.")
     parser.add_argument("target_pos", nargs="?", default=None, help="Arquivo .py alvo")
     parser.add_argument("--target", dest="target_opt", default=None, help="Arquivo .py alvo (alternativo)")
-    parser.add_argument("--test-cmd", required=True, help="Comando de teste (ex: 'python -m unittest discover -s tests')")
+    parser.add_argument("--test-cmd", default=None,
+                        help="Comando de teste (ex: 'python -m unittest discover -s tests'); "
+                             "obrigatório exceto quando --auto-diff encontra zero alvos (veredito n/a)")
+    parser.add_argument("--auto-diff", action="store_true",
+                        help="Enumera alvos sozinho: .py do `git diff --against <ref>` + não-rastreados; "
+                             "zero alvos → exit 3 (n/a), sem --test-cmd")
+    parser.add_argument("--repo", type=Path, default=Path("."),
+                        help="Raiz do repo git no modo --auto-diff (default: cwd)")
     parser.add_argument("--max-mutants", type=int, default=15, help="Máximo de mutantes gerados (default: 15)")
     parser.add_argument("--min-kill-rate", type=float, default=0.0, help="Taxa mínima de abate em %% (ex: 80.0 ou 0.80)")
     parser.add_argument(
@@ -349,6 +481,9 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 2
 
+    if args.auto_diff:
+        return _main_auto_diff(args)
+
     raw_target = args.target_opt or args.target_pos
     if not raw_target:
         print("ERRO: informe o arquivo Python alvo (posicional ou --target).", file=sys.stderr)
@@ -359,6 +494,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERRO: alvo inválido ou não é arquivo .py: {target_path}", file=sys.stderr)
         return 2
 
+    if not args.test_cmd:
+        print("ERRO: --test-cmd obrigatório sem --auto-diff.", file=sys.stderr)
+        return 2
     cmd_list = _split_cmd(args.test_cmd)
     if not cmd_list:
         print("ERRO: --test-cmd vazio.", file=sys.stderr)

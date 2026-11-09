@@ -23,7 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import scripts.henke_gates as henke_gates
 from scripts.henke_gates import MAX_REWORK, main as gates_main, run_gates
-from scripts.run_state import init_run
+from scripts.run_state import derive_run_outcome, init_run, record_gate
 
 GATE_OK_SRC = (
     "import sys\n"
@@ -36,8 +36,13 @@ GATE_FAIL_SRC = (
     "print('detalhe do erro', file=sys.stderr)\n"
     "sys.exit(1)\n"
 )
+GATE_NA_SRC = (
+    "import sys\n"
+    "print('portao-fake-na')\n"
+    "sys.exit(3)\n"
+)
 
-VERDICT_KEYS = {"gate", "cmd", "exit", "duration_ms", "stdout_sha256", "stderr_tail"}
+VERDICT_KEYS = {"gate", "cmd", "exit", "na", "duration_ms", "stdout_sha256", "stderr_tail"}
 
 
 def sha(texto: str) -> str:
@@ -121,6 +126,65 @@ class GatesRunnerTests(unittest.TestCase):
     def test_max_rework_contrato(self):
         self.assertEqual(henke_gates.MAX_REWORK, 2)
         self.assertEqual(MAX_REWORK, 2)
+
+    # ---------- veredito n/a (exit 3): rodou, reportou "nada a verificar" ----------
+
+    def test_na_nao_reprova_quando_ha_verde_real(self):
+        na_script = self.repo / "fake_na.py"
+        na_script.write_text(GATE_NA_SRC, encoding="utf-8")
+        res = run_gates(str(self.repo), [str(self.ok_script), str(na_script)], record=False)
+        self.assertTrue(res["all_green"])
+        self.assertEqual([v["exit"] for v in res["verdicts"]], [0, 3])
+        self.assertFalse(res["verdicts"][0]["na"])
+        self.assertTrue(res["verdicts"][1]["na"])
+
+    def test_na_sozinho_nunca_e_verde(self):
+        na_script = self.repo / "fake_na.py"
+        na_script.write_text(GATE_NA_SRC, encoding="utf-8")
+        res = run_gates(str(self.repo), [str(na_script), str(na_script)], record=False)
+        self.assertEqual(res["ran"], 2)
+        self.assertTrue(all(v["na"] for v in res["verdicts"]))
+        self.assertFalse(res["all_green"])
+
+    # ---------- run_state: exit 3 na derivação mecânica ----------
+
+    def _run_with_gates(self, gate_exits: dict, mandatory: list | None = None):
+        run_path = init_run(self.repo, "run-na-test", mode="EXECUTAR",
+                            mandatory_gates=mandatory)
+        for gate, ec in gate_exits.items():
+            ev = self.repo / f"ev_{gate}.out"
+            ev.write_text(f"evidencia {gate} exit {ec}", encoding="utf-8")
+            record_gate(run_path, gate, ec, f"{gate} → exit {ec}",
+                        command=f"python {gate}.py", evidence_file=ev)
+        return json.loads(run_path.read_text(encoding="utf-8"))
+
+    def test_derive_na_gate_nao_reprova_mas_exige_verde(self):
+        data = self._run_with_gates({"hazard_scan": 0, "a11y_scan": 3, "mutant_hunt": 3})
+        outcome, reasons = derive_run_outcome(data)
+        self.assertEqual(outcome, "verified", reasons)
+
+    def test_derive_todos_na_e_blocked_antitautologia(self):
+        data = self._run_with_gates({"a11y_scan": 3, "mutant_hunt": 3})
+        outcome, reasons = derive_run_outcome(data)
+        self.assertEqual(outcome, "blocked")
+        self.assertTrue(any("ALL-GATES-N/A" in r for r in reasons), reasons)
+
+    def test_derive_mandatory_satisfeito_por_veredito_na(self):
+        data = self._run_with_gates(
+            {"hazard_scan": 0, "a11y_scan": 3},
+            mandatory=["scripts/metricas/hazard_scan.py", "scripts/metricas/a11y_scan.py"],
+        )
+        outcome, reasons = derive_run_outcome(data)
+        self.assertEqual(outcome, "verified", reasons)
+
+    def test_derive_mandatory_ausente_mesmo_com_na_presente(self):
+        data = self._run_with_gates(
+            {"hazard_scan": 0, "a11y_scan": 3},
+            mandatory=["scripts/metricas/hazard_scan.py", "scripts/metricas/ratchet.py"],
+        )
+        outcome, reasons = derive_run_outcome(data)
+        self.assertEqual(outcome, "blocked")
+        self.assertTrue(any("ratchet" in r for r in reasons), reasons)
 
     def test_shape_do_resultado(self):
         res = run_gates(str(self.repo), [], record=False)

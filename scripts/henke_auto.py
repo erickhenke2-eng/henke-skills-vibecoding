@@ -771,12 +771,14 @@ def _dispatch_driver(
 # Estágio: portões e testes (seams injetáveis p/ testes determinísticos)
 # ---------------------------------------------------------------------------
 
-def _invoke_gates(repo_root: Path, gates: list[str], run_id: str, timeout_sec: float) -> dict | None:
+def _invoke_gates(repo_root: Path, gates: list[str], run_id: str, timeout_sec: float,
+                  test_cmd: str | None = None) -> dict | None:
     """Chama henke_gates.run_gates (contrato externo). None = runner indisponível."""
     mod = _load_module("henke_gates")
     if mod is None or not hasattr(mod, "run_gates"):
         return None
-    return mod.run_gates(repo_root, list(gates), run_id=run_id, record=True, timeout_sec=timeout_sec)
+    return mod.run_gates(repo_root, list(gates), run_id=run_id, record=True,
+                         timeout_sec=timeout_sec, test_cmd=test_cmd)
 
 
 def _gates_max_rework() -> int:
@@ -925,7 +927,7 @@ def _print_report(
     if ran_gates:
         for g_name, g_info in ran_gates.items():
             ec = g_info.get("exit_code")
-            badge = "PASS" if ec == 0 else "FAIL"
+            badge = "N/A" if ec == 3 else ("PASS" if ec == 0 else "FAIL")
             print(f"  [{badge}] {g_name} (exit {ec})")
     elif gates_info is not None:
         print("  (portões executados — ver run para detalhes)")
@@ -1276,7 +1278,8 @@ def run_auto(args: argparse.Namespace) -> int:
         _record_stage(run_path, "gates", "nenhum portão obrigatório declarado pelo route")
     else:
         while True:
-            gres = _invoke_gates(repo_root, gates_required, run_id, gates_timeout)
+            gres = _invoke_gates(repo_root, gates_required, run_id, gates_timeout,
+                                 test_cmd=(project or {}).get("test_cmd"))
             if gres is None:
                 # Runner externo indisponível: registra cada portão como não-veredito
                 # (exit 2) — fail-closed, nunca verde presumido.

@@ -122,6 +122,6 @@ Teste mentalmente (ou no navegador se possível) os pontos de falha:
 **Papel no ecossistema:** é o adaptador — garante que a interface funciona onde o usuário estiver.
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
-Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no [PROTOCOLO §12](../PROTOCOLO.md) — confirme cada item lá antes de declarar a tarefa concluída:
+Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no PROTOCOLO §12 — confirme cada item lá antes de declarar a tarefa concluída:
 
 - [ ] Checklist canônico de entrega do PROTOCOLO §12 cumprido (entrega real zero-stub, portão vs produto, ledger de evidência, custódia de ambiente, ressalvas transparentes).

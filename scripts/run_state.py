@@ -162,10 +162,24 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
             failed_gates.append(f"GATE-FAILED: {gate_name} (formato inválido)")
             continue
         ec = gate_info.get("exit_code")
-        if isinstance(ec, bool) or not isinstance(ec, int) or ec != 0:
+        # exit 3 = NÃO-APLICÁVEL: o portão rodou e reportou "nada a verificar"
+        # (veredito honesto com evidência) — não reprova, mas também não é verde.
+        if isinstance(ec, bool) or not isinstance(ec, int) or ec not in (0, 3):
             failed_gates.append(f"GATE-FAILED: {gate_name} (exit {ec})")
     if failed_gates:
         return "failed", failed_gates
+
+    # Anti-tautologia: se TODO portão físico devolveu n/a (exit 3), nenhum check
+    # real aconteceu — verified por vacuidade é o falso-verde que este guarda mata.
+    real_greens = [
+        g for g, g_info in physical_gates.items()
+        if isinstance(g_info, dict) and g_info.get("exit_code") == 0
+    ]
+    if not real_greens:
+        return "blocked", [
+            "ALL-GATES-N/A: todos os portões físicos reportaram não-aplicável "
+            "(exit 3) — nenhuma verificação real executada"
+        ]
 
     # 2b. Verifica portões obrigatórios declarados na run (ou gates_required)
     mandatory_gates = run_data.get("mandatory_gates") or run_data.get("gates_required")
@@ -208,10 +222,12 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
         missing_mandatory: list[str] = []
         for req in mandatory_gates:
             gate_stem = Path(req).stem if ("/" in req or "\\" in req) else req
+            # exit 3 (n/a) conta como veredito produzido: o portão obrigatório
+            # rodou e concluiu honestamente "nada a verificar" neste contexto.
             found = any(
                 (g_name == req or Path(g_name).stem == gate_stem)
                 and isinstance(g_info, dict)
-                and g_info.get("exit_code") == 0
+                and g_info.get("exit_code") in (0, 3)
                 for g_name, g_info in physical_gates.items()
             )
             if not found:

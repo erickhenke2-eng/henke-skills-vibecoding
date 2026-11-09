@@ -12,9 +12,11 @@ Escaneia arquivos de interface (.html, .tsx, .jsx, .vue, .svelte) caçando:
      sem `aria-labelledby` e sem `title` (ex: `<button><svg></svg></button>`).
 
 Códigos de saída:
-  0  zero violações encontradas
+  0  zero violações encontradas (pelo menos 1 arquivo de UI foi escaneado)
   1  pelo menos 1 violação de acessibilidade/anti-cheat encontrada
   2  caminho inexistente ou erro de argumentos
+  3  NÃO-APLICÁVEL: zero arquivos de UI escaneados — veredito honesto "nada a
+     verificar", nunca verde por tautologia (o runner conta 3 como n/a)
 """
 from __future__ import annotations
 
@@ -272,6 +274,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{r:<26} {loc}  {msg}")
         print(f"{files_scanned} file(s) scanned, {len(findings)} finding(s)")
 
+    if files_scanned == 0:
+        print(
+            "N/A: nenhum arquivo de UI elegível encontrado — portão não aplicável "
+            "a este alvo (veredito n/a, não verde).",
+            file=sys.stderr,
+        )
+        return 3
     return 1 if findings else 0
 
 

@@ -18,11 +18,13 @@ Despacho de cada item de `gates`:
 
 Não para no primeiro vermelho: produz relatório completo na ordem pedida. Aborta
 com FileNotFoundError apenas quando o registro falha por run inexistente — o CLI
-converte em exit 2. `all_green` exige exit==0 em TODOS (exit 2 também reprova).
+converte em exit 2. `all_green` exige todo exit em (0, 3), zero skipped e ≥1
+exit 0 real — exit 2 reprova; exit 3 é "não aplicável" (portão rodou e declarou
+honestamente "nada a verificar": a11y sem UI, mutant sem .py no diff).
 
 Códigos de saída (CLI):
-  0  todos os portões aprovados (exit 0)
-  1  algum portão reprovado (exit != 0, inclui 2)
+  0  todos os portões aprovados (exit 0) ou n/a (exit 3), com ≥1 verde real
+  1  algum portão reprovado (exit ∉ {0,3}) ou zero verde real
   2  erro de uso, route.json inválido ou run inexistente
 """
 from __future__ import annotations
@@ -121,11 +123,19 @@ _SKIP_REASONS = {
 }
 
 
-def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None = None) -> list[str] | None:
+def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None = None,
+                       test_cmd: str | None = None) -> list[str] | None:
     """Args por portão, espelhando `henke gate`/check. `None` = não autoexecutável
     neste contexto — o veredito vira `skipped` (não-veredito), nunca verde."""
     if name in _GATES_COM_REPO_ARG:
         return [str(repo_root)]
+    if name == "mutant":
+        # Modo matriz: o próprio portão enumera os .py do diff vs HEAD.
+        # Sem HEAD não há diff a caçar → skipped (fail-closed).
+        if not _git_has_head(repo_root):
+            return None
+        return ["--auto-diff", "--repo", str(repo_root), "--diff-against", "HEAD",
+                "--min-kill-rate", "100", "--test-cmd", test_cmd or ""]
     if name == "assertless":
         tests_dir = repo_root / "tests"
         return [str(tests_dir)] if tests_dir.is_dir() else [str(repo_root)]
@@ -152,7 +162,8 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
     return []
 
 
-def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None) -> tuple[str, list[str] | None] | None:
+def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
+                  test_cmd: str | None = None) -> tuple[str, list[str] | None] | None:
     """Resolve um item de `gates` para (gate_id_canônico, cmd_ou_None).
     None = desconhecido; cmd=None = conhecido mas não autoexecutável aqui."""
     if not token:
@@ -161,7 +172,7 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None) ->
         script = Path(GATE_MAP[token])
         if not script.is_file():
             return None
-        args = _default_gate_args(token, repo_root, spec_path)
+        args = _default_gate_args(token, repo_root, spec_path, test_cmd)
         if args is None:
             return script.stem, None
         if script.stem in _PIPELINE_GATES:
@@ -182,7 +193,7 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None) ->
     resolved = cand.resolve()
     path_to_name = {os.path.normcase(str(Path(p).resolve())): n for n, p in GATE_MAP.items()}
     name = path_to_name.get(os.path.normcase(str(resolved)))
-    args = _default_gate_args(name, repo_root, spec_path) if name else [str(repo_root)]
+    args = _default_gate_args(name, repo_root, spec_path, test_cmd) if name else [str(repo_root)]
     if args is None:
         return resolved.stem, None
     if name in _PIPELINE_GATES:
@@ -238,13 +249,19 @@ def _record_gate_verdict(
 
 
 def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
-              record: bool = True, timeout_sec: float = 180.0) -> dict:
+              record: bool = True, timeout_sec: float = 180.0,
+              test_cmd: str | None = None) -> dict:
     """Executa `gates` em ordem e devolve o relatório mecânico.
 
     Retorna {"verdicts": [{"gate", "cmd", "exit", "duration_ms", "stdout_sha256",
     "stderr_tail"}], "all_green": bool, "ran": int}. `verdicts["gate"]` é o stem
     canônico do script do portão (ex. `hazard_scan`), igual para entrada por nome
     ou por path, e é a mesma chave gravada na run.
+
+    exit 3 = NÃO-APLICÁVEL (n/a): o portão rodou e reportou honestamente "nada a
+    verificar" (ex.: a11y sem arquivos de UI, mutant sem .py no diff). Conta como
+    veredito físico com evidência, não reprova — mas `all_green` continua exigindo
+    ≥1 portão com exit 0 real (n/a nunca vira verde por tautologia).
 
     Levanta FileNotFoundError (run inexistente), ValueError (run_id inválido) —
     nunca por portão desconhecido (esse vira verdict exit 2).
@@ -283,7 +300,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     skipped: list[dict] = []
     for raw in gates:
         token = str(raw).strip()
-        resolved = _resolve_gate(token, root, spec_path)
+        resolved = _resolve_gate(token, root, spec_path, test_cmd)
         if resolved is None:
             gate_id = _gate_id_of(token)
             cmd_str = ""
@@ -338,6 +355,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
             "gate": gate_id,
             "cmd": cmd_str,
             "exit": exit_code,
+            "na": exit_code == 3,
             "duration_ms": ms,
             "stdout_sha256": sha,
             "stderr_tail": (err or "")[-_STDERR_TAIL_CHARS:],
@@ -346,7 +364,11 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     return {
         "verdicts": verdicts,
         "skipped": skipped,
-        "all_green": bool(verdicts) and not skipped and all(v["exit"] == 0 for v in verdicts),
+        "all_green": (
+            bool(verdicts) and not skipped
+            and all(v["exit"] in (0, 3) for v in verdicts)
+            and any(v["exit"] == 0 for v in verdicts)
+        ),
         "ran": len(verdicts),
     }
 
@@ -413,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         for v in result["verdicts"]:
-            badge = "PASS" if v["exit"] == 0 else "FAIL"
+            badge = "N/A" if v["exit"] == 3 else ("PASS" if v["exit"] == 0 else "FAIL")
             print(f"[{badge}] {v['gate']} (exit {v['exit']}, {v['duration_ms']} ms)")
             for ln in (v["stderr_tail"] or "").splitlines()[:6]:
                 print(f"  {ln}")

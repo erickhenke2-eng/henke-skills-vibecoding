@@ -148,6 +148,6 @@ Se algum filtro falhar, ajuste o conceito até passar — e documente o ajuste.
 **Handoff natural:** conceito pronto → sugira `/henke-plan-radar` (se precisa de repertório) ou `/henke-plan-mvp` (se já sabe o que quer e precisa cortar).
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
-Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no [PROTOCOLO §12](../PROTOCOLO.md) — confirme cada item lá antes de declarar a tarefa concluída:
+Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no PROTOCOLO §12 — confirme cada item lá antes de declarar a tarefa concluída:
 
 - [ ] Checklist canônico de entrega do PROTOCOLO §12 cumprido (entrega real zero-stub, portão vs produto, ledger de evidência, custódia de ambiente, ressalvas transparentes).

@@ -168,7 +168,7 @@ Você é um auditor de segurança. O `henke-arch-seguranca` protege os pontos b�
 **Papel no ecossistema:** é o auditor de postura — avalia a higiene estrutural, configurações, dependências e código para defender a aplicação antes de ir ao ar.
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
-Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no [PROTOCOLO §12](../PROTOCOLO.md) — confirme cada item lá antes de declarar a tarefa concluída:
+Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no PROTOCOLO §12 — confirme cada item lá antes de declarar a tarefa concluída:
 
 - [ ] Checklist canônico de entrega do PROTOCOLO §12 cumprido (entrega real zero-stub, portão vs produto, ledger de evidência, custódia de ambiente, ressalvas transparentes).
 

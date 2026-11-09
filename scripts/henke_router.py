@@ -250,11 +250,15 @@ MINIMAL_GATES = (
 )
 
 MODE_GATES = {
+    # a11y_scan e mutant_hunt devolvem exit 3 (n/a) quando não há o que verificar
+    # (sem arquivos de UI / sem .py no diff) — entram na matriz sem quebrar repos
+    # fora do seu escopo, e sem verde por tautologia (all_green exige ≥1 exit 0).
     "ANALISAR": (
         "scripts/repo_signals.py",
         "scripts/metricas/hazard_scan.py",
         "scripts/metricas/assertless_scan.py",
         "scripts/metricas/coverage_ledger.py",
+        "scripts/metricas/a11y_scan.py",
     ),
     "PLANEJAR": (
         "scripts/spec_drift.py",
@@ -269,6 +273,8 @@ MODE_GATES = {
         "scripts/metricas/fence_check.py",
         "scripts/metricas/contract_closure.py",
         "scripts/metricas/metaconfig_diff.py",
+        "scripts/metricas/a11y_scan.py",
+        "scripts/metricas/mutant_hunt.py",
     ),
     # Variante EXECUTAR com verbo composto ("audita e corrige"): mesmo conjunto
     # CARPINTEIRO reforçado por repo_signals.py na cabeça (sinais do repo antes
@@ -283,6 +289,8 @@ MODE_GATES = {
         "scripts/metricas/fence_check.py",
         "scripts/metricas/contract_closure.py",
         "scripts/metricas/metaconfig_diff.py",
+        "scripts/metricas/a11y_scan.py",
+        "scripts/metricas/mutant_hunt.py",
     ),
 }
 
