@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -96,6 +97,16 @@ def main() -> int:
             for a in PRESETS[cli]
         ]
         argv = [a for a in argv if a != ""]  # modelo ausente remove token vazio
+        # CLIs de agente no Windows são shims npm `.cmd` — CreateProcess não os
+        # resolve por nome nem executa batch direto. `which` acha o path real;
+        # `.cmd/.bat` precisam do cmd.exe na frente.
+        exe = shutil.which(argv[0])
+        if exe is None:
+            print(json.dumps({"files_changed": [], "notes": f"cli '{cli}' indisponível (não está no PATH)"}))
+            return 1  # CLI ausente = falha de driver (nunca verde)
+        argv[0] = exe
+        if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
+            argv = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", *argv]
         try:
             res = subprocess.run(
                 argv, cwd=repo, capture_output=True, text=True,
