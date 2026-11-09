@@ -846,19 +846,20 @@ def _cmd_goldfish(
     if not driver:
         if run_path is not None:
             try:
-                data = json.loads(run_path.read_text(encoding="utf-8"))
-                if not isinstance(data, dict):
-                    raise ValueError("raiz do JSON da run não é um objeto")
-                data["review_status"] = "goldfish_unavailable"
-                data["updated_at"] = _now_iso()
-                try:
-                    from scripts.run_state import derive_run_outcome
-                    derived, reasons = derive_run_outcome(data)
-                    data["outcome"] = derived
-                    data["reasons"] = reasons
-                except Exception:
-                    pass  # mantém outcome anterior se a derivação estiver indisponível
-                _atomic_write_json(run_path, data)
+                from scripts.run_state import _file_lock, derive_run_outcome
+                with _file_lock(run_path):
+                    data = json.loads(run_path.read_text(encoding="utf-8"))
+                    if not isinstance(data, dict):
+                        raise ValueError("raiz do JSON da run não é um objeto")
+                    data["review_status"] = "goldfish_unavailable"
+                    data["updated_at"] = _now_iso()
+                    try:
+                        derived, reasons = derive_run_outcome(data)
+                        data["outcome"] = derived
+                        data["reasons"] = reasons
+                    except Exception:
+                        pass  # mantém outcome anterior se a derivação estiver indisponível
+                    _atomic_write_json(run_path, data)
                 print(f"Registrado review_status='goldfish_unavailable' em {run_path}")
             except Exception as exc:
                 print(f"ERRO: não foi possível atualizar a run '{run_path}': {exc}", file=sys.stderr)
@@ -910,7 +911,12 @@ def _cmd_goldfish(
         ),
     }
     env_path = repo_root / ".henke" / "runs" / f"{run_id}.goldfish.json"
-    _atomic_write_json(env_path, envelope)
+    if run_path is not None:
+        from scripts.run_state import _file_lock
+        with _file_lock(run_path):
+            _atomic_write_json(env_path, envelope)
+    else:
+        _atomic_write_json(env_path, envelope)
 
     if as_json:
         print(json.dumps({

@@ -89,6 +89,120 @@ def _repo_root_for_run(run_path: Path) -> Path | None:
     return None
 
 
+def _config_dir() -> Path:
+    """Diretório de config LOCAL do usuário — fora do repo, fora do alcance
+    de um driver/agente que só escreve na worktree. Aprovacões e âncoras de
+    nascimento vivem aqui: um .henke/ plantado num clone não pode forjar o
+    que nunca existiu na máquina da vítima."""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "henke"
+    return Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "henke"
+
+
+def _binding_token(binding: dict) -> str:
+    """Token determinístico do vínculo de aprovação: sha256 do binding
+    canônico (head + scope_sha256 + driver). O token é a CHAVE do arquivo de
+    aprovação local — só existe se `henke approve` rodou naquela máquina
+    sobre aquele exato binding."""
+    canon = json.dumps(
+        {
+            "head": binding.get("head"),
+            "scope_sha256": binding.get("scope_sha256"),
+            "driver": binding.get("driver"),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
+def write_approval_token(binding: dict, approver: str, run_path: Path) -> Path | None:
+    """Grava o comprovante LOCAL de que um humano aprovou este binding nesta
+    máquina (`~/.config/henke/approvals/<token>.json`). Uma run plantada por
+    clone com binding forjado não encontra token local → --resume bloqueia."""
+    try:
+        d = _config_dir() / "approvals"
+        d.mkdir(parents=True, exist_ok=True)
+        token = _binding_token(binding)
+        p = d / f"{token}.json"
+        _atomic_write_json(p, {
+            "binding": {
+                "head": binding.get("head"),
+                "scope_sha256": binding.get("scope_sha256"),
+                "driver": binding.get("driver"),
+            },
+            "approved_by": approver,
+            "approved_at": _now_iso(),
+            "run_file": str(run_path),
+        })
+        return p
+    except OSError:
+        return None
+
+
+def verify_approval_token(run_data: dict) -> tuple[bool, str]:
+    """Confere se existe token LOCAL para o approval_binding desta run.
+    Sem binding → nada a verificar (True). Com binding → exige o arquivo de
+    aprovação local; sua ausência prova que `henke approve` nunca rodou aqui."""
+    binding = run_data.get("approval_binding")
+    if not isinstance(binding, dict):
+        return True, ""
+    token = _binding_token(binding)
+    p = _config_dir() / "approvals" / f"{token}.json"
+    if not p.is_file():
+        return False, (
+            "APPROVAL-TOKEN-MISSING: nenhuma aprovação local para este binding — "
+            "a run pode ter sido plantada/forjada; rode `henke approve` nesta máquina"
+        )
+    try:
+        stored = json.loads(p.read_text(encoding="utf-8")).get("binding") or {}
+    except (OSError, ValueError):
+        return False, "APPROVAL-TOKEN-CORRUPT: token local ilegível"
+    want = {"head": binding.get("head"), "scope_sha256": binding.get("scope_sha256"),
+            "driver": binding.get("driver")}
+    if stored != want:
+        return False, "APPROVAL-TOKEN-MISMATCH: token local pertence a outro binding"
+    return True, ""
+
+
+def write_anchor_sidecar(run_id: str, spec_path: str | None,
+                         spec_sha256: str | None, head_start: str | None) -> Path | None:
+    """Cópia LOCAL das âncoras de nascimento da run (fora do repo). O driver
+    pode editar .henke/runs/<id>.json e mover head_start/spec_sha256 — o
+    sidecar fora do alcance dele é a fonte preferida de run_gates."""
+    safe = "".join(c for c in str(run_id) if c.isalnum() or c in ("-", "_")).strip()
+    if not safe:
+        return None
+    try:
+        d = _config_dir() / "anchors"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"{safe}.json"
+        _atomic_write_json(p, {
+            "run_id": safe,
+            "spec_path": spec_path,
+            "spec_sha256": spec_sha256,
+            "head_start": head_start,
+            "created_at": _now_iso(),
+        })
+        return p
+    except OSError:
+        return None
+
+
+def load_anchor_sidecar(run_id: str) -> dict | None:
+    """Lê o sidecar local de âncoras (None se ausente/inválido)."""
+    safe = "".join(c for c in str(run_id) if c.isalnum() or c in ("-", "_")).strip()
+    if not safe:
+        return None
+    p = _config_dir() / "anchors" / f"{safe}.json"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and data.get("run_id") == safe else None
+
+
 def _git_head(repo_root: Path) -> str | None:
     """HEAD atual do repo (None se git indisponível/sem commits — nunca inventa)."""
     try:
@@ -290,9 +404,14 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     declared = data.get("outcome")
     derived, reasons = derive_run_outcome(data)
 
-    if declared == "verified" and derived != "verified":
+    # CONFLICT é bidirecional: declared=verified com derived≠verified é a forja
+    # clássica; mas declared≠derived com derived=verified também é estado
+    # contraditório (ex.: JSON editado para 'failed' sobre mecânica verde) —
+    # silenciar qualquer divergência aceita arquivo incoerente.
+    known = {"verified", "failed", "blocked", "unverified"}
+    if isinstance(declared, str) and declared in known and declared != derived:
         conflict_msg = (
-            f"STATE-DERIVED-CONFLICT: outcome declarado como 'verified' "
+            f"STATE-DERIVED-CONFLICT: outcome declarado '{declared}' "
             f"mas derivação mecânica resultou em '{derived}'"
         )
         return False, [conflict_msg] + reasons
@@ -302,8 +421,16 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
 
     # Integridade retroativa da evidência física: o sha256 gravado na run deve
     # bater com o arquivo em disco AGORA — evidência reescrita após o record
-    # torna a tríade decorativa se ninguém re-conferir.
+    # torna a tríade decorativa se ninguém re-conferir. E a evidência TEM que
+    # viver sob .henke/evidence/: sem confinamento, `evidence_file: README.md`
+    # com o sha real do arquivo verificaria — a tríade provaria "o arquivo
+    # existe", não "um portão produziu esta saída" (banca v6).
     tampered: list[str] = []
+    run_id = str(data.get("run_id") or p.stem)
+    # Confinamento a evidence/<run_id>/: evidência de OUTRA run não prova esta
+    # (reuso cross-run), e o mesmo arquivo não pode ser saída de dois portões.
+    evidence_root = (p.parent.parent / "evidence" / run_id).resolve()
+    seen_evidence: dict[str, str] = {}
     for g_name, g_info in (data.get("gates") or {}).items():
         if not isinstance(g_info, dict):
             continue
@@ -314,10 +441,27 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
         ev_path = Path(str(ev))
         if not ev_path.is_absolute():
             ev_path = p.parent.parent.parent / ev  # relativo à raiz do repo
-        if not ev_path.is_file():
+        try:
+            resolved = ev_path.resolve()
+        except Exception:
+            tampered.append(f"EVIDENCE-INVALID: {g_name} → '{ev}'")
+            continue
+        if not (resolved == evidence_root or evidence_root in resolved.parents):
+            tampered.append(
+                f"EVIDENCE-OUTSIDE-SCOPE: {g_name} → '{ev}' fora de .henke/evidence/{run_id}/"
+            )
+            continue
+        prev = seen_evidence.get(str(resolved))
+        if prev is not None:
+            tampered.append(
+                f"EVIDENCE-REUSED: {g_name} e {prev} apontam o mesmo arquivo '{ev}'"
+            )
+            continue
+        seen_evidence[str(resolved)] = g_name
+        if not resolved.is_file():
             tampered.append(f"EVIDENCE-MISSING: {g_name} → '{ev}'")
             continue
-        actual = hashlib.sha256(ev_path.read_bytes()).hexdigest()
+        actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
         if actual != sha:
             tampered.append(f"EVIDENCE-TAMPERED: {g_name} → sha diverge do gravado")
     if tampered:
@@ -439,6 +583,41 @@ def record_gate(
         if not isinstance(gates, dict):
             gates = {}
             data["gates"] = gates
+        if evidence_path is not None:
+            # Custódia no record-time: se a evidência nasce fora do confinamento
+            # ela é COPIADA para .henke/evidence/<run_id>/<gate>__<nome> — depois
+            # de gravada, nem o driver nem ninguém a altera sem invalidar o
+            # sha256 (a verificação re-hasheia o arquivo confinado).
+            run_id = str(data.get("run_id") or run_path.stem)
+            ev_root = (run_path.parent.parent / "evidence" / run_id).resolve()
+            try:
+                resolved = evidence_path.resolve()
+            except Exception as exc:
+                raise ValueError(f"evidence-file inválido: {exc}") from exc
+            source_resolved = resolved
+            if not (resolved == ev_root or ev_root in resolved.parents):
+                ev_root.mkdir(parents=True, exist_ok=True)
+                safe_gate = "".join(c if c.isalnum() or c in "._-" else "_" for c in gate_name)
+                confined = (ev_root / f"{safe_gate}__{resolved.name}").resolve()
+                if not (confined == ev_root or ev_root in confined.parents):
+                    raise ValueError(f"evidence-file fora do confinamento: {evidence_path}")
+                try:
+                    confined.write_bytes(resolved.read_bytes())
+                except OSError as exc:
+                    raise ValueError(f"falha ao confinar evidência: {exc}") from exc
+                evidence_path = confined
+            # Dedupe por FONTE: o mesmo arquivo de saída não pode servir de
+            # evidência para dois portões distintos (anti-forja cross-gate).
+            for other, o_info in gates.items():
+                if (
+                    other != gate_name
+                    and isinstance(o_info, dict)
+                    and o_info.get("evidence_source")
+                    and str(o_info["evidence_source"]) == str(source_resolved)
+                ):
+                    raise ValueError(
+                        f"mesmo arquivo-fonte já registrado pelo portão '{other}'"
+                    )
         entry: dict = {
             "exit_code": int(exit_code),
             "summary": summary,
@@ -448,6 +627,7 @@ def record_gate(
             entry["command"] = str(command)
             entry["evidence_file"] = str(evidence_path)
             entry["evidence_sha256"] = evidence_sha
+            entry["evidence_source"] = str(source_resolved)
         elif manual:
             entry["manual"] = True
         gates[gate_name] = entry
@@ -500,11 +680,18 @@ def approve_run(run_path: Path, approver: str = "human") -> dict:
         # tornava a run irrecuperável para sempre (approve→commit→resume→stale→loop).
         if isinstance(data.get("approval_binding"), dict):
             data["approval_binding"]["head"] = approved_head
+            data["approval_binding"]["driver"] = data.get("driver")
         derived, reasons = derive_run_outcome(data)
         data["outcome"] = derived
         data["reasons"] = reasons
         data["updated_at"] = _now_iso()
         _atomic_write_json(run_path, data)
+        # Comprovante LOCAL fora do repo: --resume exige este token — uma run
+        # plantada via clone (binding forjado mas self-consistente) não tem
+        # token na máquina da vítima e é recusada.
+        if isinstance(data.get("approval_binding"), dict):
+            write_approval_token(data["approval_binding"],
+                                 data["approved_by"], run_path)
     return data
 
 
@@ -565,6 +752,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.subcmd == "record-gate":
+            import re as _re
+            if _re.match(r"^(?:stage_.+|tests|dispatch)$", args.gate or ""):
+                print(
+                    f"ERRO: nome de portão reservado à pipeline interna: '{args.gate}' "
+                    "(stage_*/tests/dispatch só a própria pipeline grava; um CLI externo "
+                    "forjando esses nomes fabricaria a narrativa da run).",
+                    file=sys.stderr,
+                )
+                return 2
             has_cmd = bool(args.command and str(args.command).strip())
             has_ev = args.evidence_file is not None
             if has_cmd != has_ev:

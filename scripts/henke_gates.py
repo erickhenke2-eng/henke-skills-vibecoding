@@ -154,7 +154,10 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
         tests_dir = repo_root / "tests"
         return [str(tests_dir)] if tests_dir.is_dir() else [str(repo_root)]
     if name == "metaconfig":
-        return ["--repo", str(repo_root), "--against", "HEAD"] if _git_has_head(repo_root) else None
+        # Âncora de nascimento vence HEAD vivo: um commit feito pelo driver
+        # durante a execução não pode cegar o portão sobre o próprio trabalho.
+        base = head_start or "HEAD"
+        return ["--repo", str(repo_root), "--against", base] if _git_has_head(repo_root) else None
     if name == "signals":
         return ["metrics", "--root", str(repo_root)]
     if name == "drift":
@@ -315,13 +318,28 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     spec_hash: str | None = None
     head_start: str | None = None
     if run_path is not None:
+        # Âncoras de nascimento: o sidecar LOCAL (fora do repo, intocável pelo
+        # driver) vence o arquivo da run — editá-lo é o ataque que esconde o
+        # próprio trabalho do diff (A1-banca).
+        sidecar = None
+        try:
+            from scripts.run_state import load_anchor_sidecar
+        except ImportError:
+            try:
+                from run_state import load_anchor_sidecar  # type: ignore
+            except ImportError:
+                load_anchor_sidecar = None  # type: ignore[assignment]
+        if load_anchor_sidecar is not None:  # type: ignore[truthy-function]
+            sidecar = load_anchor_sidecar(run_path.stem)
         try:
             run_meta = json.loads(run_path.read_text(encoding="utf-8"))
-            spec_path = Path(run_meta.get("spec_path") or "")
+            anchor = sidecar if isinstance(sidecar, dict) else run_meta
+            spec_raw = anchor.get("spec_path") or ""
+            spec_path = Path(spec_raw) if spec_raw else None
             # Âncoras de nascimento: vencem qualquer estado vivo do repo.
-            spec_hash = run_meta.get("spec_sha256") or None
-            head_start = run_meta.get("head_start") or None
-        except (OSError, ValueError):
+            spec_hash = anchor.get("spec_sha256") or None
+            head_start = anchor.get("head_start") or None
+        except (OSError, ValueError, TypeError):
             spec_path = None
 
     verdicts: list[dict] = []
@@ -358,12 +376,24 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
                     exit_code = proc.returncode
                 except subprocess.TimeoutExpired:
                     _kill_tree(proc)
-                    out, err = proc.communicate()
+                    try:
+                        # Neto órfão segurando o pipe herdado bloquearia para
+                        # sempre — segundo communicate com teto pequeno (B2).
+                        out, err = proc.communicate(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        out, err = "", ""
                     exit_code = 2
                     err = (err or "") + f"\n[TIMEOUT] expirou após {timeout_sec}s (árvore encerrada)"
                 ms = int(round((time.monotonic() - t0) * 1000))
                 out = out or ""
                 err = (err or "").strip()
+                # Cap de evidência: portão ruidoso não pode encher memória/disco
+                # (communicate já bufferizou; o arquivo é o que fica para a
+                # auditoria). 4 MiB cobrem qualquer relatório legítimo.
+                _CAP = 4 * 1024 * 1024
+                if len(out) + len(err) > _CAP:
+                    out = out[: _CAP // 2]
+                    err = err[: _CAP // 2] + "\n[EVIDENCE-TRUNCATED: saída excedeu 4 MiB]"
             except OSError as exc:
                 ms = int(round((time.monotonic() - t0) * 1000))
                 exit_code, out, err = 2, "", f"ERRO ao lançar processo: {exc}"

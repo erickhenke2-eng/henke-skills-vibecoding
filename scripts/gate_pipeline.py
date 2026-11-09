@@ -82,6 +82,21 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    # Coletor degradado: arquivos que não parsearam saem do grafo em silêncio —
+    # fence/ratchet verdes sobre evidência incompleta é falso-verde. O portão
+    # exige grafo completo (M6 banca v6).
+    skipped = [
+        ln[12:].strip() for ln in (collector.stderr or "").splitlines()
+        if ln.startswith("SKIP-PARSE:")
+    ]
+    if skipped:
+        print(
+            "gate_pipeline: coletor incompleto — arquivos não parseados "
+            f"({len(skipped)}): {', '.join(skipped[:10])}",
+            file=sys.stderr,
+        )
+        return 2
+
     # fence com zero arestas internas não tem o que verificar: exit 3 (n/a
     # honesto) — não é verde (não conta para all_green) nem vermelho. Repo de
     # arquivo único ou sem imports internos não pode ser punido nem premiado.
@@ -97,9 +112,13 @@ def main(argv: list[str] | None = None) -> int:
             return 3
 
     ev_dir = repo / ".henke" / "evidence" / "pipeline"
-    ev_dir.mkdir(parents=True, exist_ok=True)
-    artifact = ev_dir / EVIDENCE_NAME[gate]
-    artifact.write_text(collector.stdout, encoding="utf-8")
+    try:
+        ev_dir.mkdir(parents=True, exist_ok=True)
+        artifact = ev_dir / EVIDENCE_NAME[gate]
+        artifact.write_text(collector.stdout[: 4 * 1024 * 1024], encoding="utf-8")
+    except OSError as exc:
+        print(f"gate_pipeline: falha ao gravar artefato: {exc}", file=sys.stderr)
+        return 2
 
     # 2) Portão real sobre o artefato.
     if gate == "ratchet":

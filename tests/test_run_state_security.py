@@ -24,7 +24,11 @@ from scripts.run_state import derive_run_outcome, verify_run_file
 
 
 def _evidence(tmp: Path, name: str, content: str = "ok\n") -> tuple[str, str]:
-    ev = tmp / name
+    # Evidência real vive sob .henke/evidence/ — o verify confina o
+    # evidence_file a esse diretório (anti-forja banca v6).
+    ev_dir = tmp / ".henke" / "evidence" / "r"
+    ev_dir.mkdir(parents=True, exist_ok=True)
+    ev = ev_dir / name
     ev.write_text(content, encoding="utf-8")
     return str(ev), hashlib.sha256(ev.read_bytes()).hexdigest()
 
@@ -43,7 +47,9 @@ def _run(tmp: Path, gates: dict, **extra) -> Path:
     data = {"run_id": "r", "mode": "EXECUTAR", "archetype": "CARPINTEIRO",
             "outcome": "verified", "gates": gates}
     data.update(extra)
-    p = tmp / "run.json"
+    runs = tmp / ".henke" / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    p = runs / "r.json"
     p.write_text(json.dumps(data), encoding="utf-8")
     return p
 
@@ -165,6 +171,33 @@ class ForgedRunTests(unittest.TestCase):
         derived, reasons = derive_run_outcome(data)
         self.assertEqual(derived, "blocked")
         self.assertTrue(any("MANDATORY" in r for r in reasons))
+
+    def test_evidence_outside_scope_rejected(self):
+        """evidence_file apontando para arquivo do repo (README) não é prova
+        de execução — confinamento a .henke/evidence/ (banca v6)."""
+        repo_file = self.t / "README.md"
+        repo_file.write_text("estável\n", encoding="utf-8")
+        sha = hashlib.sha256(repo_file.read_bytes()).hexdigest()
+        p = _run(self.t, {"hazard_scan": {
+            "exit_code": 0, "command": "x",
+            "evidence_file": str(repo_file), "evidence_sha256": sha,
+        }})
+        ok, reasons = verify_run_file(p)
+        self.assertFalse(ok)
+        self.assertTrue(any("OUTSIDE-SCOPE" in r for r in reasons), reasons)
+
+    def test_evidence_traversal_rejected(self):
+        """evidence_file com .. saindo do repo é rejeitado."""
+        outside = self.t.parent / "fora.txt"
+        outside.write_text("x\n", encoding="utf-8")
+        sha = hashlib.sha256(outside.read_bytes()).hexdigest()
+        p = _run(self.t, {"hazard_scan": {
+            "exit_code": 0, "command": "x",
+            "evidence_file": str(outside), "evidence_sha256": sha,
+        }})
+        ok, reasons = verify_run_file(p)
+        self.assertFalse(ok)
+        self.assertTrue(any("OUTSIDE-SCOPE" in r or "EVIDENCE" in r for r in reasons), reasons)
 
     def test_mandatory_gate_stem_matching(self):
         """'hazard' casa 'scripts/metricas/hazard_scan.py'? Não — casa pelo stem

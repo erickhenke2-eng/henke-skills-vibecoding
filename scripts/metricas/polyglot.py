@@ -97,7 +97,7 @@ def mask_c_like(text: str, lang: str = "") -> str:
             i = j
         elif c == "`":
             i = _mask_template(text, out, i)
-        elif c == "/" and _regex_start(prev):
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs") and _regex_ctx_ok(text, i):
             j = _regex_end(text, i)
             for k in range(i, j):
                 if out[k] != "\n":
@@ -329,13 +329,10 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
         elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
             # Regex literal JS: `/a\/*/` contém `/*` que, lido como comentário,
             # engole o resto da linha — inclusive um marker de supressão forjado
-            # logo depois (A15/A11-banca). Heurística padrão divisão-vs-regex:
-            # char anterior não-espaço em posição de operando → é regex.
-            j = i - 1
-            while j >= 0 and text[j] in " \t":
-                j -= 1
-            prev = text[j] if j >= 0 else ""
-            if prev == "" or prev in "(,=:[!&|?{};+-*/%^~<>\n":
+            # logo depois (A15/A11/F1-banca). Char anterior operador → regex;
+            # word-char → retrocede o identificador e exige keyword (`return`,
+            # `typeof`, ...) — `foo /re/` é divisão, `return /re/` é regex.
+            if _regex_ctx_ok(text, i):
                 end = _regex_end(text, i)
                 i = end if end != -1 else i + 1
             else:
@@ -399,7 +396,30 @@ def _template_end(text, i):
     return n
 
 
-_REGEX_PREV = set("=(,:[!&|?{};\n") | {"return", "=>", "typeof", "case", "do", "else"}
+# Keywords JS/TS após as quais '/' abre regex (operando), não divisão.
+# `=>` e operadores já são cobertos pelo conjunto de chars.
+_REGEX_KEYWORDS = frozenset({
+    "return", "typeof", "case", "in", "of", "throw", "void", "new",
+    "delete", "do", "else", "instanceof", "yield", "await",
+})
+
+
+def _regex_ctx_ok(text: str, i: int) -> bool:
+    """True se '/' em `i` abre regex literal (posição de operando)."""
+    j = i - 1
+    while j >= 0 and text[j] in " \t":
+        j -= 1
+    if j < 0:
+        return True  # início de arquivo = posição de expressão
+    c = text[j]
+    if c in "(,=:[!&|?{};+-*/%^~<>\n":
+        return True
+    if c.isalnum() or c in "_$":
+        k = j
+        while k >= 0 and (text[k].isalnum() or text[k] in "_$"):
+            k -= 1
+        return text[k + 1:j + 1] in _REGEX_KEYWORDS
+    return False
 
 
 def _regex_start(prev):

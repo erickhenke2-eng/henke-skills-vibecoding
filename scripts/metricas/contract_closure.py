@@ -122,11 +122,27 @@ def _check_ipc_handler_hygiene(masked_code: str, rel: str, errors: list[str]) ->
 
 
 def _is_callsite_arg(literal: str, masked_code: str) -> bool:
-    """Literal aparece como argumento direto de um callsite (não declaração morta)."""
+    """Literal aparece como argumento direto de um callsite (não declaração morta).
+
+    Idiom de canal nomeado também conta: `const CH = "canal"; handle(CH, h)` —
+    o literal está içado numa constante local usada no callsite (F5 banca v6).
+    """
     esc = re.escape(literal)
-    return bool(re.search(
+    if re.search(
         r"[\w$.]+\s*\(\s*['\"]" + esc + r"['\"]|[,(]\s*['\"]" + esc + r"['\"]",
-        masked_code))
+        masked_code):
+        return True
+    # Coleta bindings locais `NAME = "literal"` (const/let/var ou atribuição
+    # simples) e aceita `call(NAME` / `, NAME` quando NAME → este literal.
+    bind_re = re.compile(
+        r"\b(?:const|let|var|final|static\s+readonly)?\s*"
+        r"([A-Za-z_$][\w$]*)\s*=\s*['\"]" + esc + r"['\"]")
+    bound_names = {m.group(1) for m in bind_re.finditer(masked_code)}
+    for name in bound_names:
+        if re.search(r"[\w$.]+\s*\(\s*" + re.escape(name) + r"\b|[,(]\s*" + re.escape(name) + r"\b",
+                     masked_code):
+            return True
+    return False
 
 
 def _strip_comments_keep_strings(raw: str, ext: str) -> str:

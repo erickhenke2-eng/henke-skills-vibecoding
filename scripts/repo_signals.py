@@ -82,7 +82,8 @@ def funcs_in_py(path: Path):
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError, UnicodeDecodeError) as e:
-        print(f"WARN: {path}: {e} (pulado)", file=sys.stderr)
+        # SKIP-PARSE: marker que o gate_pipeline traduz em falha (grafo incompleto)
+        print(f"SKIP-PARSE: {path}: {e} (pulado)", file=sys.stderr)
         return
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -99,7 +100,7 @@ def iter_functions(path: Path):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
-            print(f"WARN: {path}: {e} (pulado)", file=sys.stderr)
+            print(f"SKIP-PARSE: {path}: {e} (pulado)", file=sys.stderr)
             return
         lang = ".rs" if ext == ".rs" else ".go" if ext == ".go" else ext
         for name, sl, el, body in pg.find_functions(text, ext):
@@ -280,17 +281,22 @@ def cmd_edges(args):
     pkgmap = pg.build_pkgmap(root)
     gomod = pg.go_module_path(root)
     seen, out = set(), []
+    skipped: list[str] = []
     for f in iter_files(root):
         ext = f.suffix.lower()
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            skipped.append(relposix(f, root))
             continue
         raw_edges = []
         if ext == ".py":
             try:
                 tree = ast.parse(text, filename=str(f))
             except SyntaxError:
+                # Arquivo .py que não parseia some do grafo — arestas que ele
+                # carregaria nunca são emitidas e o fence verde é falso.
+                skipped.append(relposix(f, root))
                 continue
             py_edges(f, tree, root, raw_edges)
         elif ext in pg.JS_EXTS:
@@ -333,6 +339,10 @@ def cmd_edges(args):
             if e not in seen and e[0] != e[1]:
                 seen.add(e)
                 out.append({"from": e[0], "to": e[1]})
+    # Canal separado: arquivos pulados (ilegível/syntax) deixam o grafo
+    # INCOMPLETO — o consumidor (gate_pipeline) decide entre degradar ou falhar.
+    for s in skipped:
+        print(f"SKIP-PARSE: {s}", file=sys.stderr)
     print(json.dumps(out, indent=1))
     return 0
 

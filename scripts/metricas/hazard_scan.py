@@ -489,16 +489,19 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
                 # unsafe_load/full_load são perigosos INDEPENDENTE de kwargs
                 out.append(("UNSAFE-DESERIALIZE", line, scope, f"{name}() is never safe (AST)"))
                 continue
-            line_txt = raw_lines[line - 1] if line <= len(raw_lines) else ""
-            # Só isenta com loader comprovadamente seguro no kwarg — qualquer
-            # outro Loader (yaml.Loader == UnsafeLoader, UnsafeLoader explícito,
-            # FullLoader) NÃO isenta (A7-banca).
+            # Só isenta com loader comprovadamente seguro no kwarg — nome EXATO
+            # do loader via AST ('NotSafeLoader' contém 'SafeLoader' por
+            # substring, e mencionar SafeLoader num comentário não torna a
+            # chamada segura — F2 banca v6).
             safe_loader = any(
                 (kw.arg in ("Loader", "loader"))
-                and ("SafeLoader" in ast.unparse(kw.value) or "UniqueKeyLoader" in ast.unparse(kw.value))
+                and (
+                    (isinstance(kw.value, ast.Name) and kw.value.id in ("SafeLoader", "CSafeLoader", "UniqueKeyLoader"))
+                    or (isinstance(kw.value, ast.Attribute) and kw.value.attr in ("SafeLoader", "CSafeLoader", "UniqueKeyLoader"))
+                )
                 for kw in node.keywords
             )
-            if safe_loader or "SafeLoader" in line_txt or "UniqueKeyLoader" in line_txt:
+            if safe_loader:
                 continue
             out.append(("UNSAFE-DESERIALIZE", line, scope, "yaml.load() without SafeLoader (AST)"))
             continue
@@ -622,7 +625,11 @@ def scan_file(path: Path, extra_exts: set | None = None,
         lineno = masked.count("\n", 0, m.start()) + 1
         if "yaml.load" in tok:
             line_raw = raw.splitlines()[lineno - 1] if lineno <= len(raw.splitlines()) else ""
-            if "SafeLoader" in line_raw or "UniqueKeyLoader" in line_raw:
+            # Isenção exige o kwarg Loader=<nome exato seguro> — substring nua
+            # casaria 'NotSafeLoader' e comentários mencionando SafeLoader (F2).
+            if not re.search(r"Loader\s*=\s*(?:\w+\.)*(?:CSafeLoader|SafeLoader|UniqueKeyLoader)\b", line_raw):
+                pass
+            else:
                 continue
         add("UNSAFE-DESERIALIZE", lineno, f"line:{lineno}", f"unsafe code/data deserialization ({tok.strip()})")
 
@@ -738,6 +745,14 @@ def scan_file(path: Path, extra_exts: set | None = None,
                 add("WEAK-CRYPTO", line_hit, fn_name, "non-CSPRNG random generator used in function handling token/secret/auth")
         if _EXT_SOURCE_RE.search(fn_body) and not _PATH_SAFE_RE.search(fn_body):
             for m_fs in _FILE_SINK_RE.finditer(fn_body):
+                # F8: ident capturado ligado a literal na MESMA função não é
+                # traversal (`const p = "x.txt"; writeFile(p, req.body)`).
+                ident = m_fs.group(1) or m_fs.group(2)
+                if ident and re.search(
+                    r"\b(?:const|let|var)?\s*" + re.escape(ident) + r"\s*=\s*['\"`]",
+                    fn_body,
+                ):
+                    continue
                 line_hit = sl + fn_body.count("\n", 0, m_fs.start())
                 add("PATH-TRAVERSAL", line_hit, fn_name, "dynamic file sink with external input and no path normalization/resolve in function")
         if _SSRF_SOURCE_RE.search(fn_body) and not _SSRF_SAFE_RE.search(fn_body):

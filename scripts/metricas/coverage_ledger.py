@@ -268,7 +268,11 @@ def verify_ledger(
                     tf = step.get("file", "")
                     tline = step.get("line", 0)
                     tpath = (root / tf).resolve()
-                    if not tpath.is_file():
+                    root_res = root.resolve()
+                    if root_res not in (tpath, *tpath.parents):
+                        errors.append(
+                            f"FABRICATED-FILE [{fid}]: arquivo '{tf}' do trace escapa a raiz do repo")
+                    elif not tpath.is_file():
                         errors.append(f"FABRICATED-FILE [{fid}]: arquivo '{tf}' citado no trace não existe")
                     else:
                         _, max_ln = _file_sha256_and_lines(tpath)
@@ -314,6 +318,19 @@ def verify_ledger(
 
     # 3c. Arquivo criado na própria PR não pode ser out_of_scope (diluição por nascença).
     if against:
+        # F7: --against precisa resolver pra um commit — sem validação, uma ref
+        # inválida/`--opt` falha o diff silenciosamente e o NEW-FILE-OUT-OF-SCOPE
+        # nunca dispara (bypass do portão).
+        if against.startswith("-") or not against.strip():
+            errors.append(f"INVALID-AGAINST: ref '--against' inválida: {against!r}")
+        else:
+            _rc = subprocess.run(
+                ["git", "rev-parse", "--verify", f"{against}^{{commit}}"],
+                cwd=str(root), capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+            )
+            if _rc.returncode != 0:
+                errors.append(f"INVALID-AGAINST: ref '{against}' não resolve para commit")
         res_added = subprocess.run(
             ["git", "-c", "core.quotePath=false", "diff", "--name-status", against, "--"],
             cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",

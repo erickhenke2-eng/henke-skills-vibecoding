@@ -105,6 +105,9 @@ HARD_ALWAYS_ASK = frozenset({"publish", "destructive", "metaconfig"})
 PUBLISH_VERBS = (
     "deploy", "publica", "publicar", "publico", "sobe", "subir", "coloca no ar",
     "producao", "production", "rollback", "reverte", "reversao",
+    # paráfrases coloquiais de evasão (MÉDIO-10 banca v6)
+    "manda pra prod", "manda para prod", "bota no servidor", "coloca no servidor",
+    "sobe pra producao", "manda pro ar",
 )
 DESTRUCTIVE_VERBS = (
     "deleta", "deletar", "delete", "exclui", "excluir", "apaga", "apagar",
@@ -113,6 +116,9 @@ DESTRUCTIVE_VERBS = (
     # formas imperativas do léxico do vibecoder (ALTO-2 da banca)
     "apague", "exclua", "remova", "delete", "destrua", "reverta", "restaura",
     "reseta", "reset", "limpa", "limpar", "wipe", "zera", "desinstala",
+    # paráfrases coloquiais de evasão (MÉDIO-10 banca v6)
+    "remove", "remover", "elimina", "eliminar", "eliminate", "joga fora",
+    "jogar fora", "tira do ar", "tirar do ar", "get rid of", "get rid",
 )
 METACONFIG_SIGNALS = (
     "package.json", "package-lock", "lockfile", "requirements", "pyproject",
@@ -185,7 +191,9 @@ try:
         derive_run_outcome,
         init_run,
         record_gate,
+        verify_approval_token,
         verify_run_file,
+        write_anchor_sidecar,
     )
 except Exception:  # pragma: no cover - execução como script solto dentro de scripts/
     from run_state import (  # type: ignore
@@ -193,7 +201,9 @@ except Exception:  # pragma: no cover - execução como script solto dentro de s
         derive_run_outcome,
         init_run,
         record_gate,
+        verify_approval_token,
         verify_run_file,
+        write_anchor_sidecar,
     )
 
 
@@ -1102,6 +1112,14 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             )
             if fp_now != binding.get("scope_sha256"):
                 stale.append("escopo/prompt da run divergiu do snapshot aprovado")
+        # Comprovante LOCAL de aprovação (fora do repo): o binding é self-signed
+        # dentro do próprio arquivo — uma run plantada por clone com binding
+        # recomputado passaria em TODAS as checagens acima e executaria o
+        # driver arbitrário gravado nela. O token só existe se `henke approve`
+        # rodou de verdade nesta máquina sobre este binding.
+        tok_ok, tok_err = verify_approval_token(resumed)
+        if not tok_ok:
+            stale.append(tok_err)
         if stale:
             _record_stage(cand, "resume_bind", "RETOMADA RECUSADA: " + "; ".join(stale))
             _patch_run(cand, lambda d: d.update({"review_status": "pending"}))
@@ -1185,6 +1203,19 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             "bound_at": _now_iso(),
         }
     _patch_run(run_path, lambda d: d.update(run_patch))
+    # Sidecar LOCAL das âncoras de nascimento (fora do repo): o driver pode
+    # editar .henke/runs/<id>.json e mover head_start/spec_sha256 para esconder
+    # o próprio trabalho do diff — run_gates prefere esta cópia intocável.
+    try:
+        _run_now = json.loads(run_path.read_text(encoding="utf-8"))
+        write_anchor_sidecar(
+            str(_run_now.get("run_id") or run_id),
+            _run_now.get("spec_path"),
+            _run_now.get("spec_sha256"),
+            _run_now.get("head_start"),
+        )
+    except (OSError, ValueError):
+        pass
     _record_stage(
         run_path, "route",
         f"mode={route.get('mode')} archetype={route.get('archetype')} "
@@ -1250,6 +1281,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         record_gate(
             run_path, "dispatch", 0,
             f"{len(envelope['skills'])} skill(s) injetada(s) verbatim (sha256 conferido com disco)",
+            manual=True,
         )
 
         # ---- estágio 4b: PRE-FLIGHT de portões obrigatórios — ANTES do driver ----
@@ -1292,10 +1324,45 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             print(drv_err, file=sys.stderr)
             return drv_exit or 2
         echo_dispatched = (driver == "echo")
+        declared_changes = list(driver_result.get("files_changed") or [])
         _patch_run(run_path, lambda d: d.update({
             "driver_result": driver_result,
-            "files_changed": list(driver_result.get("files_changed") or []),
+            "files_changed": declared_changes,
         }))
+        # Auditoria files_changed↔diff: o driver declara o que editou — o git
+        # mostra o que mudou de verdade. Edição real fora da declaração (mesmo
+        # dentro do escopo da spec) é relatório falso → atestação vermelha
+        # (exit 1 manual reprova a run). .henke/ e artefatos de run não contam.
+        if not is_analisar and isinstance(driver, str) and driver.startswith(("cmd:", "opencode", "agent:")):
+            try:
+                _anchor = None
+                _rd = json.loads(run_path.read_text(encoding="utf-8"))
+                _anchor = _rd.get("head_start") or None
+                from scripts.spec_drift import get_touched_files as _gtf
+                touched = set(_gtf(repo_root, against=_anchor))
+                declared = {
+                    str(f).replace("\\", "/").strip().lstrip("./")
+                    for f in declared_changes
+                }
+                undeclared = sorted(
+                    t for t in touched
+                    if t not in declared and not t.startswith(".henke/")
+                )
+            except Exception:
+                undeclared = []
+            if undeclared:
+                record_gate(
+                    run_path, "files_changed_audit", 1,
+                    "FILES-CHANGED-INCOMPLETE: driver editou sem declarar: "
+                    + ", ".join(undeclared[:20]),
+                    manual=True,
+                )
+            else:
+                record_gate(
+                    run_path, "files_changed_audit", 0,
+                    "files_changed declarado cobre o diff real (fora .henke/)",
+                    manual=True,
+                )
         if driver == "echo":
             _record_stage(
                 run_path, "dispatch",

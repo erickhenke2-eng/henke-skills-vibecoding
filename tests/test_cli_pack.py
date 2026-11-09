@@ -132,7 +132,12 @@ class CliPackTests(unittest.TestCase):
         entry = data["gates"]["hazard_scan"]
         self.assertNotIn("manual", entry)
         self.assertEqual(entry["command"], "python hazard_scan.py")
-        self.assertEqual(entry["evidence_file"], str(ev))
+        # Custódia: a evidência é copiada p/ .henke/evidence/<run_id>/<gate>__<nome>
+        # — o caminho gravado é o confinado, não o arquivo solto do caller.
+        confined = Path(entry["evidence_file"])
+        ev_root = (self.repo / ".henke" / "evidence" / "e1").resolve()
+        self.assertIn(ev_root, confined.resolve().parents)
+        self.assertEqual(confined.read_text(encoding="utf-8"), "saída real\n")
         self.assertIn("evidence_sha256", entry)
 
         code, _, _ = run_cli(["run", "verify", str(run_file)])

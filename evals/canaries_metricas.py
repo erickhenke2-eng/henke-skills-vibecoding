@@ -1126,11 +1126,14 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         }), encoding="utf-8")
         ok_r_bad, errs_r_bad = verify_run_file(m78_bad)
         # Run íntegra = tríade de evidência física de verdade (exit_code:0 cru é
-        # atestação — depois do endurecimento banca v5, não verifica mais).
-        m78_ev = t / "hazard_scan.out"
+        # atestação — depois do endurecimento banca v5, não verifica mais) E a
+        # evidência sob custódia de .henke/evidence/<run_id>/ (confinamento v6).
+        (t / ".henke" / "evidence" / "r2").mkdir(parents=True)
+        (t / ".henke" / "runs").mkdir(parents=True)
+        m78_ev = t / ".henke" / "evidence" / "r2" / "hazard_scan.out"
         m78_ev.write_text("scan limpo\n", encoding="utf-8")
         m78_sha = hashlib.sha256(m78_ev.read_bytes()).hexdigest()
-        m78_ok = t / "run_ok.json"
+        m78_ok = t / ".henke" / "runs" / "run_ok.json"
         m78_ok.write_text(json.dumps({
             "run_id": "r2",
             "mode": "EXECUTAR",
@@ -1191,6 +1194,76 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                c_ex == 0 and exec_log_p.is_file() and errs_valid_log == []
                and any("UNVERIFIED_EXECUTION_EVIDENCE" in e for e in errs_tampered_log),
                f"valid={errs_valid_log} tampered={errs_tampered_log}")
+
+        # --- banca v6: canários de regressão dos fixes ---
+
+        # M81: polyglot — '/' após keyword (return/typeof/etc.) é regex literal,
+        # não abre comentário /*; '/' após identificador é divisão.
+        from scripts.metricas import polyglot as _pg
+        js_regex = "function f(){ return /a\\/*/; exec(cmd); }\n"
+        masked_r = _pg.mask_c_like(js_regex, ".js")
+        js_div = "function g(){ x = y / z /*comentario*/; exec(cmd2); }\n"
+        masked_d = _pg.mask_c_like(js_div, ".js")
+        expect("Canário M81: polyglot mascara /* dentro de regex literal mas trata divisão como comentário",
+               "exec(cmd)" in masked_r and "exec(cmd2)" in masked_d,
+               f"regex={masked_r!r} div={masked_d!r}")
+
+        # M82: hazard — yaml.load exige loader seguro EXATO (AST); NotSafeLoader
+        # e comentário mencionando SafeLoader não são bypass; unsafe_load sempre.
+        from scripts.metricas.hazard_scan import scan_path as _hz_scan
+        hz_dir = t / "m82_yaml"
+        hz_dir.mkdir()
+        (hz_dir / "evil.py").write_text(
+            "import yaml\nyaml.load(data, Loader=NotSafeLoader)\nyaml.unsafe_load(d2)\n",
+            encoding="utf-8")
+        (hz_dir / "clean.py").write_text(
+            "import yaml\nyaml.load(data, Loader=SafeLoader)\nyaml.safe_load(d2)\n",
+            encoding="utf-8")
+        _, res_e, _ = _hz_scan(hz_dir / "evil.py")
+        _, res_c, _ = _hz_scan(hz_dir / "clean.py")
+        ev_rules = {f[0] for f in res_e}
+        cl_rules = {f[0] for f in res_c}
+        expect("Canário M82: hazard reprova NotSafeLoader/unsafe_load e aprova SafeLoader",
+               any("DESER" in str(r).upper() for r in ev_rules)
+               and not any("DESER" in str(r).upper() for r in cl_rules),
+               f"evil={ev_rules} clean={cl_rules}")
+
+        # M83: assertless — rebind TARDIO não lava tautologia por-ponto:
+        # `ok=True; assert ok; ok=f()` reprova; `ok=f(); assert ok` aprova.
+        m83_dir = t / "m83_rebind"
+        m83_dir.mkdir()
+        (m83_dir / "test_evade.py").write_text(
+            "def test_e():\n    ok = True\n    assert ok\n    ok = compute()\n",
+            encoding="utf-8")
+        (m83_dir / "test_legit.py").write_text(
+            "def test_l():\n    ok = compute()\n    assert ok\n",
+            encoding="utf-8")
+        c83a, _ = run(MET / "assertless_scan.py", m83_dir / "test_evade.py")
+        c83b, _ = run(MET / "assertless_scan.py", m83_dir / "test_legit.py")
+        expect("Canário M83: assertless reprova tautologia com rebind tardio e aprova binding real",
+               c83a == 1 and c83b == 0, f"evade={c83a} legit={c83b}")
+
+        # M84: run_state — evidência fora de .henke/evidence/<run_id>/ é
+        # EVIDENCE-OUTSIDE-SCOPE; nome de portão reservado (stage_*) sai 2 no CLI.
+        m84_ev = t / "fora.out"
+        m84_ev.write_text("fora do confinamento\n", encoding="utf-8")
+        m84_sha = hashlib.sha256(m84_ev.read_bytes()).hexdigest()
+        (t / ".henke" / "runs2").mkdir(parents=True, exist_ok=True)
+        m84_run = t / ".henke" / "runs2" / "r9.json"
+        m84_run.write_text(json.dumps({
+            "run_id": "r9", "mode": "EXECUTAR", "archetype": "CARPINTEIRO",
+            "outcome": "verified",
+            "gates": {"hazard_scan": {
+                "exit_code": 0, "command": "hs .",
+                "evidence_file": str(m84_ev), "evidence_sha256": m84_sha,
+            }}}), encoding="utf-8")
+        ok84, errs84 = verify_run_file(m84_run)
+        RS_SCRIPT = repo_root / "scripts" / "run_state.py"
+        c84, o84 = run(RS_SCRIPT, "record-gate", str(m84_run),
+                       "--gate", "stage_dispatch", "--exit-code", "0")
+        expect("Canário M84: verify bloqueia evidência fora do confinamento e record-gate rejeita nome reservado",
+               not ok84 and any("EVIDENCE-OUTSIDE-SCOPE" in e for e in errs84) and c84 == 2,
+               f"verify={errs84} cli={c84}:{o84[-120:]}")
 
     return passed, total, reports
 

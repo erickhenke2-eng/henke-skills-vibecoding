@@ -40,7 +40,9 @@ def compute_spec_hash(spec_path: Path) -> str:
 
 def _parse_scope_text(text: str) -> list[str]:
     """Extrai os caminhos declarados na seção '## 4. Escopo Declarado' do texto já lido."""
-    match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
+    # A seção termina em QUALQUER heading seguinte (#, ##, ###...) — uma
+    # subseção '### 4.1 Não-autorizado' não pode injetar itens no escopo (B1).
+    match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n#{1,6} |\Z)", text, flags=re.S)
     if not match:
         return []
 
@@ -68,7 +70,7 @@ def parse_declared_scope(spec_path: Path) -> list[str]:
 
 def _parse_symbols_text(text: str) -> list[tuple[str, str]]:
     """Extrai pares (caminho, simbolo) para itens com '::' a partir do texto já lido."""
-    match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
+    match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n#{1,6} |\Z)", text, flags=re.S)
     if not match:
         return []
     symbols: list[tuple[str, str]] = []
@@ -185,6 +187,34 @@ def _is_wildcard_scope(decl: str) -> bool:
     return not reduced.strip("./").strip("*")
 
 
+def _scope_glob_re(pattern: str) -> re.Pattern:
+    """Glob de escopo ancorado À ESQUERDA com semântica de path: `*` e `?` não
+    atravessam `/`; `**` atravessa. `PurePosixPath.match` casa por SUFIXO
+    ('src/*.py' autorizaria 'vendor/src/x.py' — B1 banca v6) e `fnmatch` deixa
+    `*` comer '/'. Este tradutor é o meio-termo estrito correto."""
+    out: list[str] = ["^"]
+    i = 0
+    n = len(pattern)
+    while i < n:
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    out.append("$")
+    return re.compile("".join(out))
+
+
 def is_path_in_scope(touched_file: str, declared_paths: list[str]) -> bool:
     """Verifica se um arquivo tocado corresponde ou está dentro de algum caminho declarado."""
     norm_touched = touched_file.replace("\\", "/").strip("/")
@@ -205,7 +235,7 @@ def is_path_in_scope(touched_file: str, declared_paths: list[str]) -> bool:
         norm_decl = norm_decl.strip("/")
         if norm_touched == norm_decl or norm_touched.startswith(norm_decl + "/"):
             return True
-        if "*" in norm_decl and (fnmatch.fnmatch(norm_touched, norm_decl) or PurePosixPath(norm_touched).match(norm_decl)):
+        if ("*" in norm_decl or "?" in norm_decl) and _scope_glob_re(norm_decl).match(norm_touched):
             return True
     return False
 

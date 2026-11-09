@@ -397,18 +397,21 @@ def _auto_diff_targets(repo: Path, git_ref: str) -> list[tuple[Path, bool]] | No
     others_list = _git_z(repo, "ls-files", "-z", "--others", "--exclude-standard", "--", "*.py")
     if diff_list is None or others_list is None:
         return None
+    def _in_repo(p: Path) -> bool:
+        return repo in (p, *p.parents)
+
     for rel in diff_list:
-        seen.add(rel.replace("/", os.sep).lower())
         p = (repo / rel).resolve()
-        if p.is_file():
-            out.append((p, False))
-    for rel in others_list:
-        norm = rel.replace("/", os.sep).lower()
-        if norm in seen:
+        if not p.is_file() or not _in_repo(p):
             continue
+        seen.add(os.path.normcase(str(p)))
+        out.append((p, False))
+    for rel in others_list:
         p = (repo / rel).resolve()
-        if p.is_file():
-            out.append((p, True))
+        norm = os.path.normcase(str(p))
+        if norm in seen or not p.is_file() or not _in_repo(p):
+            continue
+        out.append((p, True))
     return out
 
 
@@ -419,6 +422,9 @@ def _main_auto_diff(args: argparse.Namespace) -> int:
         print(f"ERRO: --repo não é worktree git: {repo}", file=sys.stderr)
         return 2
     git_ref = args.diff_against or "HEAD"
+    if git_ref.startswith("-") or not git_ref.strip():
+        print(f"ERRO: --diff-against inválido: {git_ref!r}", file=sys.stderr)
+        return 2
     targets = _auto_diff_targets(repo, git_ref)
     if targets is None:
         print(
@@ -491,9 +497,13 @@ def _main_auto_diff(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
     if total == 0:
-        print("NÃO-VEREDITO: 0 mutantes gerados nos alvos do diff — inconclusivo.",
-              file=sys.stderr)
-        return 2
+        # Todos os alvos parsearam e a baseline passou, mas as linhas do diff
+        # não têm nós mutáveis (só docstring/comentário/import). É o veredito
+        # n/a honesto: não há superfície mutável a verificar — nem verde nem
+        # vermelho, e a run ainda exige ≥1 verde real de outro portão.
+        print("N/A: 0 mutantes gerados nos alvos do diff — nada mutável a "
+              "verificar (veredito n/a, não verde).", file=sys.stderr)
+        return 3
     min_kr = args.min_kill_rate * 100.0 if 0.0 < args.min_kill_rate <= 1.0 else args.min_kill_rate
     kill_rate = killed / total * 100.0
     return 0 if kill_rate >= min_kr else 1

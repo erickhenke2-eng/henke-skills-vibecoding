@@ -354,7 +354,20 @@ def literal_value(node, consts, depth=0):
     if depth > 16:
         return _UNKNOWN
     if isinstance(node, ast.Name):
-        node = consts.get(node.id)
+        # Resolução por-ponto: último binding ≤ a linha de USO do nome.
+        # Literal → fold; binding não-literal ou inexistente antes do uso →
+        # _UNKNOWN. Bindings POSTERIORES ao uso não contaminam (F4).
+        hist = consts.get(node.id)
+        if not hist:
+            return _UNKNOWN
+        ln_use = getattr(node, "lineno", -1)
+        chosen = None
+        for bln, bval in hist:
+            if bln <= ln_use:
+                chosen = bval
+            else:
+                break
+        node = chosen
         if node is None:
             return _UNKNOWN
     if isinstance(node, ast.Constant):
@@ -425,31 +438,32 @@ def _each_binding(body):
 
 
 def constant_bindings(body, inherited=None, shadowed=()):
-    """Map each name bound ONLY to literals in this scope to its literal node.
+    """Map each bound name to its binding HISTORY: [(lineno, literal|None), ...]
+    em ordem de aparição. `None` = binding não-literal naquele ponto.
 
-    Extracting an expected value to a name is the cheapest idiom swap there is —
-    it changes the wording of a test without changing what it proves — so a
-    constant-bound name must contribute exactly what the inline literal
-    contributed. A name bound anywhere in the same scope to something else (a
-    call, an attribute, a loop variable) is never constant, whichever binding is
-    written first. `shadowed` names — this test's own parameters — drop any
-    inherited module constant of the same name, so a fixture value is never read
-    as a literal; rebinding a parameter to a literal still makes it constant,
-    because that is the same hoist one step further along.
+    Resolução é POR-PONTO (F4 banca v6): `ok = True; assert ok; ok = compute()`
+    — a rebind tardia em 12 não lava a tautologia do assert em 8. O estado do
+    nome numa linha é o ÚLTIMO binding ≤ essa linha: literal → constante;
+    não-literal ou inexistente → não-constante. `shadowed` (parâmetros do
+    teste) entram como binding não-literal na linha -1 — um valor de fixture
+    nunca lê como literal.
     """
-    const, real = dict(inherited or {}), set()
+    const: dict[str, list[tuple[int, object]]] = {}
+    if inherited:
+        for n, hist in inherited.items():
+            const[n] = list(hist)
     for n in shadowed:
-        const.pop(n, None)
+        const[n] = [(-1, None)]
     for targets, value in _each_binding(body):
         literal = value is not None and is_literal(value)
+        ln = getattr(targets[0] if targets else value, "lineno", -1)
         for t in targets:
             for n in _bound_names(t):
-                if literal:
-                    if n not in real:
-                        const[n] = value
-                else:
-                    real.add(n)
-                    const.pop(n, None)
+                const.setdefault(n, []).append((ln, value if literal else None))
+    # _each_binding não garante ordem de fonte — o "último binding ≤ uso" só
+    # é correto com histórico ordenado por linha.
+    for hist in const.values():
+        hist.sort(key=lambda e: e[0])
     return const
 
 

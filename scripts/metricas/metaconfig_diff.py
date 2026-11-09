@@ -52,6 +52,8 @@ _PKG_WATCHED_KEYS = (
     "optionalDependencies", "overrides", "resolutions", "publishConfig", "bin",
     # campos que trocam entry point/resolução do pacote (A1-banca)
     "workspaces", "main", "exports", "imports", "files", "type",
+    # instalação condicionada / exec nativo (M5 banca v6)
+    "gypfile", "os", "cpu", "libc", "engines", "config",
 )
 # Qualquer arquivo cujo diff inteiro é sensível (não há seção segura)
 _WHOLE_FILE_SENSITIVE = (
@@ -70,6 +72,12 @@ _WHOLE_FILE_BASENAMES = {
     "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
     ".gitmodules", ".travis.yml", "tox.ini",
     "rust-toolchain", "rust-toolchain.toml",
+    # task runners / hooks / CI fora de .github (M5 banca v6)
+    ".envrc", "justfile", "Justfile", "justfile.toml",
+    ".pre-commit-config.yaml", ".pre-commit-config.yml",
+    "lefthook.yml", "lefthook.yaml", "mise.toml", ".mise.toml",
+    "Jenkinsfile", "bitbucket-pipelines.yml", "azure-pipelines.yml",
+    "Brewfile", "Earthfile", ".gitlab-ci.yml",
 }
 # requirements*.txt / Pipfile* / Dockerfile* — matching por padrão, não exato
 _WHOLE_FILE_GLOBS = (
@@ -79,6 +87,16 @@ _WHOLE_FILE_GLOBS = (
 # Composite actions do GitHub também executam código
 _ACTION_FILE_RE = re.compile(r"(^|/|\\)\.github/actions/[^/\\]+/action\.ya?ml$")
 _WORKFLOW_DIR_RE = re.compile(r"(^|/|\\)\.github/workflows/[^/\\]+\.ya?ml$")
+# Outros CI dirs fora de .github (M5 banca v6)
+_ALT_CI_RE = re.compile(r"(^|/|\\)\.circleci/[^/\\]+\.ya?ml$|(^|/|\\)\.husky/[^/\\]+$")
+# Arquivos de custódia do próprio Henke — adulterá-los é metaconfig também
+# (defesa em profundidade: o spec_drift os veria como touched, mas só se a
+# spec existir e a âncora não tiver sido movida).
+_HENKE_CUSTODY = frozenset({
+    ".henke/POLICY.json", ".henke/PROJECT.json", ".henke/fence.json",
+    ".henke/ratchet-baseline.tsv", ".henke/gate-baseline.json",
+    ".henke/coverage-ledger.json",
+})
 
 
 def _strip_dot_prefix(rel: str) -> str:
@@ -100,12 +118,12 @@ def _is_protected(rel: str) -> str | None:
         return "package_json"
     if base in ("pyproject.toml", "Cargo.toml"):
         return "toml"
-    if rel_n in _WHOLE_FILE_SENSITIVE or base in _WHOLE_FILE_BASENAMES:
+    if rel_n in _WHOLE_FILE_SENSITIVE or rel_n in _HENKE_CUSTODY or base in _WHOLE_FILE_BASENAMES:
         return "whole_file"
     if any(fnmatch.fnmatchcase(base, pat) or fnmatch.fnmatchcase(rel_n, pat)
            for pat in _WHOLE_FILE_GLOBS):
         return "whole_file"
-    if _WORKFLOW_DIR_RE.search(rel_n) or _ACTION_FILE_RE.search(rel_n):
+    if _WORKFLOW_DIR_RE.search(rel_n) or _ACTION_FILE_RE.search(rel_n) or _ALT_CI_RE.search(rel_n):
         return "whole_file"
     return None
 
@@ -178,6 +196,20 @@ def _changed_protected_files(repo: Path, against: str) -> tuple[list[tuple[str, 
                 changed.append(("A", rel, kind, "worktree"))
                 seen.add(("worktree", rel))
 
+    # Arquivos IGNORADOS (.gitignore) também são superfície: um payload em path
+    # ignorado (.env.local, dist/, .envrc) é invisível ao diff normal — vetor
+    # supply-chain direto (M3 banca v6). Filtramos aos nomes protegidos.
+    res_ignored = _git(repo, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
+    if res_ignored.returncode == 0:
+        for rel in res_ignored.stdout.split("\0"):
+            rel = rel.strip().replace("\\", "/")
+            if not rel or ("worktree", rel) in seen:
+                continue
+            kind = _is_protected(rel)
+            if kind:
+                changed.append(("A", rel, kind, "worktree"))
+                seen.add(("worktree", rel))
+
     return changed, None
 
 
@@ -229,7 +261,9 @@ _TOML_WATCH = ("dependencies", "dev-dependencies", "build-dependencies",
                # Cargo.toml supply-chain: [patch] redireciona deps para fonte
                # arbitrária; [source]/[replace] trocam o registry inteiro (A2).
                "patch", "source", "replace", "target", "package",
-               "features", "workspace")
+               "features", "workspace",
+               # PEP 735: onde uv/pdm colocam dev-deps hoje (M5 banca v6)
+               "dependency-groups")
 
 
 def _diff_toml(old_text: str | None, new_text: str | None) -> list[str]:
@@ -314,8 +348,19 @@ def main() -> int:
     args = ap.parse_args()
 
     repo = Path(args.repo)
+    # `--against` vai ao argv do git: valor começando com '-' vira opção
+    # (--output= / --ext-diff → file write/exec). Fail-closed, mesma regra
+    # do spec_drift — e a ref precisa resolver para um commit real.
+    against = str(args.against or "").strip()
+    if not against or against.startswith("-"):
+        print("ERRO: --against inválido (não pode ser vazio nem começar com '-')", file=sys.stderr)
+        return 2
+    chk = _git(repo, "rev-parse", "--verify", f"{against}^{{commit}}")
+    if chk.returncode != 0:
+        print(f"ERRO: --against '{against}' não resolve para um commit", file=sys.stderr)
+        return 2
     try:
-        mutations, requires_auth = check_metaconfig(repo, args.against, args.spec)
+        mutations, requires_auth = check_metaconfig(repo, against, args.spec)
     except RuntimeError as exc:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 2
