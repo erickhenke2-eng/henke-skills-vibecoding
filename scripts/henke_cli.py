@@ -541,7 +541,7 @@ def _git_staged_files(repo_root: Path) -> list[str] | None:
             ["git", "-C", str(repo_root),
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "diff", "--cached", "--name-only", "-z"],
-            capture_output=True,
+            capture_output=True, timeout=30,
         )
     except OSError:
         return None
@@ -631,6 +631,7 @@ def _cmd_check(
             text=True,
             encoding="utf-8",
             errors="replace",
+            timeout=300,
         )
         # exit 3 = n/a honesto (portão rodou, nada a verificar) — não é falha,
         # mesma semântica de run_state/henke_gates; nunca conta como verde.

@@ -35,6 +35,7 @@ def git(cwd, *args, check=True):
         ["git", "-C", str(cwd), "-c", "core.quotePath=false",
          "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=30,
     )
     if check and result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} falhou: {result.stderr.strip()}")

@@ -20,7 +20,15 @@ build/
 
 # Custódia local — baseline é estado da máquina, não fonte compartilhada
 .henke/gate-baseline.json
-.henke/runs/*.envelope.json
+# Estado de execução é custódia LOCAL (sidecar/manifesto/exec-tip vivem fora
+# do repo): run files, evidência e ledgers tracked sempre falham a verificação
+# em outro clone e seriam forja-plantável via commit (banca v8 — F-10).
+.henke/runs/
+.henke/evidence/
+.henke/exec_log.jsonl
+.henke/LEDGER.json
+# Locks de processo — lock órfão commitado herdaria trava morta no clone
+.henke/*.lock
 
 # Segredos e chaves — nunca entram no repo
 .env

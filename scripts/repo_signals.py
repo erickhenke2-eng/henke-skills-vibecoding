@@ -116,7 +116,7 @@ def cmd_churn(args):
     if args.order == "oldest-first":
         cmd.append("--reverse")
     res = subprocess.run(cmd, capture_output=True, text=True,
-                         encoding="utf-8", errors="replace")
+                         encoding="utf-8", errors="replace", timeout=60)
     if res.returncode != 0:
         _fail(f"git log falhou: {res.stderr.strip()[:200]}")
     sha, count = None, 0

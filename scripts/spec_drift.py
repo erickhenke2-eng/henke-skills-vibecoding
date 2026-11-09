@@ -103,7 +103,8 @@ def get_git_root(cwd: Path) -> Path:
             cwd=str(cwd),
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            timeout=30,
         )
         return Path(res.stdout.strip()).resolve()
     except Exception as e:
@@ -241,6 +242,30 @@ def _scope_glob_re(pattern: str) -> re.Pattern:
         elif pattern[i] == "?":
             out.append("[^/]")
             i += 1
+        elif pattern[i] == "[":
+            # Classes de caracteres são glob real: 'docs/[wv]*.md' deve casar
+            # 'docs/wave-x.md' (banca v8 — F3). Copia o conteúdo da classe com
+            # escape do ']' interno; classe vazia/não-fechada vira literal.
+            j = i + 1
+            if j < n and pattern[j] == "!":
+                j += 1
+            if j < n and pattern[j] == "]":
+                j += 1
+            while j < n and pattern[j] != "]":
+                j += 1
+            if j < n and j > i + 1:
+                body = pattern[i + 1:j]
+                if body.startswith("!"):
+                    body = "^" + body[1:]
+                out.append("[" + body.replace("\\", "\\\\") + "]")
+                i = j + 1
+            else:
+                out.append(re.escape(pattern[i]))
+                i += 1
+        elif pattern[i] == "\\" and i + 1 < n:
+            # '\*' é literal escapado — não pode globar (banca v8 — F3).
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
         else:
             out.append(re.escape(pattern[i]))
             i += 1
@@ -261,9 +286,14 @@ def is_path_in_scope(touched_file: str, declared_paths: list[str]) -> bool:
                 return True
             continue
         if norm_decl.endswith("/*"):
+            # 'docs/*' autoriza UM nível ('docs/x') — nunca atravessa '/' como
+            # 'docs/**' faria. Antes, o prefixo solto autorizava 'docs/a/b/c'
+            # divergindo de _scope_glob_re e de henke_gate.in_scope (banca v8 F4).
             base = norm_decl[:-2].rstrip("/").strip("/")
-            if base and (norm_touched == base or norm_touched.startswith(base + "/")):
-                return True
+            if base and norm_touched.startswith(base + "/"):
+                rest = norm_touched[len(base) + 1:]
+                if rest and "/" not in rest:
+                    return True
             continue
         norm_decl = norm_decl.strip("/")
         if norm_touched == norm_decl or norm_touched.startswith(norm_decl + "/"):
@@ -333,7 +363,7 @@ def check_spec_drift(
         return False, [f"Ref '--against' inválida (parece flag): {against!r}"]
     vres = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"{against}^{{commit}}"],
-        cwd=str(git_root), capture_output=True, text=True,
+        cwd=str(git_root), capture_output=True, text=True, timeout=30,
     )
     if vres.returncode != 0:
         return False, [

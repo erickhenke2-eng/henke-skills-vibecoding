@@ -951,7 +951,10 @@ def _print_report(
         f"Confiança: {route.get('confidence')}"
     )
     if skills_run:
-        names = ", ".join(f"{s['name']} (sha256:{s['sha256'][:8]}…)" for s in skills_run)
+        names = ", ".join(
+            f"{s.get('name', '?')} (sha256:{str(s.get('sha256', ''))[:8]}…)"
+            for s in skills_run if isinstance(s, dict)
+        )
         print(f"Skills despachadas (verbatim): {names}")
     else:
         print("Skills despachadas: nenhuma (route confidence=none ou escopo fora do catálogo)")
@@ -1400,7 +1403,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                          "-c", "diff.external=", "check-ignore", "--stdin"],
                         cwd=str(repo_root), capture_output=True, text=True,
                         input="\n".join(sorted(declared)) + "\n",
-                        encoding="utf-8", errors="replace",
+                        encoding="utf-8", errors="replace", timeout=30,
                     )
                     if _ci.returncode == 0:
                         # Rastreado+modificado aparece em `touched` mesmo casando

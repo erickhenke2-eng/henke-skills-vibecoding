@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -49,10 +50,12 @@ EVIDENCE_NAME = {
 }
 
 
-def _run(argv: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
+def _run(argv: list[str], cwd: Path | None = None,
+         timeout: float = 300.0) -> subprocess.CompletedProcess:
     return subprocess.run(
         argv, cwd=str(cwd) if cwd else None,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout,
     )
 
 
@@ -115,7 +118,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         ev_dir.mkdir(parents=True, exist_ok=True)
         artifact = ev_dir / EVIDENCE_NAME[gate]
-        artifact.write_text(collector.stdout[: 4 * 1024 * 1024], encoding="utf-8")
+        # >4MB NÃO trunca: um artefato parcial alimentaria o portão com
+        # evidência incompleta (falso-verde banca v8 — F6). E escrita é
+        # tmp+replace: crash no meio não deixa artefato truncado servindo o
+        # portão seguinte nem outro run concorrente (A5).
+        if len(collector.stdout) > 4 * 1024 * 1024:
+            print("gate_pipeline: saída do coletor excede 4MB — recusada", file=sys.stderr)
+            return 2
+        tmp = artifact.with_suffix(artifact.suffix + f".{os.getpid()}.tmp")
+        tmp.write_text(collector.stdout, encoding="utf-8")
+        os.replace(tmp, artifact)
     except OSError as exc:
         print(f"gate_pipeline: falha ao gravar artefato: {exc}", file=sys.stderr)
         return 2

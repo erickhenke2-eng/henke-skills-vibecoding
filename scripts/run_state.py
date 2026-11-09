@@ -561,6 +561,11 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     # contraditório (ex.: JSON editado para 'failed' sobre mecânica verde) —
     # silenciar qualquer divergência aceita arquivo incoerente.
     known = {"verified", "failed", "blocked", "unverified"}
+    if declared is not None and not (isinstance(declared, str) and declared in known):
+        # F-12 (banca v8): outcome fora do vocabulário ("hacked") com mecânica
+        # verde passava — declared desconhecido é estado incoerente.
+        return False, [f"OUTCOME-UNKNOWN: outcome declarado '{declared}' não "
+                       "pertence a verified|failed|blocked|unverified"]
     if isinstance(declared, str) and declared in known and declared != derived:
         conflict_msg = (
             f"STATE-DERIVED-CONFLICT: outcome declarado '{declared}' "

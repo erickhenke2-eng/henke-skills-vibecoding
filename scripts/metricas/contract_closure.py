@@ -69,8 +69,16 @@ def parse_declared_bridges_with_validation(spec_path: Path) -> tuple[bool, list[
     """Extrai `(origem, simbolo, destino, ações)` da seção '## 5. Ponte[s]'.
     Retorna (has_section, bridges, malformed_lines)."""
     text = spec_path.read_text(encoding="utf-8").replace("\r\n", "\n")
-    match = re.search(r"(?mi)^## 5\..*?Ponte.*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
+    match = re.search(r"(?mi)^## 5\..*?(?:Ponte|Bridge).*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
     if not match:
+        # Seção '## 5.' presente com heading não reconhecido (ex.: 'Contract
+        # Bridges' em outra forma) desligava a verificação em silêncio —
+        # fail-open. Agora é MALFORMED, fail-closed (banca v8 — A4).
+        if re.search(r"(?mi)^## 5\.", text):
+            return True, [], [
+                "MALFORMED-SECTION: heading '## 5.' presente sem 'Ponte(s)'/"
+                "'Bridge(s)' — seção de pontes não reconhecida"
+            ]
         return False, [], []
     bridges: list[tuple[str, str, str, list[str]]] = []
     malformed: list[str] = []
@@ -254,12 +262,11 @@ def _is_top_level_symbol(src_raw: str, src_code: str, ext: str, sym: str) -> boo
         for fn_name, _sl, _el, _ in fns:
             if fn_name == sym and _sl not in class_lines:
                 return True
-        code_lines = src_code.splitlines(keepends=True)
-        top_lines = list(code_lines)
-        for _fn_name, sl, el, _ in fns:
-            for idx in range(max(0, sl - 1), min(el, len(top_lines))):
-                top_lines[idx] = "\n"
-        return bool(re.search(r"\b" + re.escape(sym) + r"\b", "".join(top_lines)))
+        # Binding top-level SEM 'export'/'pub'/'exports' não é importável em
+        # JS/TS/Rust/Go — `const sym = 1` + `import {sym}` quebra em runtime e
+        # a ponte era verde (banca v8 — A3). A função top-level continua
+        # aceita acima (fns já cobrem Go-export-por-capital e fn público).
+        return False
 
     return True
 
