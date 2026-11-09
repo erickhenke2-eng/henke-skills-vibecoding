@@ -103,3 +103,16 @@ python scripts/audit_ledger.py --ledger .henke/LEDGER.json --require-exec-log
 ```
 
 Se qualquer um desses scripts retornar **código diferente de 0**, a tarefa **NÃO ESTÁ PRONTA**. Corrija a raiz da falha em vez de tentar contornar a verificação.
+
+---
+
+## 5. Protocolo de Sentinels de Sessão (Wave 7)
+
+Sessões de agente podem registrar sua custódia via `henke session`:
+
+- `henke session start --agent <nome> --workspace <dir> --run-id <id>` cria um sentinel em `<state_dir>/sessions/<session-id>.sentinel.json` com schema, sessão, run, agente, workspace, PID do dono (diagnóstico apenas — nunca autoridade para matar), timestamps e workspaces registrados.
+- `henke session heartbeat <session-id>` renova a janela de 1 hora do sentinel.
+- `henke session end <session-id>` marca `state=closed`.
+- `henke session gc` reapa somente sentinels expirados e invoca o GC efêmero seguro; nunca remove sentinels vivos.
+- O PID do dono é informativo: nenhum fluxo do Henke encerra processos por PID. A supervisão é por Job Object (Windows) ou process group (POSIX) do `ChildSupervisor`.
+- `henke watch` é exclusivamente foreground/interativo; o hook de pre-commit sempre roda `check --staged --no-cache --full` e nunca usa atalhos de watch ou manifesto.

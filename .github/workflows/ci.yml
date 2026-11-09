@@ -62,6 +62,15 @@ jobs:
       - name: Executar Benchmark Adversarial Completo (17 Defeitos + 3 Controles)
         run: python evals/bench_corpus.py --suite-dir .
 
+      - name: Executar Canários Wave 7 (supervisão, TIA, manifests, watch, higiene)
+        run: python evals/canaries_wave7.py
+
+      - name: Executar Integração Wave 7
+        run: python tests/test_wave7_integration.py
+
+      - name: Executar Benchmark Wave 7 (paralelo x sequencial, incremental x full)
+        run: python evals/bench_wave7.py
+
       - name: Executar Dogfooding do Hazard Scan (. no próprio repositório)
         run: python scripts/metricas/hazard_scan.py .
 

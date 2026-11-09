@@ -30,6 +30,8 @@ Códigos de saída:
 """
 from __future__ import annotations
 
+SCANNER_VERSION = "wave7.1"
+
 import argparse
 import fnmatch
 import io

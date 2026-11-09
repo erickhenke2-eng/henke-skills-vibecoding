@@ -25,6 +25,14 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from scripts.state_paths import state_dir  # noqa: E402
+
+
+def _henke_dir(repo_path: Path) -> Path:
+    """Diretório de estado Henke — honra HENKE_STATE_DIR (Wave 7)."""
+    return state_dir(Path(repo_path))
+
 # ---------------------------------------------------------------------------
 # Win32 Working Set & Private Memory Tracking (Zero External Dependencies)
 # ---------------------------------------------------------------------------
@@ -354,7 +362,7 @@ import secrets
 
 def _get_cache_secret(repo_path: Path) -> bytes:
     """Recupera ou gera a chave secreta HMAC para autenticação das entradas de cache."""
-    secret_file = repo_path / ".henke" / ".cache_secret"
+    secret_file = _henke_dir(repo_path) / ".cache_secret"
     if secret_file.is_file():
         try:
             raw = secret_file.read_bytes()
@@ -415,7 +423,7 @@ def get_cached_gate(
                 del _IN_MEMORY_CACHE[key]
 
     # Check disk cache
-    cache_dir = repo_path / ".henke" / "cache"
+    cache_dir = _henke_dir(repo_path) / "cache"
 
     # 1. Check consolidated gate_cache.json if present
     consolidated_file = cache_dir / "gate_cache.json"
@@ -471,7 +479,7 @@ def store_cached_gate(
 
     try:
         repo_path = _discover_repo_root(Path(repo_root) if repo_root else None)
-        cache_dir = repo_path / ".henke" / "cache"
+        cache_dir = _henke_dir(repo_path) / "cache"
 
         # 1. Write individual gate entry atomically
         gate_file = cache_dir / "gates" / _safe_key_filename(key)
@@ -507,7 +515,7 @@ def enforce_ram_limit(
 
     if current_mb >= limit_mb or force_flush or limit_mb <= 0.0:
         repo_path = _discover_repo_root(Path(repo_root) if repo_root else None)
-        cache_dir = repo_path / ".henke" / "cache"
+        cache_dir = _henke_dir(repo_path) / "cache"
         consolidated_file = cache_dir / "gate_cache.json"
         consolidated = _read_json_safe(consolidated_file) or {}
 

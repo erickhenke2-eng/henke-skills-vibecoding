@@ -276,5 +276,35 @@ class TestMetricGates(unittest.TestCase):
         self.assertTrue(any("WILDCARD-SCOPE-FORBIDDEN" in v for v in viols), viols)
 
 
+
+
+class TestWave7ScannerCompat(unittest.TestCase):
+    """Compatibilidade dos três scanners após extração dos adapters (Wave 7)."""
+
+    def test_scan_test_file_extracted(self):
+        from scripts.metricas.assertless_scan import scan_test_file
+        import tempfile
+        from pathlib import Path as _P
+        with tempfile.TemporaryDirectory() as td:
+            f = _P(td) / "test_x.py"
+            f.write_text("def test_a():\n    pass\n", encoding="utf-8")
+            out = scan_test_file(f, set())
+        self.assertIsNotNone(out)
+        n, findings = out
+        self.assertEqual(n, 1)
+        self.assertTrue(findings)
+
+    def test_scanner_versions_exposed(self):
+        import scripts.metricas.hazard_scan as hz
+        import scripts.metricas.a11y_scan as ax
+        self.assertEqual(hz.SCANNER_VERSION, "wave7.1")
+        self.assertEqual(ax.SCANNER_VERSION, "wave7.1")
+
+    def test_a11y_scan_file_signature(self):
+        from scripts.metricas.a11y_scan import scan_a11y_file, A11Y_EXTS
+        self.assertIn(".html", A11Y_EXTS)
+        self.assertTrue(callable(scan_a11y_file))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

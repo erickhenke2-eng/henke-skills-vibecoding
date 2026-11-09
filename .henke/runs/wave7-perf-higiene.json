@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "run_id": "wave7-perf-higiene",
+  "mode": "EXECUTAR",
+  "archetype": "CARPINTEIRO",
+  "spec_path": "docs/designs/wave7-performance-higiene-v2.md",
+  "created_at": "2026-11-09T03:52:15.816500+00:00",
+  "updated_at": "2026-11-09T04:15:54.733631+00:00",
+  "requires_human_auth": false,
+  "review_status": "not_required",
+  "gates": {
+    "hazard_scan": {
+      "exit_code": 0,
+      "summary": "verde (ver relatório)",
+      "recorded_at": "2026-11-09T04:13:58.676213+00:00"
+    },
+    "assertless_scan": {
+      "exit_code": 0,
+      "summary": "verde (ver relatório)",
+      "recorded_at": "2026-11-09T04:13:58.783008+00:00"
+    },
+    "a11y_scan": {
+      "exit_code": 0,
+      "summary": "verde (ver relatório)",
+      "recorded_at": "2026-11-09T04:13:58.875293+00:00"
+    },
+    "spec_drift": {
+      "exit_code": 0,
+      "summary": "verde (ver relatório)",
+      "recorded_at": "2026-11-09T04:13:58.969692+00:00"
+    },
+    "audit_ledger": {
+      "exit_code": 0,
+      "summary": "verde (ver relatório)",
+      "recorded_at": "2026-11-09T04:13:59.062486+00:00"
+    },
+    "unittest_full": {
+      "exit_code": 0,
+      "summary": "verde (ver relatório)",
+      "recorded_at": "2026-11-09T04:13:59.162477+00:00"
+    },
+    "canaries_wave7": {
+      "exit_code": 0,
+      "summary": "verde (ver relatório)",
+      "recorded_at": "2026-11-09T04:13:59.255619+00:00"
+    },
+    "contract_closure": {
+      "exit_code": 0,
+      "summary": "verde",
+      "recorded_at": "2026-11-09T04:15:54.545211+00:00"
+    },
+    "metaconfig_diff": {
+      "exit_code": 0,
+      "summary": "verde",
+      "recorded_at": "2026-11-09T04:15:54.639244+00:00"
+    },
+    "spec_drift_final": {
+      "exit_code": 0,
+      "summary": "verde",
+      "recorded_at": "2026-11-09T04:15:54.732630+00:00"
+    }
+  },
+  "scope_amendments": [],
+  "outcome": "verified",
+  "reasons": []
+}

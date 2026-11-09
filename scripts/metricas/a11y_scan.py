@@ -32,6 +32,8 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
         except Exception:
             pass
 
+SCANNER_VERSION = "wave7.1"
+
 A11Y_EXTS = {".html", ".tsx", ".jsx", ".vue", ".svelte"}
 SKIP_DIRS = {
     ".git", ".hg", ".henke", "__pycache__", ".pytest_cache", ".mypy_cache",

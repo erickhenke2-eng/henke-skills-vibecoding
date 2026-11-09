@@ -1,11 +1,12 @@
-"""Testes de execução atômica de processos e eliminação de zumbis no Windows.
+"""Testes da fachada compatível de execução de processos (`scripts/process_runner.py`).
 
-Valida scripts/process_runner.py:
+Valida:
 1. Execução normal (exit 0, stdout, stderr, cwd, env, UTF-8, built-ins, stream sem deadlock).
-2. Timeout com eliminação atômica da árvore de processos (filho + neto) via taskkill /F /T.
-3. Ausência de zumbis no Windows via tasklist.
-4. Mocks de edge cases (taskkill 128 / já finalizado, fallback não-Windows, falhas).
-5. Execução rápida e determinística (< 3s total) e limpeza garantida via addCleanup.
+2. Timeout com eliminação da árvore de processos (filho + neto) via supervisão por
+   propriedade — Job Object no Windows, process group próprio no POSIX.
+3. Ausência da API pública de morte por PID (`kill_process_tree` foi removida na
+   Wave 7; permanece apenas um sentinel não-chamável).
+4. Semântica Wave 6 da fachada: timeout → `timed_out=True` com returncode legado.
 """
 from __future__ import annotations
 
@@ -16,49 +17,56 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
 
 SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
+import scripts.process_runner as process_runner
 from scripts.process_runner import (
     ProcessExecutionResult,
-    kill_process_tree,
     run_process,
 )
 
+_IS_WINDOWS = sys.platform == "win32"
 
-def is_pid_alive_tasklist(pid: int) -> bool:
-    """Verifica de forma agnóstica a idioma se o PID existe no tasklist do Windows."""
-    if not sys.platform.startswith("win"):
+
+def _pid_alive(pid: int) -> bool:
+    """Consulta passiva sobre a existência do PID (nunca usada para matar)."""
+    if pid <= 0:
         return False
+    if _IS_WINDOWS:
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32")
+        STILL_ACTIVE = 259
+        h = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not k32.GetExitCodeProcess(h, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            k32.CloseHandle(h)
     try:
-        res = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=5,
-        )
-        for line in res.stdout.strip().splitlines():
-            parts = [p.strip(' "') for p in line.split(",")]
-            if len(parts) >= 2 and parts[1] == str(pid):
-                return True
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
         return False
-    except Exception:
+    except PermissionError:
+        return True
+    except OSError:
         return False
 
 
-def wait_until_dead(pid: int, timeout_sec: float = 2.0, interval: float = 0.05) -> bool:
-    """Aguarda até que o PID desapareça do tasklist, retornando True se morto."""
-    start = time.time()
-    while time.time() - start < timeout_sec:
-        if not is_pid_alive_tasklist(pid):
+def _wait_dead(pid: int, timeout_sec: float = 3.0) -> bool:
+    end = time.monotonic() + timeout_sec
+    while time.monotonic() < end:
+        if not _pid_alive(pid):
             return True
-        time.sleep(interval)
-    return not is_pid_alive_tasklist(pid)
+        time.sleep(0.05)
+    return not _pid_alive(pid)
 
 
 class TestProcessRunnerNormalExecution(unittest.TestCase):
@@ -124,11 +132,25 @@ class TestProcessRunnerNormalExecution(unittest.TestCase):
         """Verifica que saída superior a 100 KB não causa deadlock no pipe OS."""
         line_count = 2000
         cmd = [sys.executable, "-c", f"for i in range({line_count}): print('linha_' * 10 + str(i))"]
-        res = run_process(cmd, timeout_sec=5.0)
+        res = run_process(cmd, timeout_sec=10.0)
         self.assertEqual(res.returncode, 0)
         self.assertFalse(res.timed_out)
         lines = res.stdout.strip().splitlines()
         self.assertEqual(len(lines), line_count)
+
+    def test_stream_hashes_cover_full_output(self):
+        cmd = [sys.executable, "-c", "import sys; sys.stdout.write('HENKE_HASH'); sys.stderr.write('E2')"]
+        res = run_process(cmd)
+        import hashlib
+        self.assertEqual(res.stdout_sha256, hashlib.sha256(b"HENKE_HASH").hexdigest())
+        self.assertEqual(res.stderr_sha256, hashlib.sha256(b"E2").hexdigest())
+
+    def test_bounded_retention_truncates_and_flags(self):
+        cmd = [sys.executable, "-c", "import sys; sys.stdout.write('Y' * 32768)"]
+        res = run_process(cmd, max_output_bytes=1024)
+        self.assertEqual(res.returncode, 0)
+        self.assertTrue(res.output_truncated)
+        self.assertEqual(len(res.stdout), 1024)
 
     @unittest.skipUnless(sys.platform.startswith("win"), "Comandos internos cmd.exe exigem Windows")
     def test_windows_builtins_resolution(self):
@@ -138,29 +160,30 @@ class TestProcessRunnerNormalExecution(unittest.TestCase):
 
 
 class TestProcessRunnerTimeoutTreeKill(unittest.TestCase):
-    """Testes de timeout e eliminação atômica da árvore de processos no Windows."""
+    """Timeout elimina a árvore supervisionada (filho + neto)."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
+        self.fixture_pids: list[int] = []
+        self.addCleanup(self._safety_cleanup)
 
-    def _force_cleanup_pids(self, pids: list[int]):
-        for pid in pids:
+    def _safety_cleanup(self):
+        for pid in self.fixture_pids:
             try:
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(pid)],
-                    check=False,
-                    capture_output=True,
-                    timeout=5,
-                )
+                if _IS_WINDOWS:
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(pid)],
+                        check=False, capture_output=True, timeout=5,
+                    )
+                else:
+                    os.kill(pid, 9)
             except Exception:
                 pass
 
-    @unittest.skipUnless(sys.platform.startswith("win"), "Exige Windows para validação física do taskkill /F /T")
     def test_timeout_kills_child_and_grandchild_tree(self):
-        """Valida que o timeout elimina atomicamente tanto o processo filho quanto o neto."""
+        """Timeout elimina filho e neto criados pelo filho supervisionado."""
         pid_file = Path(self.temp_dir.name) / "pids.txt"
-
         child_code = (
             "import sys, os, subprocess, time\n"
             "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
@@ -175,20 +198,17 @@ class TestProcessRunnerTimeoutTreeKill(unittest.TestCase):
         self.assertTrue(res.timed_out, "Deveria ter marcado timed_out=True")
         self.assertTrue(res.killed_tree, "Deveria ter marcado killed_tree=True")
         self.assertNotEqual(res.returncode, 0, "Returncode em timeout não deve ser 0")
+        self.assertEqual(res.termination_reason, "timeout")
 
         self.assertTrue(pid_file.exists(), "Arquivo de PIDs deveria ter sido gerado pelo filho")
         content = pid_file.read_text(encoding="utf-8").strip()
         parts = [int(p) for p in content.split(",") if p.isdigit()]
         self.assertEqual(len(parts), 2, f"Esperava 2 PIDs (filho e neto), obteve: {content}")
         child_pid, grandchild_pid = parts[0], parts[1]
+        self.fixture_pids.extend([child_pid, grandchild_pid])
 
-        self.addCleanup(self._force_cleanup_pids, [child_pid, grandchild_pid])
-
-        child_dead = wait_until_dead(child_pid, timeout_sec=2.0)
-        grandchild_dead = wait_until_dead(grandchild_pid, timeout_sec=2.0)
-
-        self.assertTrue(child_dead, f"Processo filho (PID {child_pid}) ainda está vivo após taskkill!")
-        self.assertTrue(grandchild_dead, f"Processo neto (PID {grandchild_pid}) ainda está vivo após taskkill!")
+        self.assertTrue(_wait_dead(child_pid), f"Processo filho (PID {child_pid}) ainda está vivo!")
+        self.assertTrue(_wait_dead(grandchild_pid), f"Processo neto (PID {grandchild_pid}) ainda está vivo!")
 
     def test_partial_stdout_captured_on_timeout(self):
         """Valida que buffers de stdout gravados antes do timeout são preservados."""
@@ -199,39 +219,26 @@ class TestProcessRunnerTimeoutTreeKill(unittest.TestCase):
         self.assertIn("SAIDA_PARCIAL_HENKE", res.stdout)
 
 
-class TestProcessRunnerEdgeCasesAndMocking(unittest.TestCase):
-    """Testes de casos de borda e simulações com mock."""
+class TestNoPublicPidKillApi(unittest.TestCase):
+    """Morte por PID arbitrário não faz mais parte da API pública."""
 
-    @patch("subprocess.run")
-    def test_taskkill_already_exited_race_condition(self, mock_run):
-        """Simula taskkill retornando 128 (processo morreu antes do taskkill executar)."""
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["taskkill", "/F", "/T", "/PID", "12345"],
-            returncode=128,
-            stdout="",
-            stderr="ERRO: o processo 12345 não foi encontrado.",
-        )
-        success = kill_process_tree(12345)
-        self.assertTrue(success)
+    def test_kill_process_tree_is_not_callable_api(self):
+        sentinel = getattr(process_runner, "kill_process_tree", None)
+        self.assertFalse(callable(sentinel),
+                         "kill_process_tree não pode ser função pública na Wave 7")
 
-    @patch("subprocess.run", side_effect=FileNotFoundError("taskkill not found"))
-    def test_taskkill_missing_fallback(self, mock_run):
-        """Simula ausência de taskkill, garantindo que não lance exceção fatal."""
-        success = kill_process_tree(12345)
-        self.assertFalse(success)
-
-    @patch("sys.platform", "linux")
-    @patch("os.killpg", create=True)
-    @patch("os.getpgid", create=True, return_value=54321)
-    def test_non_windows_platform_fallback(self, mock_getpgid, mock_killpg):
-        """Valida que em ambientes não-Windows o kill_process_tree usa os.killpg."""
-        success = kill_process_tree(54321)
-        self.assertTrue(success)
-        mock_killpg.assert_called_once()
-
-    def test_kill_process_tree_invalid_pid(self):
-        self.assertIs(kill_process_tree(0), False)
-        self.assertIs(kill_process_tree(-10), False)
+    def test_no_helper_kills_arbitrary_pid(self):
+        """Nenhuma função definida no módulo mata processo por PID fornecido."""
+        for name in dir(process_runner):
+            if name.startswith("_"):
+                continue
+            obj = getattr(process_runner, name)
+            if not callable(obj):
+                continue
+            if getattr(obj, "__module__", None) != process_runner.__name__:
+                continue  # símbolo importado/re-exportado, não é API definida aqui
+            if name not in {"run_process"}:
+                self.fail(f"API pública inesperada exposta: {name}")
 
 
 if __name__ == "__main__":

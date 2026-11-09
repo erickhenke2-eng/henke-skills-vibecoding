@@ -1,8 +1,13 @@
-"""Módulo de execução atômica de processos e eliminação de zumbis no Windows (Wave 6 - R3).
+"""process_runner.py — fachada compatível da Wave 6 sobre `process_supervisor`.
 
-Garante que timeouts de subprocessos eliminem recursivamente toda a árvore de processos
-descendentes via `taskkill /F /T` no Windows, prevenindo processos órfãos, travamento de
-arquivos e vazamento de portas.
+`run_process(...)` mantém a assinatura antiga e agora retorna o
+`ProcessExecutionResult` estendido do supervisor (campos novos são aditivos:
+`duration_ms`, `stdout_sha256`, `stderr_sha256`, `output_truncated`,
+`termination_reason`).
+
+A morte por PID arbitrário (`kill_process_tree`) deixou de existir como API
+pública: todo encerramento passa por um handle devolvido por
+`ChildSupervisor.start` na mesma execução.
 """
 from __future__ import annotations
 
@@ -10,61 +15,23 @@ import os
 from pathlib import Path
 import shlex
 import shutil
-import subprocess
 import sys
-from typing import NamedTuple, Sequence
+from typing import Sequence
 
+from scripts.process_supervisor import (
+    SUPERVISOR_UNAVAILABLE,
+    TIMEOUT_RETURNCODE,
+    ChildSupervisor,
+    ProcessExecutionResult,
+)
 
-class ProcessExecutionResult(NamedTuple):
-    """Resultado imutável da execução de um subprocesso."""
-    returncode: int
-    stdout: str
-    stderr: str
-    timed_out: bool
-    killed_tree: bool
-
-
-def kill_process_tree(pid: int, timeout_sec: float = 10.0) -> bool:
-    """Termina atomicamente uma árvore de processos no Windows via taskkill /F /T.
-
-    Retorna True se taskkill finalizou a árvore com sucesso (código 0) ou se o
-    processo já havia sido encerrado (código 128 / corrida benigna).
-    Retorna False em caso de PID inválido (<= 0) ou falha irrecuperável.
-    """
-    if pid <= 0:
-        return False
-
-    if sys.platform.startswith("win"):
-        try:
-            res = subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                check=False,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout_sec,
-            )
-            # Código 0: árvore finalizada com sucesso
-            # Código 128: processo já encerrado no momento do disparo (race benigna)
-            return res.returncode in (0, 128)
-        except (subprocess.TimeoutExpired, OSError):
-            return False
-    else:
-        # Fallback defensivo para ambientes POSIX (testes / CI híbrido)
-        try:
-            import signal
-            sig = getattr(signal, "SIGKILL", getattr(signal, "SIGTERM", 9))
-            if hasattr(os, "getpgid") and hasattr(os, "killpg"):
-                pgid = os.getpgid(pid)
-                os.killpg(pgid, sig)
-                return True
-            elif hasattr(os, "kill"):
-                os.kill(pid, sig)
-                return True
-            return False
-        except Exception:
-            return False
+__all__ = [
+    "SUPERVISOR_UNAVAILABLE",
+    "TIMEOUT_RETURNCODE",
+    "ChildSupervisor",
+    "ProcessExecutionResult",
+    "run_process",
+]
 
 
 def run_process(
@@ -72,20 +39,32 @@ def run_process(
     cwd: Path | str | None = None,
     timeout_sec: float | int | None = None,
     env: dict[str, str] | None = None,
+    max_output_bytes: int | None = None,
 ) -> ProcessExecutionResult:
-    """Executa comando com captura limpa de streams e eliminação atômica da árvore no timeout.
+    """Executa comando com captura limitada de streams e supervisão da árvore.
 
     Parâmetros:
         cmd: Lista de argumentos ou string de comando a executar.
         cwd: Diretório de trabalho para execução (default: None).
-        timeout_sec: Tempo limite em segundos antes do encerramento forçado da árvore.
-        env: Dicionário de variáveis de ambiente adicionais ou sobrescritas.
+        timeout_sec: Tempo limite em segundos antes do encerramento da árvore
+            supervisionada (Job Object no Windows, process group próprio no POSIX).
+        env: Variáveis de ambiente adicionais ou sobrescritas.
+        max_output_bytes: Teto de retenção por stream; o excedente entra apenas
+            no hash (`output_truncated` marca o corte). `None` (padrão da fachada)
+            preserva a semântica da Wave 6 e retém o stream inteiro; chamadas de
+            portões devem passar um teto explícito.
+
+    Nota de compatibilidade: em timeout, `timed_out=True` e
+    `termination_reason="timeout"` são fiéis, mas `returncode` é mapeado para 1,
+    a forma da Wave 6. Chamadas novas que precisam do código 124/125 usam
+    `ChildSupervisor.wait` diretamente.
 
     Retorna:
-        ProcessExecutionResult com returncode, stdout, stderr, timed_out e killed_tree.
+        ProcessExecutionResult com returncode do filho (timeout → 1 na fachada;
+        125 = supervisor indisponível), streams retidos, hashes e flags de término.
     """
     if isinstance(cmd, str):
-        raw_tokens = shlex.split(cmd, posix=not sys.platform.startswith("win"))
+        raw_tokens = shlex.split(cmd, posix=sys.platform != "win32")
         tokens = [
             tok.strip("\"'") if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in "\"'" else tok
             for tok in raw_tokens
@@ -97,7 +76,7 @@ def run_process(
         raise ValueError("cmd cannot be empty")
 
     # Resolução de binário e comandos internos no Windows (sem shell=True)
-    if sys.platform.startswith("win") and tokens:
+    if sys.platform == "win32" and tokens:
         resolved = shutil.which(tokens[0])
         if resolved:
             tokens[0] = resolved
@@ -110,49 +89,23 @@ def run_process(
     child_env.setdefault("PYTHONUTF8", "1")
     child_env.setdefault("PYTHONIOENCODING", "utf-8")
 
-    work_dir = str(cwd) if cwd is not None else None
+    work_dir = Path(cwd) if cwd is not None else Path.cwd()
 
-    proc = subprocess.Popen(
-        tokens,
-        cwd=work_dir,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=child_env,
-    )
-
-    try:
-        stdout, stderr = proc.communicate(timeout=timeout_sec)
-        return ProcessExecutionResult(
-            returncode=proc.returncode if proc.returncode is not None else 0,
-            stdout=stdout or "",
-            stderr=stderr or "",
-            timed_out=False,
-            killed_tree=False,
+    with ChildSupervisor() as supervisor:
+        child = supervisor.start(tokens, cwd=work_dir, env=child_env, max_output_bytes=max_output_bytes)
+        res = supervisor.wait(child, timeout_sec=float(timeout_sec) if timeout_sec is not None else None)
+    if res.timed_out:
+        # Semântica Wave 6: timeout reporta código não-zero legado (1), nunca 124.
+        res = ProcessExecutionResult(
+            returncode=1,
+            stdout=res.stdout,
+            stderr=res.stderr,
+            timed_out=res.timed_out,
+            killed_tree=res.killed_tree,
+            duration_ms=res.duration_ms,
+            stdout_sha256=res.stdout_sha256,
+            stderr_sha256=res.stderr_sha256,
+            output_truncated=res.output_truncated,
+            termination_reason=res.termination_reason,
         )
-    except subprocess.TimeoutExpired:
-        # 1. Eliminação atômica da árvore de processos descendentes via taskkill
-        killed = kill_process_tree(proc.pid)
-
-        # 2. Defesa em profundidade: encerra o handle principal do processo
-        try:
-            proc.kill()
-        except (OSError, ProcessLookupError):
-            pass
-
-        # 3. Drena buffers acumulados antes do timeout
-        try:
-            rem_stdout, rem_stderr = proc.communicate(timeout=5.0)
-        except Exception:
-            rem_stdout, rem_stderr = "", ""
-
-        ret = proc.returncode if proc.returncode not in (None, 0) else 1
-        return ProcessExecutionResult(
-            returncode=ret,
-            stdout=rem_stdout or "",
-            stderr=rem_stderr or "",
-            timed_out=True,
-            killed_tree=killed,
-        )
+    return res

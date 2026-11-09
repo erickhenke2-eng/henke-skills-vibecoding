@@ -19,3 +19,9 @@ build/
 .henke/cache/
 .henke/report.html
 .henke/.cache_secret
+
+# Estado Wave 7 (manifestos incrementais, quarentena, sentinels e efêmeros)
+.henke/scan-manifests/
+.henke/quarantine/
+.henke/sessions/
+.henke/clean_log.jsonl

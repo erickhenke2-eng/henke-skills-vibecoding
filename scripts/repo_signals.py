@@ -247,7 +247,33 @@ def resolve_py(mod_parts, base_dir: Path, level: int):
     return None
 
 
-def py_edges(py: Path, tree, root: Path, edges):
+def _py_dynamic_imports(tree) -> list[str]:
+    """Detecta `__import__(...)` e `*.import_module(...)` — grafo estático não cobre."""
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        name = ""
+        if isinstance(f, ast.Name):
+            name = f.id
+        elif isinstance(f, ast.Attribute):
+            name = f.attr
+        if name in ("__import__", "import_module"):
+            hits.append(name)
+    return hits
+
+
+def _abs_looks_internal(root: Path, first: str) -> bool:
+    """True se o 1º componente de um import absoluto existe no repo."""
+    return (root / first).is_dir() or (root / f"{first}.py").is_file()
+
+
+def py_edges(py: Path, tree, root: Path, edges, problems=None):
+    rel = relposix(py, root)
+    if problems is not None:
+        for dyn in _py_dynamic_imports(tree):
+            problems.append((rel, f"dynamic_import:{dyn}"))
     for node in ast.walk(tree):
         targets = []
         if isinstance(node, ast.Import):
@@ -258,6 +284,7 @@ def py_edges(py: Path, tree, root: Path, edges):
             elif node.level:
                 targets = [(n.name.split("."), node.level) for n in node.names]
         for parts, level in targets:
+            resolved = None
             for base in (py.parent, root):
                 lv = max(level, base != py.parent)
                 hit = resolve_py(list(parts), base, lv)
@@ -271,36 +298,56 @@ def py_edges(py: Path, tree, root: Path, edges):
                             hit = sub
                             break
                 if hit and root in hit.parents:
-                    edges.append((relposix(py, root), relposix(hit, root)))
+                    resolved = hit
                     break
+            if resolved is not None:
+                edges.append((rel, relposix(resolved, root)))
+            elif problems is not None and level > 0:
+                problems.append((rel, f"unresolved_relative:{'.' * level}{'.'.join(parts)}"))
+            elif problems is not None and parts and _abs_looks_internal(root, parts[0]):
+                problems.append((rel, f"unresolved_internal:{'.'.join(parts)}"))
 
 
-def cmd_edges(args):
-    root = Path(args.root).resolve()
+def build_dependency_edges(root: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Extrai arestas internas de dependência + problemas por arquivo.
+
+    Retorna `(edges, problems)`:
+    - `edges`: lista deduplicada de `(from_rel, to_rel)` POSIX relativos a root.
+    - `problems`: lista de `(rel, reason)` — import interno/relativo não
+      resolvido, import dinâmico, erro de leitura ou de parse. Consumidores
+      conservadores tratam qualquer entrada como incerteza total.
+    """
+    root = Path(root).resolve()
     pkgmap = pg.build_pkgmap(root)
     gomod = pg.go_module_path(root)
-    seen, out = set(), []
+    seen, edges, problems = set(), [], []
     for f in iter_files(root):
         ext = f.suffix.lower()
+        rel = relposix(f, root)
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        except OSError as e:
+            problems.append((rel, f"read_error:{type(e).__name__}"))
             continue
         raw_edges = []
         if ext == ".py":
             try:
                 tree = ast.parse(text, filename=str(f))
-            except SyntaxError:
+            except SyntaxError as e:
+                problems.append((rel, f"syntax_error:{e.lineno or 0}"))
                 continue
-            py_edges(f, tree, root, raw_edges)
+            py_edges(f, tree, root, raw_edges, problems)
         elif ext in pg.JS_EXTS:
             for spec in pg.find_imports(text, ext):
                 hit = pg.resolve_js(spec, f.parent, root, pkgmap)
                 if hit and root in hit.parents:
-                    raw_edges.append((relposix(f, root), relposix(hit, root)))
+                    raw_edges.append((rel, relposix(hit, root)))
+                elif spec.startswith(("./", "../")):
+                    problems.append((rel, f"unresolved_relative:{spec}"))
         elif ext == ".rs":
             crate = pg.cargo_root(f, root)
             for spec in pg.find_imports(text, ext):
+                internal = spec.startswith(("mod::", "crate::", "self::", "super::"))
                 if spec.startswith("mod::"):
                     name = spec[5:]
                     cands = [f.parent / f"{name}.rs", f.parent / name / "mod.rs"]
@@ -314,26 +361,43 @@ def cmd_edges(args):
                         cands += [crate.joinpath(*parts[:-1]).with_suffix(".rs"),
                                   crate.joinpath(*parts[:-1], "mod.rs"),
                                   crate.joinpath("src", *parts[:-1]).with_suffix(".rs")]
+                hit = None
                 for c in cands:
                     if c.is_file():
-                        raw_edges.append((relposix(f, root), relposix(c.resolve(), root)))
+                        hit = c.resolve()
                         break
+                if hit is not None and root in hit.parents:
+                    raw_edges.append((rel, relposix(hit, root)))
+                elif internal:
+                    problems.append((rel, f"unresolved_internal:{spec}"))
         elif ext == ".go":
             for spec in pg.find_imports(text, ext):
-                rel = spec[len(gomod):].lstrip("/") if gomod and spec.startswith(gomod) else \
+                rel_spec = spec[len(gomod):].lstrip("/") if gomod and spec.startswith(gomod) else \
                     spec.lstrip("./") if spec.startswith("./") else None
-                if rel:
-                    d = (root / rel) if not spec.startswith("./") else (f.parent / rel)
+                if rel_spec:
+                    d = (root / rel_spec) if not spec.startswith("./") else (f.parent / rel_spec)
                     if d.is_dir():
+                        found = False
                         for g in sorted(d.glob("*.go")):
                             if not g.name.endswith("_test.go"):
-                                raw_edges.append((relposix(f, root), relposix(g.resolve(), root)))
+                                raw_edges.append((rel, relposix(g.resolve(), root)))
+                                found = True
                                 break
+                        if not found:
+                            problems.append((rel, f"unresolved_internal:{spec}"))
+                    elif spec.startswith(("./", gomod)):
+                        problems.append((rel, f"unresolved_internal:{spec}"))
         for e in raw_edges:
             if e not in seen and e[0] != e[1]:
                 seen.add(e)
-                out.append({"from": e[0], "to": e[1]})
-    print(json.dumps(out, indent=1))
+                edges.append(e)
+    return edges, problems
+
+
+def cmd_edges(args):
+    root = Path(args.root).resolve()
+    edges, _problems = build_dependency_edges(root)
+    print(json.dumps([{"from": a, "to": b} for a, b in edges], indent=1))
     return 0
 
 

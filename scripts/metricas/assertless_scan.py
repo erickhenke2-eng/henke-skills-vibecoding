@@ -898,6 +898,36 @@ class RecordingParser(argparse.ArgumentParser):
         raise SystemExit(2)
 
 
+def scan_test_file(path: Path, helpers):
+    """Escaneia UM arquivo de teste. Retorna (scanned_count, findings) ou None.
+
+    `None` sinaliza erro de leitura/parse — jamais findings vazios por erro.
+    Função pura extraída de `run()` para o adapter incremental da Wave 7:
+    mesmas regras, mesmo formato de findings `(veredito, path, _Fn, why)`.
+    """
+    f = Path(path)
+    if f.suffix.lower() != ".py":
+        return scan_polyglot(f, helpers)
+    try:
+        tree = ast.parse(f.read_text(encoding="utf-8-sig"), filename=str(f))
+    except (OSError, SyntaxError, ValueError, RecursionError) as e:
+        print(f"error: cannot parse {f}: {e} ({_RECORD})", file=sys.stderr)
+        return None
+    b = bindings(tree)
+    module_consts = constant_bindings(tree.body)
+    scanned, findings = 0, []
+    for fn, class_consts in test_functions(tree, class_constants(tree)):
+        scanned += 1
+        real, mock, swallow = classify(fn, helpers, b, module_consts, class_consts)
+        if real == 0 and mock == 0:
+            findings.append(("NO-ASSERTION", f, fn, "executes code, asserts nothing"))
+        elif real == 0:
+            findings.append(("MOCK-ONLY", f, fn, f"{mock} assertion(s) on the double, none on the code under test"))
+        if swallow:
+            findings.append(("SWALLOWED", f, fn, swallow))
+    return scanned, findings
+
+
 def run(argv):
     global _RECORD
     ap = RecordingParser(description="Flag tests that execute code without asserting on it.")
@@ -923,30 +953,12 @@ def run(argv):
 
     scanned, findings = 0, []
     for f in files:
-        # [HENKE-PATCH] .py segue o caminho AST original; demais linguagens usam o lexer.
-        if f.suffix.lower() != ".py":
-            n, poly_findings = scan_polyglot(f, helpers)
-            if n is None:
-                return 2
-            scanned += n
-            findings.extend(poly_findings)
-            continue
-        try:
-            tree = ast.parse(f.read_text(encoding="utf-8-sig"), filename=str(f))
-        except (OSError, SyntaxError, ValueError, RecursionError) as e:
-            print(f"error: cannot parse {f}: {e} ({excusal})", file=sys.stderr)
+        out = scan_test_file(f, helpers)
+        if out is None:
             return 2
-        b = bindings(tree)
-        module_consts = constant_bindings(tree.body)
-        for fn, class_consts in test_functions(tree, class_constants(tree)):
-            scanned += 1
-            real, mock, swallow = classify(fn, helpers, b, module_consts, class_consts)
-            if real == 0 and mock == 0:
-                findings.append(("NO-ASSERTION", f, fn, "executes code, asserts nothing"))
-            elif real == 0:
-                findings.append(("MOCK-ONLY", f, fn, f"{mock} assertion(s) on the double, none on the code under test"))
-            if swallow:
-                findings.append(("SWALLOWED", f, fn, swallow))
+        n, file_findings = out
+        scanned += n
+        findings.extend(file_findings)
 
     if not scanned:
         print(f"error: no test functions found — nothing to audit ({excusal})", file=sys.stderr)

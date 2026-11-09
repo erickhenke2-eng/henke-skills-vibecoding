@@ -21,7 +21,7 @@ HOOK_SCRIPT_TEMPLATE = """#!/bin/sh
 # HENKE-PRE-COMMIT-HOOK
 # Installed automatically by 'henke install-hook'
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-python scripts/henke_cli.py check --repo "$REPO_ROOT" --staged
+python scripts/henke_cli.py check --repo "$REPO_ROOT" --staged --no-cache --full
 exit $?
 """
 
@@ -37,11 +37,12 @@ def get_hook_template(cli_path: Path, python_exe: Path) -> str:
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 # 1. Executa bateria de portões via Henke CLI autoritativa
+#    O pre-commit NUNCA usa atalhos de watch/manifesto: sempre --staged --no-cache --full.
 if [ -f "{cli_posix}" ]; then
-    "{py_posix}" "{cli_posix}" check --repo "$REPO_ROOT" --staged --no-cache
+    "{py_posix}" "{cli_posix}" check --repo "$REPO_ROOT" --staged --no-cache --full
     HENKE_EXIT=$?
 elif command -v henke >/dev/null 2>&1; then
-    henke check --repo "$REPO_ROOT" --staged --no-cache
+    henke check --repo "$REPO_ROOT" --staged --no-cache --full
     HENKE_EXIT=$?
 else
     echo "[HENKE HOOK] ERRO CRÍTICO: interpretador ou CLI do Henke não encontrado em {cli_posix}." >&2

@@ -496,6 +496,19 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
     return res.returncode
 
 
+def _format_manifest_output(scanner_id: str, res) -> str:
+    lines = []
+    for f in res.findings:
+        loc = f.get("location", "?")
+        scope = f.get("scope", "")
+        lines.append(f"{f.get('rule','?'):<26} {loc}  [{scope}]  {f.get('message','')}")
+    lines.append(
+        f"{len(res.scanned_files)} file(s) scanned this round, "
+        f"{len(res.reused_files)} reused, {len(res.findings)} finding(s)"
+    )
+    return "\n".join(lines)
+
+
 def _cmd_check(
     repo_root: Path,
     spec_path: str | None = None,
@@ -503,6 +516,9 @@ def _cmd_check(
     no_cache: bool = False,
     clear_cache_flag: bool = False,
     staged: bool = False,
+    full: bool = False,
+    jobs: int = 1,
+    gate_timeout: float = 120.0,
 ) -> int:
     if clear_cache_flag:
         clear_cache(repo_root)
@@ -513,6 +529,9 @@ def _cmd_check(
     target_root = repo_root
 
     if staged:
+        # --staged implica --no-cache --full: manifestos, watch e cache desligados.
+        no_cache = True
+        full = True
         try:
             git_check = subprocess.run(
                 ["git", "rev-parse", "--is-inside-work-tree"],
@@ -534,8 +553,12 @@ def _cmd_check(
                 else:
                     print(f"ERRO: Falha ao extrair snapshot do index Git via git checkout-index (exit {co_res.returncode}): {co_res.stderr}", file=sys.stderr)
                     return 2
+            else:
+                print("ERRO: --staged exige repositório Git.", file=sys.stderr)
+                return 2
         except Exception as exc:
-            sys.stderr.write(f"[AVISO] Falha ao extrair index Git para --staged: {exc}\n")
+            print(f"ERRO: Falha ao extrair index Git para --staged: {exc}", file=sys.stderr)
+            return 2
 
     try:
         from scripts.mission_classifier import classify_repository, prompt_unconfigured_stack
@@ -552,17 +575,21 @@ def _cmd_check(
             classification = classify_repository(target_root)
 
         checks_to_run: list[tuple[str, Path, list[str]]] = []
+        manifest_scanners: list[str] = []
 
         # 1. Universal baseline gate: hazard_scan
         checks_to_run.append(("hazard_scan", GATE_MAP["hazard"], [str(target_root)]))
+        manifest_scanners.append("hazard")
 
         # 2. Universal assertless scan: se diretório tests/ existir no snapshot inspecionado
         tests_dir = target_root / "tests"
         if tests_dir.is_dir():
             checks_to_run.append(("assertless_scan", GATE_MAP["assertless"], [str(tests_dir)]))
+            manifest_scanners.append("assertless")
 
         # 3. Universal a11y scan: executado incondicionalmente para evitar regressões
         checks_to_run.append(("a11y_scan", GATE_MAP["a11y"], [str(target_root)]))
+        manifest_scanners.append("a11y")
 
         if spec_path:
             checks_to_run.append((
@@ -571,59 +598,107 @@ def _cmd_check(
                 ["--repo", str(target_root), "--spec", spec_path],
             ))
 
+        use_manifests = not staged
         effective_no_cache = no_cache or staged
         results: list[dict] = []
         overall_ok = True
-        for name, script_path, gate_args in checks_to_run:
-            key = compute_cache_key(name, script_path, gate_args, repo_root)
-            cached = None if effective_no_cache else get_cached_gate(key, repo_root=repo_root)
 
-            if cached is not None:
-                exit_code = cached.get("exit_code", cached.get("returncode", 0))
-                passed = cached.get("passed", exit_code == 0)
-                if not passed:
-                    overall_ok = False
-                output = cached.get("output", cached.get("stdout", "")).strip()
-                results.append({
-                    "gate": name,
-                    "exit_code": exit_code,
-                    "passed": passed,
-                    "output": output,
-                    "cached": True,
-                })
-            else:
-                full_cmd = [sys.executable, str(script_path), *gate_args]
-                res = run_process(
-                    full_cmd,
-                    cwd=str(target_root),
-                    timeout_sec=120.0,
+        if use_manifests:
+            from scripts.metricas.scan_manifest import (
+                run_incremental_scan, scanner_specs,
+            )
+            spec_by_id = {s.scanner_id: s for s in scanner_specs(repo_root)}
+            manifest_results: dict[str, dict] = {}
+            for name, _script, _args in checks_to_run:
+                scanner_id = name.replace("_scan", "")
+                if scanner_id not in manifest_scanners:
+                    continue
+                res = run_incremental_scan(
+                    repo_root, spec_by_id[scanner_id],
+                    full=full or effective_no_cache,
                 )
-                passed = res.returncode == 0 and not res.timed_out
+                passed = res.exit_code == 0
                 if not passed:
                     overall_ok = False
-                out_text = ((res.stdout or "") + (res.stderr or "")).strip()
+                manifest_results[name] = {
+                    "gate": name,
+                    "exit_code": res.exit_code,
+                    "passed": passed,
+                    "output": _format_manifest_output(scanner_id, res),
+                    "cached": False,
+                    "manifest": {
+                        "full_scan": res.full_scan,
+                        "scanned": list(res.scanned_files),
+                        "reused": len(res.reused_files),
+                        "invalidated": len(res.invalidated_files),
+                        "reasons": list(res.reasons),
+                    },
+                }
+            results.extend(manifest_results[n] for n, *_ in checks_to_run
+                           if n in manifest_results)
+
+        # Portões sem adapter (ou staged) executam como processos supervisionados.
+        script_gates = [(n, p, a) for n, p, a in checks_to_run
+                        if n.replace("_scan", "") not in manifest_scanners
+                        or not use_manifests]
+        if script_gates:
+            from scripts.gate_parallel import (
+                GateSpec, aggregate_exit_code, run_gates_parallel,
+            )
+            uncached: list[tuple[int, str, Path, list[str]]] = []
+            cached_results: dict[int, dict] = {}
+            for idx, (name, script_path, gate_args) in enumerate(script_gates):
+                key = compute_cache_key(name, script_path, gate_args, repo_root)
+                cached = None if effective_no_cache else get_cached_gate(key, repo_root=repo_root)
+                if cached is not None:
+                    exit_code = cached.get("exit_code", cached.get("returncode", 0))
+                    passed = cached.get("passed", exit_code == 0)
+                    if not passed:
+                        overall_ok = False
+                    cached_results[idx] = {
+                        "gate": name,
+                        "exit_code": exit_code,
+                        "passed": passed,
+                        "output": cached.get("output", cached.get("stdout", "")).strip(),
+                        "cached": True,
+                    }
+                else:
+                    uncached.append((idx, name, script_path, gate_args))
+            specs = [
+                GateSpec(name, (sys.executable, str(script_path), *gate_args),
+                         target_root, timeout_sec=float(gate_timeout))
+                for _idx, name, script_path, gate_args in uncached
+            ]
+            par_results = run_gates_parallel(specs, max_parallel=jobs)
+            for (idx, name, script_path, gate_args), gres in zip(uncached, par_results):
+                passed = gres.passed
+                if not passed:
+                    overall_ok = False
+                out_text = ((gres.stdout or "") + (gres.stderr or "")).strip()
                 if not staged:
                     store_cached_gate(
-                        key,
+                        compute_cache_key(name, script_path, gate_args, repo_root),
                         {
                             "gate": name,
-                            "exit_code": res.returncode,
-                            "returncode": res.returncode,
-                            "stdout": res.stdout or "",
-                            "stderr": res.stderr or "",
+                            "exit_code": gres.exit_code,
+                            "returncode": gres.exit_code,
+                            "stdout": gres.stdout or "",
+                            "stderr": gres.stderr or "",
                             "passed": passed,
                             "output": out_text,
                         },
                         repo_root=repo_root,
                     )
                     enforce_ram_limit(500.0, repo_root=repo_root)
-                results.append({
+                cached_results[idx] = {
                     "gate": name,
-                    "exit_code": res.returncode,
+                    "exit_code": gres.exit_code,
                     "passed": passed,
                     "output": out_text,
                     "cached": False,
-                })
+                }
+            for idx, (name, _p, _a) in enumerate(script_gates):
+                results.append(cached_results[idx])
 
         if as_json:
             print(json.dumps({
@@ -679,6 +754,144 @@ def _cmd_report(repo_root: Path, out_path: Path | None = None) -> int:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 1
 
+
+def _cmd_test_impact(repo_root: Path, base: str, *, full: bool = False,
+                     run: bool = False, as_json: bool = False) -> int:
+    from scripts.import_graph import build_import_graph
+    from scripts.test_impact import (
+        GitDiscoveryError, ImpactSelection, build_unittest_command, select_tests,
+    )
+    try:
+        if full:
+            from scripts.test_impact import discover_changed_files
+            changed = discover_changed_files(repo_root, base)
+            sel = ImpactSelection("full", tuple(changed), (), ("forced_full",), ())
+        else:
+            graph = build_import_graph(repo_root)
+            sel = select_tests(repo_root, base, graph.direct,
+                               unresolved=graph.unresolved)
+    except GitDiscoveryError as exc:
+        print(f"ERRO: descoberta Git falhou: {exc}", file=sys.stderr)
+        return 2
+
+    if as_json:
+        print(json.dumps({
+            "mode": sel.mode,
+            "changed_files": list(sel.changed_files),
+            "test_files": list(sel.test_files),
+            "reasons": list(sel.reasons),
+            "unresolved_files": list(sel.unresolved_files),
+        }, ensure_ascii=False, indent=2))
+    else:
+        print(f"mode={sel.mode} tests={len(sel.test_files)} "
+              f"changed={len(sel.changed_files)} reasons={','.join(sel.reasons) or '-'}")
+        for t in sel.test_files:
+            print(f"  selected: {t}")
+
+    if not run:
+        return 0
+    if sel.mode == "selected" and not sel.test_files:
+        print("no_changes: nenhum teste a executar.")
+        return 0
+    cmd = build_unittest_command(sel, repo_root)
+    env = os.environ.copy()
+    env["HENKE_TEST_IMPACT"] = "1"
+    ledger = repo_root / ".henke" / "LEDGER.json"
+    exec_log = repo_root / ".henke" / "exec_log.jsonl"
+    return _cmd_exec(repo_root, ledger, exec_log, ["--"] + cmd)
+
+
+def _cmd_watch(repo_root: Path, *, quiet: bool = False,
+               poll: float = 0.75, debounce: float = 0.30) -> int:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("ERRO: 'henke watch' é exclusivamente foreground/interativo (TTY exigido).",
+              file=sys.stderr)
+        return 2
+    from scripts.henke_watch import WatchConfig, WatchController
+    cfg = WatchConfig(repo_root=repo_root, poll_interval_sec=poll,
+                      debounce_sec=debounce, quiet=quiet)
+    return WatchController(cfg).run_foreground()
+
+
+def _cmd_clean(repo_root: Path, *, execute: bool = False,
+               restore: str | None = None, purge_expired: bool = False,
+               confirm_batch: str | None = None, as_json: bool = False) -> int:
+    from scripts.henke_clean import (
+        plan_clean, purge_expired_batch, quarantine, restore_batch,
+        staging_leftovers,
+    )
+    if restore is not None:
+        if not execute:
+            print("ERRO: --restore exige --execute.", file=sys.stderr)
+            return 2
+        n = restore_batch(repo_root, restore)
+        print(f"[OK] {n} item(ns) restaurado(s) do batch {restore}.")
+        return 0 if n >= 0 else 1
+    if purge_expired:
+        if not execute or not confirm_batch:
+            print("ERRO: --purge-expired exige --execute e --confirm-batch <id>.",
+                  file=sys.stderr)
+            return 2
+        try:
+            n = purge_expired_batch(repo_root, confirm_batch,
+                                    now=datetime.now(timezone.utc))
+        except ValueError as exc:
+            print(f"ERRO: {exc}", file=sys.stderr)
+            return 2
+        print(f"[OK] batch {confirm_batch} purgado ({n}).")
+        return 0
+    candidates = plan_clean(repo_root)
+    leftovers = staging_leftovers(repo_root)
+    if as_json:
+        print(json.dumps({
+            "candidates": [
+                {"source": str(c.source), "kind": c.kind, "size_bytes": c.size_bytes}
+                for c in candidates
+            ],
+            "staging_leftovers": [str(p) for p in leftovers],
+            "dry_run": not execute,
+        }, ensure_ascii=False, indent=2))
+    else:
+        for c in candidates:
+            print(f"  [{c.kind}] {c.source} ({c.size_bytes} bytes)")
+        for p in leftovers:
+            print(f"  [staging-leftover] {p}")
+        print(f"{len(candidates)} candidato(s); "
+              f"{'EXECUTANDO quarentena' if execute else 'dry-run (use --execute para mover)'}")
+    if not execute:
+        return 0
+    if not candidates:
+        return 0
+    batch = quarantine(repo_root, candidates)
+    print(f"[OK] batch {batch.batch_id}: {len(batch.items)} item(ns) em quarentena "
+          f"(expira {batch.expires_at}).")
+    return 0
+
+
+def _cmd_session(args) -> int:
+    import scripts.henke_session as hs
+    if args.session_cmd == "start":
+        s = hs.start_session(args.agent, args.workspace.resolve(), args.run_id)
+        print(f"HENKE_SESSION_ID={s.session_id}")
+        print(s.session_id)
+        return 0
+    ws = args.workspace.resolve() if getattr(args, "workspace", None) else Path.cwd()
+    os.environ["HENKE_WORKSPACE"] = str(ws)
+    if args.session_cmd == "heartbeat":
+        hs.heartbeat(args.session_id)
+        print(f"[OK] heartbeat renovado: {args.session_id}")
+        return 0
+    if args.session_cmd == "end":
+        hs.end_session(args.session_id)
+        print(f"[OK] sessão encerrada: {args.session_id}")
+        return 0
+    if args.session_cmd == "gc":
+        n = hs.session_gc(ws, now=datetime.now(timezone.utc))
+        print(f"[OK] session gc: {n} sentinel(s) reaped.")
+        return 0
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if not raw_argv:
@@ -731,6 +944,10 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("--json", action="store_true", help="Saída em JSON")
     p_check.add_argument("--no-cache", action="store_true", help="Ignora cache e força re-execução dos portões")
     p_check.add_argument("--clear-cache", action="store_true", help="Limpa o cache de portões antes de executar")
+    p_check.add_argument("--full", action="store_true", help="Força scan integral (regrava manifesto após sucesso)")
+    p_check.add_argument("--jobs", type=int, default=1, help="Portões de processo em paralelo (1-4)")
+    p_check.add_argument("--gate-timeout", type=float, default=120.0, help="Timeout por portão em segundos")
+    p_check.add_argument("--state-dir", type=Path, default=None, help="Diretório de estado absoluto (equivale a HENKE_STATE_DIR)")
 
     p_app = sub.add_parser("approve", help="Aprova uma run pendente de autorização humana")
     p_app.add_argument("run_file", type=Path, help="Arquivo .henke/runs/<id>.json")
@@ -759,6 +976,42 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
     p_report.add_argument("--out", type=Path, default=None, help="Caminho do arquivo HTML de saída (padrão: .henke/report.html)")
 
+    p_ti = sub.add_parser("test-impact", help="Seleciona arquivos de teste pelo diff (TIA conservativa)")
+    p_ti.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_ti.add_argument("--base", required=True, help="Ref Git base para o diff")
+    p_ti.add_argument("--full", action="store_true", help="Sempre suíte completa (CI/pré-merge)")
+    p_ti.add_argument("--run", action="store_true", help="Executa o comando selecionado via supervisor")
+    p_ti.add_argument("--json", action="store_true", help="Saída em JSON")
+
+    p_watch = sub.add_parser("watch", help="Modo watch foreground interativo (exige TTY)")
+    p_watch.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_watch.add_argument("--quiet", action="store_true", help="Suprime repetições verdes idênticas")
+    p_watch.add_argument("--poll-interval", type=float, default=0.75, help="Intervalo de polling (s)")
+    p_watch.add_argument("--debounce", type=float, default=0.30, help="Janela de debounce (s)")
+
+    p_clean = sub.add_parser("clean", help="Faxina allowlist: dry-run padrão; --execute move para quarentena")
+    p_clean.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_clean.add_argument("--execute", action="store_true", help="Executa a movimentação para quarentena")
+    p_clean.add_argument("--restore", default=None, help="Batch-id para restaurar da quarentena")
+    p_clean.add_argument("--purge-expired", action="store_true", help="Purgar batch expirado (exige --confirm-batch)")
+    p_clean.add_argument("--confirm-batch", default=None, help="Confirmação humana do batch-id a purgar")
+    p_clean.add_argument("--json", action="store_true", help="Saída em JSON")
+
+    p_session = sub.add_parser("session", help="Sentinel de sessão com rastreamento de artefatos")
+    session_sub = p_session.add_subparsers(dest="session_cmd", required=True)
+    p_sstart = session_sub.add_parser("start", help="Inicia sessão e imprime session_id")
+    p_sstart.add_argument("--agent", required=True, help="Nome do agente")
+    p_sstart.add_argument("--workspace", type=Path, default=Path("."), help="Worktree alvo")
+    p_sstart.add_argument("--run-id", required=True, help="ID da run associada")
+    p_shb = session_sub.add_parser("heartbeat", help="Renova janela de heartbeat (+1h)")
+    p_shb.add_argument("session_id", help="ID da sessão")
+    p_shb.add_argument("--workspace", type=Path, default=Path("."), help="Worktree alvo")
+    p_send = session_sub.add_parser("end", help="Encerra a sessão (state=closed)")
+    p_send.add_argument("session_id", help="ID da sessão")
+    p_send.add_argument("--workspace", type=Path, default=Path("."), help="Worktree alvo")
+    p_sgc = session_sub.add_parser("gc", help="Reapa sentinels expirados e roda ephemeral_gc")
+    p_sgc.add_argument("--workspace", type=Path, default=Path("."), help="Worktree alvo")
+
     try:
         args = parser.parse_args(raw_argv)
     except SystemExit as exc:
@@ -779,6 +1032,12 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_route(prompt_val, args.repo.resolve(), compact=is_compact)
 
     if args.subcmd == "check" or args.subcmd == "goldfish":
+        state_dir_arg = getattr(args, "state_dir", None)
+        if state_dir_arg is not None:
+            if not Path(state_dir_arg).is_absolute():
+                print("ERRO: --state-dir deve ser caminho absoluto.", file=sys.stderr)
+                return 2
+            os.environ["HENKE_STATE_DIR"] = str(Path(state_dir_arg).resolve())
         return _cmd_check(
             args.repo.resolve(),
             spec_path=args.spec,
@@ -786,7 +1045,26 @@ def main(argv: list[str] | None = None) -> int:
             no_cache=getattr(args, "no_cache", False),
             clear_cache_flag=getattr(args, "clear_cache", False),
             staged=getattr(args, "staged", False),
+            full=getattr(args, "full", False),
+            jobs=getattr(args, "jobs", 1),
+            gate_timeout=getattr(args, "gate_timeout", 120.0),
         )
+
+    if args.subcmd == "test-impact":
+        return _cmd_test_impact(args.repo.resolve(), args.base,
+                                full=args.full, run=args.run, as_json=args.json)
+
+    if args.subcmd == "watch":
+        return _cmd_watch(args.repo.resolve(), quiet=args.quiet,
+                          poll=args.poll_interval, debounce=args.debounce)
+
+    if args.subcmd == "clean":
+        return _cmd_clean(args.repo.resolve(), execute=args.execute,
+                          restore=args.restore, purge_expired=args.purge_expired,
+                          confirm_batch=args.confirm_batch, as_json=args.json)
+
+    if args.subcmd == "session":
+        return _cmd_session(args)
 
     if args.subcmd == "approve":
         from scripts.run_state import main as run_state_main
