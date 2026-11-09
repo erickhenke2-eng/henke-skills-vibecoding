@@ -187,6 +187,13 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
     # reescrita do zero — o tip gravado LOCALMENTE por `henke exec` é a prova
     # de que a história termina onde a última execução real terminou.
     repo_root = log_p.parent.parent if log_p.parent.name == ".henke" else None
+    if repo_root is None and last_ehash:
+        # A6 (banca v8): log fora de <repo>/.henke/ pulava o check da ponta
+        # em silêncio — sem âncora resolvível a cadeia é só auto-consistente.
+        errors.append(
+            "UNVERIFIED_EXECUTION_EVIDENCE: exec_log fora de '<repo>/.henke/' "
+            "— âncora local da ponta não é resolvível, integridade não provada"
+        )
     if repo_root is not None and last_ehash:
         try:
             from scripts import run_state as _rs_tip

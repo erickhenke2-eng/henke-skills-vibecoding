@@ -1371,6 +1371,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                 # adulterá-lo — mitigado pelos portões de conteúdo que não
                 # dependem de âncora).
                 _anchor = None
+                _rd = None
                 try:
                     from scripts.run_state import load_anchor_sidecar as _las
                     _sc = _las(run_path.stem, repo_root=repo_root)
@@ -1393,6 +1394,33 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                     t for t in touched
                     if t not in declared and not t.startswith(".henke/")
                 )
+                # F2 (banca v8): escrita em path IGNORADO é invisível a todo
+                # portão de diff — só o snapshot de nascimento (ancorado no
+                # sidecar) vs. o atual revela arquivo escondido (evil.log,
+                # dist/payload.js não-declarado).
+                new_ignored: list[str] = []
+                _ign_start = None
+                if isinstance(_sc, dict):
+                    _ign_start = (_sc.get("fields") or {}).get("ignored_start")
+                if _ign_start is None and isinstance(_rd, dict):
+                    _ign_start = _rd.get("ignored_start")
+                if _ign_start is not None:
+                    _si = subprocess.run(
+                        ["git", "-c", "core.fsmonitor=false",
+                         "-c", "diff.external=", "status", "--porcelain",
+                         "-uall", "--ignored", "-z"],
+                        cwd=str(repo_root), capture_output=True, text=True,
+                        encoding="utf-8", errors="replace", timeout=30,
+                    )
+                    if _si.returncode == 0:
+                        cur_ig = {
+                            e[3:].strip() for e in _si.stdout.split("\0")
+                            if e.startswith("!! ") and e[3:].strip()
+                        }
+                        new_ignored = sorted(
+                            p for p in cur_ig - set(_ign_start or [])
+                            if not p.startswith(".henke/") and p not in declared
+                        )
                 # Arquivo gitignored é INVISÍVEL ao diff (status -uall não lista
                 # ignorados): declarar `dist/x.js` ou `.env` permite esconder a
                 # edição de todos os portões baseados em diff — inconclusivo.
@@ -1417,7 +1445,16 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                 # (erro honesto) reprova a run — nunca verde por omissão.
                 undeclared = None
                 ignored_declared = []
-            if ignored_declared:
+                new_ignored = []
+            if new_ignored:
+                record_gate(
+                    run_path, "files_changed_audit", 2,
+                    "IGNORED-WRITE-UNDECLARED: arquivo novo em path ignorado "
+                    "(invisível a todos os portões de diff): "
+                    + ", ".join(new_ignored[:10]),
+                    manual=True,
+                )
+            elif ignored_declared:
                 record_gate(
                     run_path, "files_changed_audit", 2,
                     "FILES-CHANGED-IGNORED: declarados gitignored invisíveis ao "
@@ -1519,8 +1556,20 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     test_info: dict | None = None
     test_cmd = (project or {}).get("test_cmd")
     if test_cmd:
-        test_timeout = float(timeout_opt or (project or {}).get("timeout_sec") or 180.0)
-        t_exit, t_out = _invoke_test_cmd(repo_root, str(test_cmd), test_timeout)
+        # allowed_cmds (F-18): knob de policy antes morto — com a lista
+        # preenchida, test_cmd fora da allowlist é recusado em vez de rodar
+        # um comando arbitrário do PROJECT.json do repo.
+        _allowed = policy_efetiva.get("allowed_cmds") or []
+        if _allowed and not any(
+                str(test_cmd).strip().startswith(str(p).strip())
+                for p in _allowed if str(p).strip()):
+            t_exit, t_out = 2, (
+                f"ALLOWED-CMDS-REJECTED: test_cmd '{test_cmd}' fora da "
+                "allowlist de POLICY.json"
+            )
+        else:
+            test_timeout = float(timeout_opt or (project or {}).get("timeout_sec") or 180.0)
+            t_exit, t_out = _invoke_test_cmd(repo_root, str(test_cmd), test_timeout)
         discovered = passed = 0
         try:
             cli_mod = _load_module("henke_cli")

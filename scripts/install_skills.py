@@ -48,11 +48,18 @@ def _install_lock(user_root, timeout=LOCK_TIMEOUT_SEC):
         os.write(fd, f"pid={os.getpid()}\n".encode("ascii"))
         yield
     finally:
-        os.close(fd)
+        # A8: unlink só se o arquivo ainda é O NOSSO lock — se o lock expirou
+        # e outro processo recriou o arquivo, remover apagaria o lock dele.
         try:
-            lock_path.unlink()
+            same = os.stat(lock_path).st_ino == os.fstat(fd).st_ino
         except OSError:
-            pass
+            same = False
+        os.close(fd)
+        if same:
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
 
 
 def _resolve_source(repo, rel):

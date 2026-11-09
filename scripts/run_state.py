@@ -264,7 +264,7 @@ def _load_evidence_manifest(run_id: str) -> dict | None:
 # para lavar o próprio veredito (banca v7 — F-03): o sidecar guarda o valor
 # de nascimento e verify_run_file re-ancora antes de confiar.
 _ANCHORED_FIELDS = ("mode", "mandatory_gates", "requires_human_auth",
-                    "gates_required", "driver", "spec_path")
+                    "gates_required", "driver", "spec_path", "ignored_start")
 
 
 def write_anchor_sidecar(run_id: str, spec_path: str | None,
@@ -340,6 +340,29 @@ def _git_head(repo_root: Path) -> str | None:
         return None
     sha = (res.stdout or "").strip()
     return sha if res.returncode == 0 and sha else None
+
+
+def _git_ignored(repo_root: Path) -> list[str] | None:
+    """Arquivos ignorados presentes no worktree (status --ignored → '!!').
+    Snapshot ancorado no init: escrita em path ignorado é invisível a TODOS
+    os portões de diff — só a diferença de snapshots a expõe (banca v8 F2).
+    None = git indisponível (auditoria fica sem baseline, não inventa)."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "status", "--porcelain", "-uall", "--ignored", "-z"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if res.returncode != 0:
+        return None
+    return sorted(
+        ent[3:].strip() for ent in (res.stdout or "").split("\0")
+        if ent.startswith("!! ") and ent[3:].strip()
+    )
 
 
 def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
@@ -735,6 +758,7 @@ def init_run(
         "spec_path": spec_path,
         "spec_sha256": spec_sha256,
         "head_start": head_start,
+        "ignored_start": _git_ignored(repo_root),
         "created_at": now,
         "updated_at": now,
         "requires_human_auth": bool(requires_human_auth),
