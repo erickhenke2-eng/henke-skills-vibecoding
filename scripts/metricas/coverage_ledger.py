@@ -345,8 +345,9 @@ def verify_ledger(
     outcome = "verified" if not errors else "failed"
     if not errors and (profile == "deep" or require_critic) and not has_critic:
         outcome = "partial"
-        if require_critic:
-            errors.append("MISSING-CRITIC: profile/flag exige pelo menos 1 passagem em 'critic_passes[]'")
+        # profile=deep SEM critic completo é veredito incompleto — 'partial' não
+        # pode vestir exit 0 como se fosse verde (M52-banca).
+        errors.append("MISSING-CRITIC: profile/flag exige pelo menos 1 passagem em 'critic_passes[]'")
 
     summary = {
         "outcome": outcome,
@@ -426,6 +427,18 @@ def main() -> None:
             if not lpath.is_file():
                 print(f"ERRO: ledger não encontrado: {lpath}", file=sys.stderr)
                 sys.exit(2)
+            import math
+            # nan/inf desligam comparações (`pct < nan` é sempre False) — flag
+            # numérica não-finita é configuração malformada, não threshold
+            # válido: erro de uso → exit 2, nunca passa despercebida (A14-banca).
+            for _flag_name, _flag_val in (
+                ("--min-pct", args.min_pct),
+                ("--max-out-of-scope-pct", args.max_out_of_scope_pct),
+                ("--max-out-of-scope-per-dir-pct", args.max_oos_per_dir_pct),
+            ):
+                if not math.isfinite(_flag_val) or _flag_val < 0:
+                    print(f"ERRO: {_flag_name}={_flag_val} não é percentual finito >= 0.", file=sys.stderr)
+                    sys.exit(2)
             r_over = Path(args.root) if args.root else None
             ok, errors, summary = verify_ledger(
                 lpath, root_override=r_over, min_pct=args.min_pct, require_critic=args.require_critic,

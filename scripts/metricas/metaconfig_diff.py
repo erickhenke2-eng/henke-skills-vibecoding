@@ -50,6 +50,8 @@ import spec_drift as _sd  # noqa: E402
 _PKG_WATCHED_KEYS = (
     "scripts", "dependencies", "devDependencies", "peerDependencies",
     "optionalDependencies", "overrides", "resolutions", "publishConfig", "bin",
+    # campos que trocam entry point/resolução do pacote (A1-banca)
+    "workspaces", "main", "exports", "imports", "files", "type",
 )
 # Qualquer arquivo cujo diff inteiro é sensível (não há seção segura)
 _WHOLE_FILE_SENSITIVE = (
@@ -62,13 +64,37 @@ _WHOLE_FILE_BASENAMES = {
     "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
     "poetry.lock", "uv.lock", "Cargo.lock",
     ".npmrc", "Makefile", ".gitlab-ci.yml",
+    # install-time code exec / supply-chain (A1-banca)
+    "setup.py", "setup.cfg", "MANIFEST.in",
+    "go.mod", "go.sum", "Gemfile", "Gemfile.lock",
+    "Dockerfile", "docker-compose.yml", "docker-compose.yaml",
+    ".gitmodules", ".travis.yml", "tox.ini",
+    "rust-toolchain", "rust-toolchain.toml",
 }
+# requirements*.txt / Pipfile* / Dockerfile* — matching por padrão, não exato
+_WHOLE_FILE_GLOBS = (
+    "requirements*.txt", "Pipfile", "Pipfile.lock", "Dockerfile*",
+    ".env", ".env.*",
+)
+# Composite actions do GitHub também executam código
+_ACTION_FILE_RE = re.compile(r"(^|/|\\)\.github/actions/[^/\\]+/action\.ya?ml$")
 _WORKFLOW_DIR_RE = re.compile(r"(^|/|\\)\.github/workflows/[^/\\]+\.ya?ml$")
+
+
+def _strip_dot_prefix(rel: str) -> str:
+    """Remove prefixo './' apenas — NUNCA lstrip('./'): isso comeria o ponto de
+    '.github/workflows/x.yml' → 'github/...' e toda metaconfig-dotfile sumia do
+    diff (C1-banca: CI adulterado invisível)."""
+    n = rel.replace("\\", "/")
+    while n.startswith("./"):
+        n = n[2:]
+    return n
 
 
 def _is_protected(rel: str) -> str | None:
     """Classifica o path relativo; retorna o tipo de inspeção ou None."""
-    rel_n = rel.replace("\\", "/").lstrip("./")
+    import fnmatch
+    rel_n = _strip_dot_prefix(rel)
     base = rel_n.rsplit("/", 1)[-1]
     if base == "package.json":
         return "package_json"
@@ -76,7 +102,10 @@ def _is_protected(rel: str) -> str | None:
         return "toml"
     if rel_n in _WHOLE_FILE_SENSITIVE or base in _WHOLE_FILE_BASENAMES:
         return "whole_file"
-    if _WORKFLOW_DIR_RE.search(rel_n):
+    if any(fnmatch.fnmatchcase(base, pat) or fnmatch.fnmatchcase(rel_n, pat)
+           for pat in _WHOLE_FILE_GLOBS):
+        return "whole_file"
+    if _WORKFLOW_DIR_RE.search(rel_n) or _ACTION_FILE_RE.search(rel_n):
         return "whole_file"
     return None
 
@@ -196,7 +225,11 @@ def _toml_sections(text: str) -> dict:
 
 
 _TOML_WATCH = ("dependencies", "dev-dependencies", "build-dependencies",
-               "build-system", "project", "tool")
+               "build-system", "project", "tool",
+               # Cargo.toml supply-chain: [patch] redireciona deps para fonte
+               # arbitrária; [source]/[replace] trocam o registry inteiro (A2).
+               "patch", "source", "replace", "target", "package",
+               "features", "workspace")
 
 
 def _diff_toml(old_text: str | None, new_text: str | None) -> list[str]:

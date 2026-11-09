@@ -132,19 +132,31 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
     if not isinstance(gates, dict):
         return "blocked", ["NO-GATES-EXECUTED: 'gates' não é um objeto na run"]
 
-    # Atestações manuais (`manual: true` — record-gate sem --command/--evidence-file)
-    # NUNCA contam como portão físico; falha declarada manualmente segue reprovando.
+    # Portão FÍSICO = tríade completa de evidência (command + evidence_file +
+    # evidence_sha256). `manual: true` é atestação declarada; entrada sem tríade
+    # e sem manual é atestação implícita — NENHUMA das duas conta como execução
+    # provada (um JSON escrito à mão com exit_code:0 não vira verde).
     physical_gates: dict = {}
     manual_failures: list[str] = []
     for gate_name, gate_info in gates.items():
-        if isinstance(gate_info, dict) and gate_info.get("manual") is True:
-            ec = gate_info.get("exit_code")
-            if isinstance(ec, int) and not isinstance(ec, bool) and ec != 0:
-                manual_failures.append(
-                    f"GATE-FAILED: {gate_name} (exit {ec} — atestação manual, sem evidência física)"
-                )
+        if not isinstance(gate_info, dict):
+            physical_gates[gate_name] = gate_info  # formato inválido → falha abaixo
             continue
-        physical_gates[gate_name] = gate_info
+        ec = gate_info.get("exit_code")
+        has_triad = bool(
+            gate_info.get("command")
+            and gate_info.get("evidence_file")
+            and gate_info.get("evidence_sha256")
+        )
+        if has_triad and gate_info.get("manual") is not True:
+            physical_gates[gate_name] = gate_info
+            continue
+        # Atestação (manual:true ou sem tríade): exit 3 é n/a honesto; qualquer
+        # outro != 0 reprova; exit 0 declaratório não conta como execução real.
+        if isinstance(ec, int) and not isinstance(ec, bool) and ec not in (0, 3):
+            manual_failures.append(
+                f"GATE-FAILED: {gate_name} (exit {ec} — atestação sem evidência física)"
+            )
 
     if not physical_gates:
         if manual_failures:
@@ -169,6 +181,17 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
     if failed_gates:
         return "failed", failed_gates
 
+    # Driver simulado: cap de outcome derivável (echo/stdin nunca executam
+    # processo real — o resultado é digitado/ecoado). Vem DEPOIS das falhas
+    # (um vermelho continua 'failed', que é pior) e ANTES dos bloqueios —
+    # para um driver simulado, 'unverified' é o relato honesto de qualquer
+    # cenário que não falhou explicitamente.
+    if run_data.get("driver") in ("echo", "stdin"):
+        return "unverified", [
+            f"SIMULATED-DRIVER: driver '{run_data.get('driver')}' não executa processo real — "
+            "outcome máximo é 'unverified'"
+        ]
+
     # Anti-tautologia: se TODO portão físico devolveu n/a (exit 3), nenhum check
     # real aconteceu — verified por vacuidade é o falso-verde que este guarda mata.
     real_greens = [
@@ -183,7 +206,12 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
 
     # 2b. Verifica portões obrigatórios declarados na run (ou gates_required)
     mandatory_gates = run_data.get("mandatory_gates") or run_data.get("gates_required")
-    if not mandatory_gates and str(run_data.get("mode", "")).upper() == "EXECUTAR":
+    if mandatory_gates is not None and not isinstance(mandatory_gates, list):
+        return "blocked", [
+            f"MANDATORY-GATE-MISSING: 'mandatory_gates' malformado ({type(mandatory_gates).__name__}) — "
+            "malformação endurece, nunca relaxa"
+        ]
+    if not mandatory_gates and str(run_data.get("mode", "")).strip().upper() == "EXECUTAR":
         # Fallback de portões obrigatórios para o modo EXECUTAR:
         # Exige ao menos os portões fundamentais executados (hazard_scan, assertless_scan, a11y_scan)
         # com exit code 0, barrando runs compostas unicamente por portões fictícios/dummy.
@@ -221,11 +249,13 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
     elif mandatory_gates and isinstance(mandatory_gates, list):
         missing_mandatory: list[str] = []
         for req in mandatory_gates:
-            gate_stem = Path(req).stem if ("/" in req or "\\" in req) else req
+            # Normaliza por stem dos DOIS lados: 'hazard', 'hazard_scan.py' e
+            # 'scripts/metricas/hazard_scan.py' devem casar o mesmo portão.
+            req_stem = Path(str(req)).stem
             # exit 3 (n/a) conta como veredito produzido: o portão obrigatório
             # rodou e concluiu honestamente "nada a verificar" neste contexto.
             found = any(
-                (g_name == req or Path(g_name).stem == gate_stem)
+                (g_name == req or Path(g_name).stem == req_stem)
                 and isinstance(g_info, dict)
                 and g_info.get("exit_code") in (0, 3)
                 for g_name, g_info in physical_gates.items()
@@ -270,6 +300,29 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     if derived != "verified":
         return False, reasons
 
+    # Integridade retroativa da evidência física: o sha256 gravado na run deve
+    # bater com o arquivo em disco AGORA — evidência reescrita após o record
+    # torna a tríade decorativa se ninguém re-conferir.
+    tampered: list[str] = []
+    for g_name, g_info in (data.get("gates") or {}).items():
+        if not isinstance(g_info, dict):
+            continue
+        ev = g_info.get("evidence_file")
+        sha = g_info.get("evidence_sha256")
+        if not ev or not sha:
+            continue
+        ev_path = Path(str(ev))
+        if not ev_path.is_absolute():
+            ev_path = p.parent.parent.parent / ev  # relativo à raiz do repo
+        if not ev_path.is_file():
+            tampered.append(f"EVIDENCE-MISSING: {g_name} → '{ev}'")
+            continue
+        actual = hashlib.sha256(ev_path.read_bytes()).hexdigest()
+        if actual != sha:
+            tampered.append(f"EVIDENCE-TAMPERED: {g_name} → sha diverge do gravado")
+    if tampered:
+        return False, tampered
+
     return True, []
 
 
@@ -287,13 +340,35 @@ def init_run(
     if not safe_id:
         raise ValueError("run_id inválido")
     run_path = Path(repo_root).resolve() / ".henke" / "runs" / f"{safe_id}.json"
+    if run_path.is_file():
+        raise FileExistsError(f"run já existe (não sobrescrevo silenciosamente): {run_path}")
     now = _now_iso()
+    # Âncoras gravadas no NASCIMENTO da run: o diff e o hash da spec comparam
+    # contra o estado que existia quando a run começou — nunca contra um arquivo
+    # vivo que o próprio driver pode adulterar durante a execução.
+    head_start = _git_head(repo_root)
+    spec_sha256 = None
+    if spec_path:
+        try:
+            from scripts.spec_drift import compute_spec_hash
+        except ImportError:
+            try:
+                from spec_drift import compute_spec_hash
+            except ImportError:
+                compute_spec_hash = None  # type: ignore[assignment]
+        if compute_spec_hash is not None:  # type: ignore[truthy-function]
+            try:
+                spec_sha256 = compute_spec_hash(Path(spec_path))
+            except (OSError, UnicodeDecodeError):
+                spec_sha256 = None
     data: dict = {
         "version": 1,
         "run_id": safe_id,
         "mode": mode,
         "archetype": archetype,
         "spec_path": spec_path,
+        "spec_sha256": spec_sha256,
+        "head_start": head_start,
         "created_at": now,
         "updated_at": now,
         "requires_human_auth": bool(requires_human_auth),
@@ -336,8 +411,10 @@ def record_gate(
     gravam `command`/`evidence_file`/`evidence_sha256` — é o que prova execução
     real. `manual=True` marca `manual: true`: atestação que NUNCA conta como
     portão físico em `derive_run_outcome`. Chamadas de API sem evidência e sem
-    `manual=True` mantêm o comportamento legado (físico) — a exigência de
-    evidência vale na superfície CLI (`record-gate`).
+    `manual=True` gravam atestação implícita — `derive_run_outcome` exige a
+    tríade para contar como físico, então tais entradas também não contam. A
+    superfície CLI (`record-gate`) força `manual: true` nesse caso para deixar
+    a natureza da entrada explícita no JSON.
 
     Transação leitura→escrita coberta por `_file_lock(run_path)`.
     """
@@ -416,7 +493,13 @@ def approve_run(run_path: Path, approver: str = "human") -> dict:
         data["approved_by"] = approver.strip() or "human"
         data["approved_at"] = _now_iso()
         repo_root = _repo_root_for_run(run_path)
-        data["approved_head"] = _git_head(repo_root) if repo_root is not None else None
+        approved_head = _git_head(repo_root) if repo_root is not None else None
+        data["approved_head"] = approved_head
+        # Re-ancora o vínculo executável ao HEAD que o humano está aprovando
+        # AGORA — sem isso, um commit legítimo entre aprovação e --resume
+        # tornava a run irrecuperável para sempre (approve→commit→resume→stale→loop).
+        if isinstance(data.get("approval_binding"), dict):
+            data["approval_binding"]["head"] = approved_head
         derived, reasons = derive_run_outcome(data)
         data["outcome"] = derived
         data["reasons"] = reasons

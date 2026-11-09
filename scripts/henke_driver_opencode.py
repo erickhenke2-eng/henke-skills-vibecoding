@@ -12,12 +12,28 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 DEFAULT_MODEL = "opencode/deepseek-v4.1-flash-free"
+
+
+def _resolve_cli(name: str) -> str | None:
+    """Localiza o executável — no Windows, CLIs npm são shims .cmd/.bat."""
+    return shutil.which(name)
+
+
+def _run_cli(argv: list[str], cwd: str) -> subprocess.CompletedProcess:
+    exe = argv[0]
+    if exe.lower().endswith((".cmd", ".bat")):
+        argv = ["cmd", "/d", "/s", "/c", subprocess.list2cmdline(argv)]
+    return subprocess.run(
+        argv, cwd=cwd, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
 
 _INSTR = (
     "Voce e o executor de uma run da Suite Henke. Trabalhe APENAS dentro do "
@@ -43,11 +59,14 @@ def _last_result_json(text: str) -> dict | None:
 
 def main() -> int:
     model = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
+    if model.startswith("-"):
+        print(json.dumps({"files_changed": [], "notes": f"modelo inválido: {model!r}"}))
+        return 1
     try:
         envelope = json.load(sys.stdin)
     except (OSError, ValueError) as exc:
         print(json.dumps({"files_changed": [], "notes": f"envelope ilegível: {exc}"}))
-        return 0
+        return 1
 
     repo = str(envelope.get("repo_root") or ".")
     env_file = tempfile.NamedTemporaryFile(
@@ -58,30 +77,37 @@ def main() -> int:
         json.dump(envelope, env_file, ensure_ascii=False)
         env_file.close()
         prompt = f"{_INSTR}\n\nEnvelope anexo: {Path(env_file.name).name}"
+        exe = _resolve_cli("opencode")
+        if exe is None:
+            print(json.dumps({"files_changed": [], "notes": "opencode não encontrado no PATH"}))
+            return 1
         try:
-            res = subprocess.run(
-                ["opencode", "run", "-m", model, "--auto", "-f", env_file.name, prompt],
-                cwd=repo, capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
+            res = _run_cli(
+                [exe, "run", "-m", model, "--auto", "-f", env_file.name, prompt],
+                cwd=repo,
             )
         except OSError as exc:
             print(json.dumps({"files_changed": [], "notes": f"opencode indisponível: {exc}"}))
-            return 0
+            return 1
 
         obj = _last_result_json(res.stdout or "")
         if obj is None:
+            # Sem JSON de resultado = driver não cumpriu o contrato → fracasso
+            # real (exit != 0), nunca "sucesso com zero arquivos".
             obj = {
                 "files_changed": [],
                 "notes": f"opencode exit={res.returncode}; sem JSON de resultado "
                          f"(stdout_tail: {(res.stdout or '')[-300:]})",
             }
+            print(json.dumps(obj, ensure_ascii=False))
+            return 1
         else:
             obj = {
                 "files_changed": [str(f) for f in obj["files_changed"]],
                 "notes": str(obj.get("notes", ""))[:2000],
             }
-        print(json.dumps(obj, ensure_ascii=False))
-        return 0
+            print(json.dumps(obj, ensure_ascii=False))
+            return 0 if res.returncode == 0 else 1
     finally:
         try:
             os.unlink(env_file.name)

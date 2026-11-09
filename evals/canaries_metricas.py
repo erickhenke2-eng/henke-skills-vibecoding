@@ -10,6 +10,7 @@ Cobertura: assertless_scan, crap_score, ratchet, fence_check, tornado_scan
 + coletores (churn/metrics/edges) + disciplina de exit 2 em entrada malformada.
 """
 from pathlib import Path
+import hashlib
 import json
 import subprocess
 import sys
@@ -56,7 +57,11 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         code, _ = run(MET / "assertless_scan.py", dirty)
         expect("Canário M1: assertless reprova teste sem asserção", code == 1)
         clean = t / "test_clean.py"
-        clean.write_text("def test_ok():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+        # Asserção real (resultado de chamada — não tautologia constante;
+        # `assert 1 + 1 == 2` é tautologia que const_truth agora detecta).
+        clean.write_text(
+            "def test_ok():\n    resultado = sum([1, 1])\n    assert resultado == 2\n",
+            encoding="utf-8")
         code, _ = run(MET / "assertless_scan.py", clean)
         expect("Canário M2: assertless aprova teste com asserção", code == 0)
 
@@ -1103,8 +1108,8 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
             "export function Good() {\n"
             "  return <button aria-label=\"Fechar\"><svg /></button>;\n"
             "}\n", encoding="utf-8")
-        _, fnds_a11y_bad = scan_a11y_path(m77_dir / "Bad.tsx")
-        _, fnds_a11y_good = scan_a11y_path(m77_dir / "Good.tsx")
+        _, fnds_a11y_bad, _unr1 = scan_a11y_path(m77_dir / "Bad.tsx")
+        _, fnds_a11y_good, _unr2 = scan_a11y_path(m77_dir / "Good.tsx")
         a11y_rules = {r for r, _, _ in fnds_a11y_bad}
         expect("Canário M77: a11y_scan reprova A11Y-SR-ONLY-DUPLICATE, A11Y-HIDDEN-INTERACTIVE e A11Y-EMPTY-CONTROL e aprova botão legítimo",
                {"A11Y-SR-ONLY-DUPLICATE", "A11Y-HIDDEN-INTERACTIVE", "A11Y-EMPTY-CONTROL"} <= a11y_rules
@@ -1120,13 +1125,23 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
             "gates": {"hazard_scan": {"exit_code": 1}}
         }), encoding="utf-8")
         ok_r_bad, errs_r_bad = verify_run_file(m78_bad)
+        # Run íntegra = tríade de evidência física de verdade (exit_code:0 cru é
+        # atestação — depois do endurecimento banca v5, não verifica mais).
+        m78_ev = t / "hazard_scan.out"
+        m78_ev.write_text("scan limpo\n", encoding="utf-8")
+        m78_sha = hashlib.sha256(m78_ev.read_bytes()).hexdigest()
         m78_ok = t / "run_ok.json"
         m78_ok.write_text(json.dumps({
             "run_id": "r2",
             "mode": "EXECUTAR",
             "archetype": "CARPINTEIRO",
             "outcome": "verified",
-            "gates": {"hazard_scan": {"exit_code": 0}}
+            "gates": {"hazard_scan": {
+                "exit_code": 0,
+                "command": "hazard_scan .",
+                "evidence_file": str(m78_ev),
+                "evidence_sha256": m78_sha,
+            }}
         }), encoding="utf-8")
         ok_r_ok, errs_r_ok = verify_run_file(m78_ok)
         expect("Canário M78: run_state bloqueia outcome=verified forjado com STATE-DERIVED-CONFLICT e aprova run íntegra",
@@ -1158,8 +1173,14 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         m80_dir = t / "m80_exec"
         m80_dir.mkdir()
         CLI_SCRIPT = repo_root / "scripts" / "henke_cli.py"
+        # Comando real de teste (não texto de saída — desde o endurecimento banca
+        # v5, `discovered>0` sozinho NÃO classifica o comando como runner).
+        # unittest precisa de ≥1 teste real — py3.12 sai exit 5 com zero testes.
+        (m80_dir / "test_sample.py").write_text(
+            "import unittest\n\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.assertEqual(1 + 1, 2)\n",
+            encoding="utf-8")
         c_ex, o_ex = run(CLI_SCRIPT, "exec", "--repo", m80_dir, "--",
-                         sys.executable, "-c", "print('Ran 4 tests in 0.01s\\n\\nOK')")
+                         sys.executable, "-m", "unittest", "discover", "-s", str(m80_dir))
         exec_log_p = m80_dir / ".henke" / "exec_log.jsonl"
         led_p = m80_dir / ".henke" / "LEDGER.json"
         led_entries = json.loads(led_p.read_text(encoding="utf-8")) if led_p.is_file() else []

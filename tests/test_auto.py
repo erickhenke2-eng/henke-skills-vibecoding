@@ -49,12 +49,22 @@ def _fake_preflight_ok(repo, gates, spec_path=None):
     return True, []
 
 
+def _record_physical_gate(rp: Path, repo, run_id: str, name: str, ec: int, summary: str):
+    """Emula run_gates fielmente: evidência em disco + tríade completa na run."""
+    ev_dir = Path(repo) / ".henke" / "evidence" / run_id
+    ev_dir.mkdir(parents=True, exist_ok=True)
+    ev = ev_dir / f"{name}.out"
+    ev.write_text(f"fake gate output: {summary}\n", encoding="utf-8")
+    record_gate(rp, name, ec, summary,
+                command=f"fake-gate {name}", evidence_file=ev)
+
+
 def _fake_gates_ok(repo, gates, run_id, timeout_sec, test_cmd=None):
     """Emula henke_gates.run_gates(record=True): grava cada portão verde na run."""
     rp = Path(repo) / ".henke" / "runs" / f"{run_id}.json"
     verdicts = []
     for g in gates:
-        record_gate(rp, Path(g).stem, 0, "stub green (teste)")
+        _record_physical_gate(rp, repo, run_id, Path(g).stem, 0, "stub green (teste)")
         verdicts.append({"gate": g, "exit_code": 0, "passed": True})
     return {"verdicts": verdicts, "all_green": True, "ran": len(gates)}
 
@@ -65,7 +75,8 @@ def _fake_gates_red(repo, gates, run_id, timeout_sec, test_cmd=None):
     verdicts = []
     for i, g in enumerate(gates):
         ec = 1 if i == 0 else 0
-        record_gate(rp, Path(g).stem, ec, "ACHADO-TESTE" if ec else "stub green")
+        _record_physical_gate(rp, repo, run_id, Path(g).stem, ec,
+                              "ACHADO-TESTE" if ec else "stub green")
         verdicts.append({"gate": g, "exit_code": ec, "passed": ec == 0, "output": "ACHADO-TESTE"})
     return {"verdicts": verdicts, "all_green": False, "ran": len(gates)}
 
@@ -163,7 +174,10 @@ class AutoDispatchTests(unittest.TestCase):
         run_file = envs[0].with_name(envs[0].name.replace(".envelope.json", ".json"))
         run = json.loads(run_file.read_text(encoding="utf-8"))
         self.assertEqual(run["outcome"], "unverified")
-        self.assertTrue(any("ECHO-UNVERIFIED" in r for r in run.get("reasons", [])))
+        self.assertTrue(
+            any("SIMULATED-DRIVER" in r or "ECHO-UNVERIFIED" in r for r in run.get("reasons", [])),
+            run.get("reasons"),
+        )
         self.assertEqual(
             [s["sha256"] for s in run.get("skills_rodadas", [])],
             [s["sha256"] for s in env["skills"]],
@@ -184,7 +198,8 @@ class AutoDispatchTests(unittest.TestCase):
             rc = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin",
             ))
-        self.assertEqual(rc, 0)
+        # stdin é driver simulado (resultado digitado, sem custódia) → unverified → rc 2
+        self.assertEqual(rc, 2)
         pol = json.loads((self.repo / ".henke" / "POLICY.json").read_text(encoding="utf-8"))
         self.assertEqual(
             set(pol.keys()), {"policy", "always_ask", "auto_approve", "allowed_cmds"},
@@ -232,11 +247,13 @@ class AutoDispatchTests(unittest.TestCase):
             rc = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin",
             ))
-        self.assertEqual(rc, 0, buf.getvalue())
+        # stdin é driver simulado → outcome teto 'unverified' → rc 2
+        self.assertEqual(rc, 2, buf.getvalue())
         runs = _run_files(self.repo)
         self.assertEqual(len(runs), 1)
         run = json.loads(runs[0].read_text(encoding="utf-8"))
         self.assertEqual(run.get("files_changed"), ["parser.py"])
+        self.assertEqual(run.get("outcome"), "unverified")
 
     def test_red_gate_maps_exit_1(self):
         buf = io.StringIO()
@@ -316,7 +333,8 @@ class AutoAuthorizationTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertIn("--yes", buf.getvalue())
 
-        # strict + --yes → flui (driver stdin p/ rc 0 significativo; echo→unverified=2)
+        # strict + --yes → flui (stdin é simulado → unverified → rc 2; o que o
+        # teste valida é NÃO bloquear na autorização)
         result = json.dumps({"files_changed": ["x.py"], "notes": "ok"})
         buf2 = io.StringIO()
         with mock.patch.object(sys, "stdin", io.StringIO(result)), \
@@ -327,7 +345,8 @@ class AutoAuthorizationTests(unittest.TestCase):
             rc2 = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin", yes=True,
             ))
-        self.assertEqual(rc2, 0, buf2.getvalue())
+        self.assertEqual(rc2, 2, buf2.getvalue())
+        self.assertNotIn("--yes", buf2.getvalue(), "autorização passou — não deve pedir --yes")
 
         # balanced → flui sem --yes
         self._write_policy("balanced")
@@ -340,7 +359,8 @@ class AutoAuthorizationTests(unittest.TestCase):
             rc3 = henke_auto.run_auto(_ns(
                 prompt=PROMPT_EXEC, repo=str(self.repo), driver="stdin",
             ))
-        self.assertEqual(rc3, 0, buf3.getvalue())
+        self.assertEqual(rc3, 2, buf3.getvalue())
+        self.assertNotIn("--yes", buf3.getvalue(), "balanced flui sem --yes")
 
         # ...mas publish NUNCA flui, em nenhuma policy
         for pol in ("strict", "balanced", "yolo"):
@@ -443,16 +463,31 @@ class AutoResumeTests(unittest.TestCase):
     def test_resume_flows_when_binding_intact(self):
         rp = self._blocked_run()
         approve_run(rp)
-        result = json.dumps({"files_changed": ["a.py"], "notes": "ok"})
-        with mock.patch.object(sys, "stdin", io.StringIO(result)), \
-             mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
+        buf_err = io.StringIO()
+        with mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
              mock.patch.object(henke_auto, "_invoke_test_cmd", _fake_test_ok), \
              mock.patch.object(henke_auto, "_preflight_gates", _fake_preflight_ok), \
-             contextlib.redirect_stdout(io.StringIO()):
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(buf_err):
+            rc = henke_auto.run_auto(_ns(
+                prompt="x", repo=str(self.repo), driver="echo", resume=rp.stem,
+            ))
+        # Mesmo driver do vínculo → retomada flui; echo é simulado → unverified → rc 2
+        self.assertEqual(rc, 2)
+        self.assertNotIn("RETOMADA RECUSADA", buf_err.getvalue())
+
+    def test_resume_refused_when_driver_changes(self):
+        """Trocar o driver entre approve e resume invalida a aprovação (driver=escopo)."""
+        rp = self._blocked_run()  # aprovada com driver=echo
+        approve_run(rp)
+        result = json.dumps({"files_changed": ["a.py"], "notes": "ok"})
+        buf_err = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO(result)), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(buf_err):
             rc = henke_auto.run_auto(_ns(
                 prompt="x", repo=str(self.repo), driver="stdin", resume=rp.stem,
             ))
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 2)
+        self.assertIn("RETOMADA RECUSADA", buf_err.getvalue())
 
 
 class DriverAgentAdapterTests(unittest.TestCase):

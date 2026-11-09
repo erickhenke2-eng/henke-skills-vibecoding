@@ -110,6 +110,9 @@ DESTRUCTIVE_VERBS = (
     "deleta", "deletar", "delete", "exclui", "excluir", "apaga", "apagar",
     "drop", "wipe", "truncate", "destroy", "destroi", "destruir", "purge",
     "force-push", "push --force", "force push", "push -f", "rm -rf", "derruba",
+    # formas imperativas do léxico do vibecoder (ALTO-2 da banca)
+    "apague", "exclua", "remova", "delete", "destrua", "reverta", "restaura",
+    "reseta", "reset", "limpa", "limpar", "wipe", "zera", "desinstala",
 )
 METACONFIG_SIGNALS = (
     "package.json", "package-lock", "lockfile", "requirements", "pyproject",
@@ -178,6 +181,7 @@ def _load_module(name: str):
 # --- run_state (mesma suíte — import direto; henke_cli.py já faz o mesmo) ---
 try:
     from scripts.run_state import (
+        _file_lock,
         derive_run_outcome,
         init_run,
         record_gate,
@@ -185,6 +189,7 @@ try:
     )
 except Exception:  # pragma: no cover - execução como script solto dentro de scripts/
     from run_state import (  # type: ignore
+        _file_lock,
         derive_run_outcome,
         init_run,
         record_gate,
@@ -193,20 +198,27 @@ except Exception:  # pragma: no cover - execução como script solto dentro de s
 
 
 def _patch_run(run_path: Path, mutator) -> dict:
-    """Carrega a run, aplica mutator(data), re-deriva outcome e grava atomicamente."""
-    data = json.loads(Path(run_path).read_text(encoding="utf-8"))
-    mutator(data)
-    derived, reasons = derive_run_outcome(data)
-    data["outcome"] = derived
-    data["reasons"] = reasons
-    data["updated_at"] = _now_iso()
-    _atomic_write_json(run_path, data)
+    """Carrega a run, aplica mutator(data), re-deriva outcome e grava atomicamente.
+
+    Coberto pelo mesmo _file_lock do run_state: sem ele, um `henke run approve`
+    concorrente perde a aprovação num lost-update de read-modify-write."""
+    with _file_lock(Path(run_path)):
+        data = json.loads(Path(run_path).read_text(encoding="utf-8"))
+        mutator(data)
+        derived, reasons = derive_run_outcome(data)
+        data["outcome"] = derived
+        data["reasons"] = reasons
+        data["updated_at"] = _now_iso()
+        _atomic_write_json(run_path, data)
     return data
 
 
 def _record_stage(run_path: Path, stage: str, detail: str, exit_code: int = 0) -> None:
-    """Cada estágio do pipeline deixa rastro na run (gates{} + lista stages[])."""
-    record_gate(run_path, f"stage_{stage}", exit_code, detail[:400])
+    """Cada estágio do pipeline deixa rastro na run (gates{} + lista stages[]).
+
+    Stages são bookkeeping — manual=True para NUNCA contarem como portão físico
+    (senão um run de só stages passaria no guarda anti-N/A por ter 'verde')."""
+    record_gate(run_path, f"stage_{stage}", exit_code, detail[:400], manual=True)
 
     def _add(data: dict) -> None:
         stages = data.setdefault("stages", [])
@@ -486,10 +498,13 @@ def _redact_secrets(text: str) -> tuple[str, int]:
     return out, count
 
 
-def _approval_fingerprint(prompt: str, route_snapshot: dict | None) -> str:
-    """sha256 do escopo aprovado (prompt + route_snapshot normalizados)."""
+def _approval_fingerprint(prompt: str, route_snapshot: dict | None,
+                          driver: str | None = None) -> str:
+    """sha256 do escopo aprovado (prompt + route_snapshot + driver — trocar o
+    driver entre approve/resume invalida a aprovação: outro driver = outro risco)."""
     payload = json.dumps(
-        {"prompt": prompt, "route_snapshot": route_snapshot or {}},
+        {"prompt": prompt, "route_snapshot": route_snapshot or {},
+         "driver": driver or ""},
         sort_keys=True, ensure_ascii=False, default=str,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -773,12 +788,16 @@ def _dispatch_driver(
 
 def _invoke_gates(repo_root: Path, gates: list[str], run_id: str, timeout_sec: float,
                   test_cmd: str | None = None) -> dict | None:
-    """Chama henke_gates.run_gates (contrato externo). None = runner indisponível."""
+    """Chama henke_gates.run_gates (contrato externo). None = runner indisponível
+    ou falhou por completo — fail-closed, nunca traceback nem verde presumido."""
     mod = _load_module("henke_gates")
     if mod is None or not hasattr(mod, "run_gates"):
         return None
-    return mod.run_gates(repo_root, list(gates), run_id=run_id, record=True,
-                         timeout_sec=timeout_sec, test_cmd=test_cmd)
+    try:
+        return mod.run_gates(repo_root, list(gates), run_id=run_id, record=True,
+                             timeout_sec=timeout_sec, test_cmd=test_cmd)
+    except Exception:
+        return None
 
 
 def _gates_max_rework() -> int:
@@ -871,7 +890,8 @@ def _red_verdicts(gres: dict | None) -> list[dict]:
             continue
         ec = v.get("exit_code", v.get("exit", 1))
         passed = v.get("passed", ec == 0)
-        if passed is True or ec == 0:
+        # exit 3 = n/a honesto ("nada a verificar") — não é achado a corrigir.
+        if passed is True or ec in (0, 3):
             continue
         findings.append({
             "gate": v.get("gate", v.get("name", "?")),
@@ -956,6 +976,24 @@ def _print_report(
 # ---------------------------------------------------------------------------
 
 def run_auto(args: argparse.Namespace) -> int:
+    """Single-writer por worktree — vale tanto para `henke auto` (cli-pack, que
+    antes travava por fora) quanto para `python scripts/henke_auto.py` direto,
+    que não tinha lock nenhum (ALTO-1 da banca)."""
+    repo_root = Path(getattr(args, "repo", ".") or ".").resolve()
+    lock_target = repo_root / ".henke" / "auto-writer"
+    try:
+        with _file_lock(lock_target, timeout=2.0):
+            return _run_auto_inner(args)
+    except TimeoutError:
+        print(
+            "ERRO: outra run `auto`/`trigger` ativa nesta worktree (single-writer). "
+            "Se a run anterior morreu, remova '.henke/auto-writer.lock'.",
+            file=sys.stderr,
+        )
+        return 2
+
+
+def _run_auto_inner(args: argparse.Namespace) -> int:
     """Executa a máquina de uma frase. Recebe o namespace do cli-pack
     (prompt, repo, driver, dry_run, yes, policy, timeout)."""
     prompt = str(getattr(args, "prompt", None) or "").strip()
@@ -1059,7 +1097,8 @@ def run_auto(args: argparse.Namespace) -> int:
                     f"agora {head_now or '<sem-git>'}"
                 )
             fp_now = _approval_fingerprint(
-                str(resumed.get("prompt") or ""), snap if isinstance(snap, dict) else None
+                str(resumed.get("prompt") or ""), snap if isinstance(snap, dict) else None,
+                str(driver or resumed.get("driver") or "") or None,
             )
             if fp_now != binding.get("scope_sha256"):
                 stale.append("escopo/prompt da run divergiu do snapshot aprovado")
@@ -1142,7 +1181,7 @@ def run_auto(args: argparse.Namespace) -> int:
         # Vínculo da aprovação (--resume): HEAD + sha256(prompt+route_snapshot).
         run_patch["approval_binding"] = {
             "head": _git_head(repo_root),
-            "scope_sha256": _approval_fingerprint(prompt, route_snapshot),
+            "scope_sha256": _approval_fingerprint(prompt, route_snapshot, driver),
             "bound_at": _now_iso(),
         }
     _patch_run(run_path, lambda d: d.update(run_patch))
@@ -1168,7 +1207,12 @@ def run_auto(args: argparse.Namespace) -> int:
 
     is_analisar = str(route.get("mode", "")).upper() == "ANALISAR"
     gates_required = list(route.get("gates_required") or [])
-    driver_timeout = float(timeout_opt) if timeout_opt else 600.0
+    try:
+        driver_timeout = float(timeout_opt) if timeout_opt else 600.0
+        if driver_timeout <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        driver_timeout = 600.0
     driver_result: dict | None = None
     echo_dispatched = False
 
@@ -1294,7 +1338,9 @@ def run_auto(args: argparse.Namespace) -> int:
             if gres.get("all_green"):
                 break
             findings = _red_verdicts(gres)
-            if real_driver and rework_attempts < _gates_max_rework():
+            # Só dispara rework com achado concreto: re-despachar sem veredito
+            # vermelho é uma chamada ao driver sem correção — custo puro.
+            if real_driver and rework_attempts < _gates_max_rework() and findings:
                 rework_attempts += 1
                 driver_result2, drv_err2, _ = _dispatch_driver(
                     driver, envelope, envelope_path, repo_root,
@@ -1334,7 +1380,23 @@ def run_auto(args: argparse.Namespace) -> int:
         except Exception:
             pass
         detail = f"{passed}/{discovered} testes" if discovered else "saída registrada no exec_log"
-        record_gate(run_path, "tests", int(t_exit), f"test_cmd=`{test_cmd}` → {detail}")
+        # Tríade física real — a bateria de testes é portão verificável, não
+        # atestação: evidência no diretório da run, hash validado por verify_run_file.
+        tests_ev_dir = repo_root / ".henke" / "evidence" / run_id
+        tests_ev: Path | None = None
+        try:
+            tests_ev_dir.mkdir(parents=True, exist_ok=True)
+            tests_ev = tests_ev_dir / "tests.out"
+            tests_ev.write_text(t_out or "", encoding="utf-8")
+        except OSError:
+            tests_ev = None
+        if tests_ev is None:
+            record_gate(run_path, "tests", 2,
+                        f"test_cmd=`{test_cmd}` → EVIDENCE-WRITE-FAILED", manual=True)
+        else:
+            record_gate(run_path, "tests", int(t_exit),
+                        f"test_cmd=`{test_cmd}` → {detail}",
+                        command=str(test_cmd), evidence_file=tests_ev)
         _record_stage(run_path, "tests", f"test_cmd=`{test_cmd}` exit={t_exit} {detail}", exit_code=0 if t_exit == 0 else 1)
         test_info = {"cmd": test_cmd, "exit": t_exit, "detail": detail}
 
@@ -1359,29 +1421,23 @@ def run_auto(args: argparse.Namespace) -> int:
         not_verified.append("ação sensível não executada — aguardando aprovação humana")
     not_verified.append("revisão Goldfish/contexto limpo e commit final (atos humanos — PROTOCOLO §9)")
 
-    # ---- cap de outcome: driver echo é SIMULAÇÃO — nunca 'verified' ----
-    # Última escrita na run (depois disto qualquer record_gate/_patch_run
-    # re-derivaria e desfaria o cap). Declarar pior que o derivado é a direção
-    # segura: verify_run_file só rejeita declarar MELHOR que a derivação.
-    if echo_dispatched:
-        data = json.loads(run_path.read_text(encoding="utf-8"))
-        derived, reasons = derive_run_outcome(data)
-        if derived == "verified":
-            data["outcome"] = "unverified"
-            data["outcome_capped_from"] = "verified"
-            data["reasons"] = list(reasons) + [
-                "ECHO-UNVERIFIED: driver echo é simulado — nenhuma execução real aconteceu"
-            ]
-            stages = data.setdefault("stages", [])
-            if isinstance(stages, list):
-                stages.append({
-                    "stage": "outcome_cap",
-                    "at": _now_iso(),
-                    "exit_code": 0,
-                    "detail": "driver echo → outcome limitado a 'unverified'",
-                })
-            data["updated_at"] = _now_iso()
-            _atomic_write_json(run_path, data)
+    # ---- cap de outcome: driver real que reportou files_changed=[] num modo
+    # mutativo não executou nada — outcome teto 'unverified'. O cap de echo/stdin
+    # já é aplicado pela própria derivação (run_data["driver"]), não por patch.
+    mutating = str(route.get("mode", "")).upper() in ("EXECUTAR", "EXECUTAR_COMPOUND")
+    if mutating and driver_result is not None and not echo_dispatched \
+            and not (driver_result.get("files_changed") or []):
+        with _file_lock(Path(run_path)):
+            data = json.loads(run_path.read_text(encoding="utf-8"))
+            derived, reasons = derive_run_outcome(data)
+            if derived == "verified":
+                data["outcome"] = "unverified"
+                data["outcome_capped_from"] = "verified"
+                data["reasons"] = list(reasons) + [
+                    "NO-OP-UNVERIFIED: driver reportou files_changed=[] — nada a verificar"
+                ]
+                data["updated_at"] = _now_iso()
+                _atomic_write_json(run_path, data)
 
     ok, _reasons = verify_run_file(run_path)
     run_data = json.loads(run_path.read_text(encoding="utf-8"))

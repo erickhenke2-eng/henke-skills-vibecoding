@@ -161,40 +161,67 @@ def extract_diff_lines(target: Path, git_ref: str = "HEAD") -> set[int] | None:
 def _import_module_names(t: Path) -> list[str]:
     """Nomes de import que devem resolver para o mutante (ex.: 'calc', 'pkg.calc').
 
-    Sobe a cadeia de pacotes enquanto existir `__init__.py` para também sombrear
-    a forma dotted (`pkg.sub.mod`). Para alvo `__init__.py`, sombreia o pacote.
-    """
+    Sobe a cadeia de pacotes enquanto existir `__init__.py`. Arquivo DENTRO de
+    pacote sombreia APENAS a forma dotted (`pkg.mod`): o stem nu (`mod`) é
+    absoluto em py3 e sombreá-lo roubaria imports de módulos homônimos de
+    outros pacotes/site-packages (A5-banca). Para alvo `__init__.py`, sombreia
+    o pacote inteiro."""
     if t.stem == "__init__":
         parts = [t.parent.name]
         parent = t.parent.parent
     else:
         parts = [t.stem]
         parent = t.parent
-    names = [parts[0]]
     while parent.name and (parent / "__init__.py").is_file():
         parts.append(parent.name)
         parent = parent.parent
-    if len(parts) > 1:
-        names.append(".".join(reversed(parts)))
-    return names
+    return [".".join(reversed(parts))]
 
 
 _SITE_HOOK_TEMPLATE = """\
 # mutant_hunt.py — hook gerado: força resolução do alvo para o mutante no tempdir.
 # Meta-path finder tem prioridade sobre QUALQUER entrada de sys.path, então o
 # mutante vence mesmo se o teste fizer sys.path.insert(0, <dir_original>).
+import importlib.abc as _ia
 import importlib.util as _ilu
 import sys as _sys
+from pathlib import Path as _P
 
+# fullname -> (mutant_path, original_path, is_package, original_pkg_dir)
 _MUTANT_FILES = {mapping!r}
+
+
+class _MutantLoader(_ia.Loader):
+    \"\"\"Executa o código do MUTANTE mas reporta __file__/__package__ do ORIGINAL:
+    sem isso, recursos relativos a __file__ (assets ao lado do módulo) quebram
+    no import e o mutante é 'morto' sem teste nenhum (A4-banca).\"\"\"
+
+    def __init__(self, src):
+        self._src = src
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        data = _P(self._src).read_bytes()
+        code = compile(data, module.__spec__.origin or self._src, "exec")
+        exec(code, module.__dict__)
 
 
 class _MutantFinder(object):
     def find_spec(self, fullname, path=None, target=None):
-        src = _MUTANT_FILES.get(fullname)
-        if src is None:
+        ent = _MUTANT_FILES.get(fullname)
+        if ent is None:
             return None
-        return _ilu.spec_from_file_location(fullname, src)
+        src, orig, is_pkg, pkg_dir = ent
+        loader = _MutantLoader(src)
+        spec = _ilu.spec_from_loader(fullname, loader, origin=orig, is_package=is_pkg)
+        if is_pkg:
+            # submodule_search_locations aponta para o pacote ORIGINAL — sem
+            # isso 'pkg' vira módulo comum e 'import pkg.mod' quebra a suíte
+            # inteira → todo mutante contado como morto (C3-banca: falso-verde).
+            spec.submodule_search_locations = [pkg_dir]
+        return spec
 
 
 if not any(isinstance(_f, _MutantFinder) for _f in _sys.meta_path):
@@ -283,7 +310,14 @@ def run_mutant_hunt(
     with tempfile.TemporaryDirectory(prefix="mutant_hunt_") as td:
         stage = Path(td)
         mutant_path = stage / t.name
-        mapping = {name: str(mutant_path) for name in _import_module_names(t)}
+        is_pkg = t.stem == "__init__"
+        # pkg_dir: para __init__.py, o diretório do pacote ORIGINAL — onde os
+        # submódulos vivem e para onde submodule_search_locations aponta.
+        pkg_dir = str(t.parent.resolve()) if is_pkg else ""
+        mapping = {
+            name: (str(mutant_path), str(t.resolve()), is_pkg, pkg_dir)
+            for name in _import_module_names(t)
+        }
         (stage / "sitecustomize.py").write_text(
             _SITE_HOOK_TEMPLATE.format(mapping=mapping), encoding="utf-8")
 
@@ -332,35 +366,43 @@ def _split_cmd(cmd_str: str) -> list[str]:
     return [tok.strip("\"'") if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in "\"'" else tok for tok in tokens]
 
 
-def _git_z(repo: Path, *args: str) -> list[str]:
-    """Lista de paths via saída NUL-safe (`-z`) — nomes com \\n/aspas não forjam."""
+def _git_z(repo: Path, *args: str) -> list[str] | None:
+    """Lista de paths via saída NUL-safe (`-z`) — nomes com \\n/aspas não forjam.
+
+    None = falha de execução/git — distinguível de 'lista vazia legítima'.
+    Confundir os dois converte repo corrompido em 'nada a verificar' (A6-banca)."""
     try:
         res = subprocess.run(
             ["git", "-C", str(repo), *args],
             capture_output=True, timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return []
+        return None
     if res.returncode != 0:
-        return []
+        return None
     return [p for p in res.stdout.decode("utf-8", errors="replace").split("\0") if p]
 
 
-def _auto_diff_targets(repo: Path, git_ref: str) -> list[tuple[Path, bool]]:
+def _auto_diff_targets(repo: Path, git_ref: str) -> list[tuple[Path, bool]] | None:
     """Arquivos .py do worktree diff vs `git_ref` + não-rastreados.
 
-    Retorna [(abs_path, is_new)]. `is_new` = arquivo não-rastreado (criado pelo
-    driver): sem baseline no git → caça o arquivo inteiro (diff_lines=None).
+    Retorna [(abs_path, is_new)] ou None se o git falhou (erro → exit 2, não
+    n/a). `is_new` = arquivo não-rastreado (criado pelo driver): sem baseline
+    no git → caça o arquivo inteiro (diff_lines=None).
     """
     repo = repo.resolve()
     seen: set[str] = set()
     out: list[tuple[Path, bool]] = []
-    for rel in _git_z(repo, "diff", "-z", "--name-only", git_ref, "--", "*.py"):
+    diff_list = _git_z(repo, "diff", "-z", "--name-only", git_ref, "--", "*.py")
+    others_list = _git_z(repo, "ls-files", "-z", "--others", "--exclude-standard", "--", "*.py")
+    if diff_list is None or others_list is None:
+        return None
+    for rel in diff_list:
         seen.add(rel.replace("/", os.sep).lower())
         p = (repo / rel).resolve()
         if p.is_file():
             out.append((p, False))
-    for rel in _git_z(repo, "ls-files", "-z", "--others", "--exclude-standard", "--", "*.py"):
+    for rel in others_list:
         norm = rel.replace("/", os.sep).lower()
         if norm in seen:
             continue
@@ -378,6 +420,13 @@ def _main_auto_diff(args: argparse.Namespace) -> int:
         return 2
     git_ref = args.diff_against or "HEAD"
     targets = _auto_diff_targets(repo, git_ref)
+    if targets is None:
+        print(
+            f"ERRO: git falhou ao enumerar o diff vs {git_ref} — inconclusivo "
+            "(erro de infraestrutura ≠ 'nada a verificar').",
+            file=sys.stderr,
+        )
+        return 2
     if not targets:
         print(
             f"N/A: zero arquivos .py no diff vs {git_ref} (inclui não-rastreados) — "

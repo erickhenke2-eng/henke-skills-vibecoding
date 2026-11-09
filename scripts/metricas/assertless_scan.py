@@ -131,7 +131,9 @@ _RS_ASSERT = re.compile(
     r"\bassert(?:_eq|_ne|_matches)?\s*!|\bpanic!|should_panic|insta::|assert_fs")
 _GO_ASSERT = re.compile(
     r"\bt\.(?:Error|Fatal|Fail)\w*\s*\(|\b(?:assert|require)\.[A-Z]\w+\s*\(|"
-    r"\bpanic\s*\(|\bt\.Helper\s*\(")
+    r"\bpanic\s*\("
+    # t.Helper() NÃO é asserção — é marcador de stack-frame (A3-banca).
+)
 
 
 class _Fn(NamedTuple):
@@ -654,7 +656,10 @@ def classify(fn, helpers, b, module_consts, class_consts):
                   assigned_values(fn.body), class_consts)
     for node in own_scope(fn.body):
         if isinstance(node, ast.Assert):
-            if is_constant_tautology(node.test):
+            # const_truth resolve `ok = True; assert ok` / `assert not done`
+            # (done=False) — a mesma tautologia que is_constant_tautology pega
+            # em literais, mas através de nomes vinculados (C2-banca).
+            if is_constant_tautology(node.test) or const_truth(node.test, scope) is True:
                 pass
             elif observes_only_mock([node.test], scope):
                 mock += 1

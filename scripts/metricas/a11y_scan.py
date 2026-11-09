@@ -204,15 +204,19 @@ def scan_a11y_content(content: str, loc_prefix: str) -> list[tuple[str, str, str
     return findings
 
 
-def scan_a11y_file(path: Path, root: Path | None = None) -> list[tuple[str, str, str]]:
-    """Escaneia um único arquivo suportado e retorna lista de findings."""
+def scan_a11y_file(path: Path, root: Path | None = None) -> list[tuple[str, str, str]] | None:
+    """Escaneia um único arquivo suportado e retorna lista de findings.
+
+    None = arquivo elegível porém ilegível — NUNCA conta como escaneado: um
+    único arquivo de UI chmod-000 não pode vestir 'exit 0 sem leitura'
+    (A12-banca)."""
     p = Path(path)
     if not p.is_file() or p.suffix.lower() not in A11Y_EXTS:
         return []
     try:
         raw = p.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return []
+        return None
     if root is not None:
         try:
             loc = p.resolve().relative_to(Path(root).resolve()).as_posix()
@@ -223,18 +227,25 @@ def scan_a11y_file(path: Path, root: Path | None = None) -> list[tuple[str, str,
     return scan_a11y_content(raw, loc)
 
 
-def scan_a11y_path(target: Path) -> tuple[int, list[tuple[str, str, str]]]:
-    """Escaneia arquivo ou diretório recursivamente. Retorna (files_scanned, findings)."""
+def scan_a11y_path(target: Path) -> tuple[int, list[tuple[str, str, str]], list[str]]:
+    """Escaneia arquivo ou diretório recursivamente.
+
+    Retorna (files_scanned, findings, unreadable). unreadable não-vazio é
+    erro de infraestrutura → exit 2, nunca verde por omissão."""
     t = Path(target)
     if not t.exists():
-        return 0, []
+        return 0, [], []
     if t.is_file():
         if t.suffix.lower() not in A11Y_EXTS:
-            return 0, []
-        return 1, scan_a11y_file(t, root=t.parent)
+            return 0, [], []
+        res = scan_a11y_file(t, root=t.parent)
+        if res is None:
+            return 0, [], [str(t)]
+        return 1, res, []
 
     files_scanned = 0
     all_findings: list[tuple[str, str, str]] = []
+    unreadable: list[str] = []
     root_resolved = t.resolve()
     for dirpath, dirnames, filenames in os.walk(t):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
@@ -242,9 +253,13 @@ def scan_a11y_path(target: Path) -> tuple[int, list[tuple[str, str, str]]]:
             fp = Path(dirpath) / fn
             if fp.suffix.lower() not in A11Y_EXTS:
                 continue
+            res = scan_a11y_file(fp, root=root_resolved)
+            if res is None:
+                unreadable.append(str(fp))
+                continue
             files_scanned += 1
-            all_findings.extend(scan_a11y_file(fp, root=root_resolved))
-    return files_scanned, all_findings
+            all_findings.extend(res)
+    return files_scanned, all_findings, unreadable
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -260,7 +275,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERRO: caminho inexistente: {args.path}", file=sys.stderr)
         return 2
 
-    files_scanned, findings = scan_a11y_path(args.path)
+    files_scanned, findings, unreadable = scan_a11y_path(args.path)
+    if unreadable:
+        print(
+            f"ERRO: {len(unreadable)} arquivo(s) de UI ilegível(is): "
+            f"{', '.join(unreadable[:5])} — inconclusivo, nunca verde.",
+            file=sys.stderr,
+        )
+        return 2
     if args.json:
         print(json.dumps({
             "files_scanned": files_scanned,

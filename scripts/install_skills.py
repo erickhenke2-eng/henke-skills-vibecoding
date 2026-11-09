@@ -95,6 +95,9 @@ def inventory(repo):
             files.append(rel)
     # [HENKE-PATCH] portões mecânicos e métricos instalados junto às skills que os invocam
     root_gate_scripts = [
+        repo / "scripts" / "_paths.py",          # importado por vários scripts — sem ele o CLI morre
+        repo / "scripts" / "gate_pipeline.py",   # invocado por henke_gates (ratchet/fence)
+        repo / "scripts" / "validate_skills.py", # chamado por install_skills e doctor
         repo / "scripts" / "repo_signals.py",
         repo / "scripts" / "henke_router.py",
         repo / "scripts" / "spec_drift.py",
@@ -126,10 +129,12 @@ def read_manifest(path):
         data = json.loads(path.read_text(encoding="utf-8"))
         entries = data.get("files", [])
         hashes = data.get("hashes", {})
-        assert isinstance(entries, list) and all(isinstance(e, str) for e in entries)
-        assert isinstance(hashes, dict)
+        if not (isinstance(entries, list) and all(isinstance(e, str) for e in entries)):
+            raise ValueError("manifesto: 'files' deve ser lista de strings")
+        if not isinstance(hashes, dict):
+            raise ValueError("manifesto: 'hashes' deve ser objeto")
         return set(entries), hashes
-    except (OSError, ValueError, KeyError, AssertionError):
+    except (OSError, ValueError, KeyError):
         if path.exists():
             print(f"Aviso: manifesto ilegível em {path}; zumbis não serão removidos.", file=sys.stderr)
         return set(), {}
@@ -244,9 +249,19 @@ def _publish(repo, targets, files):
                 (stage / "old").mkdir(exist_ok=True)
                 shutil.copy2(old_manifest, stage / "old" / MANIFEST)
         for target, stage in zip(targets, transactions):
+            target_resolved = target.resolve()
             for relative in files:
                 destination = target.joinpath(*relative.parts)
                 mkdir(destination.parent)
+                # Rechecagem no instante da escrita (TOCTOU): entre a validação
+                # do stage e o os.replace, um diretório pode virar symlink que
+                # desviaria a escrita para fora do destino (ALTO-8 da banca).
+                real_dest = destination.resolve()
+                if real_dest != destination.absolute() and not real_dest.is_relative_to(target_resolved):
+                    raise ValueError(f"Destino escapa por link simbólico: {destination}")
+                parent_resolved = destination.parent.resolve()
+                if not parent_resolved.is_relative_to(target_resolved):
+                    raise ValueError(f"Diretório de destino atravessa link simbólico: {destination}")
                 # Record before replacing so rollback also handles an interrupted replacement.
                 changed.append((destination, stage / "old" / relative))
                 os.replace(stage / "new" / relative, destination)

@@ -109,9 +109,13 @@ def get_git_root(cwd: Path) -> Path:
 
 
 def discover_latest_spec(designs_dir: Path) -> Path | None:
-    """Descobre a spec mais recente em docs/designs/*.md ordenada por (mtime, name)."""
+    """Descobre a spec mais recente em docs/designs/*.md ordenada por (mtime, name).
+
+    NUNCA cai para '*.md' da raiz: README/AGENTS.md não são spec — sem
+    docs/designs/ a resposta honesta é None (fail-closed), não lixo como escopo.
+    """
     target_dir = designs_dir / "docs" / "designs" if (designs_dir / "docs" / "designs").is_dir() else designs_dir
-    if not target_dir.is_dir():
+    if target_dir.name != "designs" or not target_dir.is_dir():
         return None
     candidates = sorted(
         (p for p in target_dir.glob("*.md") if p.is_file() and p.name != "TEMPLATE.md"),
@@ -120,78 +124,50 @@ def discover_latest_spec(designs_dir: Path) -> Path | None:
     return candidates[-1] if candidates else None
 
 
+def _git_paths_z(git_root: Path, *args: str) -> list[str]:
+    """Paths de um comando git com saída `-z` (NUL-safe): nomes com \\n/aspas/
+    espaços-nas-pontas não forjam nem se quebram em pseudo-paths."""
+    res = subprocess.run(
+        ["git", "-c", "core.quotePath=false", *args],
+        cwd=str(git_root), capture_output=True, check=True,
+    )
+    return [p for p in res.stdout.decode("utf-8", errors="replace").split("\0") if p]
+
+
 def get_touched_files(git_root: Path, against: str | None = None, active_spec: Path | None = None) -> set[str]:
     """Obtém a lista de arquivos modificados e untracked no repositório."""
     touched = set()
 
-    # 1. Arquivos modificados no diff (passa core.quotePath=false para suporte pleno a Unicode)
-    diff_cmd = ["git", "-c", "core.quotePath=false", "diff", "--name-only"]
+    # 1+2. Modificados e staged (diff worktree + --cached), NUL-safe
+    diff_args = ["diff", "--name-only", "-z"]
     if against:
-        diff_cmd.append(against)
-    res_diff = subprocess.run(diff_cmd, cwd=str(git_root), capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
-    for line in res_diff.stdout.splitlines():
-        p = line.strip().strip('"').replace("\\", "/")
-        if p:
-            touched.add(p)
+        diff_args.append(against)
+    touched.update(_git_paths_z(git_root, *diff_args))
+    touched.update(_git_paths_z(git_root, "diff", "--cached", "--name-only", "-z"))
 
-    # 2. Arquivos no stage (staged)
-    res_staged = subprocess.run(
-        ["git", "-c", "core.quotePath=false", "diff", "--cached", "--name-only"],
-        cwd=str(git_root),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True
-    )
-    for line in res_staged.stdout.splitlines():
-        p = line.strip().strip('"').replace("\\", "/")
-        if p:
-            touched.add(p)
+    # 3. Untracked: `status --porcelain -z` emite '<XY> <path>\0' sem C-quoting
+    for entry in _git_paths_z(git_root, "status", "--porcelain", "-z", "-uall"):
+        if entry.startswith("??"):
+            touched.add(entry[3:])
 
-    # 3. Arquivos untracked (não rastreados)
-    res_status = subprocess.run(
-        ["git", "-c", "core.quotePath=false", "status", "--porcelain", "-uall"],
-        cwd=str(git_root),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True
-    )
-    for line in res_status.stdout.splitlines():
-        if line.startswith("??"):
-            p = line[3:].strip().strip('"').replace("\\", "/")
-            if p:
-                touched.add(p)
-
-    # Exclusões estritas (S3): apenas runtime metadata e a spec ativa exata
+    # Exclusões estritas (S3): APENAS artefatos transitórios de runtime da run.
+    # A spec ativa NÃO é excluída — adulterá-la para ampliar escopo é exatamente o
+    # ataque que este portão existe para detectar. Memória (.henke/*.md), configs
+    # (.agents/, fence.json, baseline) e locks de terceiros também são drift:
+    # qualquer escrita fora do escopo declarado deve ser visível.
     ignored_exact = {
         ".henke/gate-baseline.json",
         ".henke/BASELINE.json",
         ".henke/LEDGER.json",
         ".henke/exec_log.jsonl",
-        ".henke/DIARIO.md",
-        ".henke/DECISOES.md",
-        ".henke/MAPA.md",
+        ".henke/auto-writer.lock",
+        ".henke-install.lock",
     }
-    if active_spec:
-        try:
-            ignored_exact.add(str(active_spec.resolve().relative_to(git_root.resolve())).replace("\\", "/"))
-        except ValueError:
-            pass
-
     clean_touched = set()
     for p in touched:
+        p = p.replace("\\", "/")
         if (p.startswith(".git/") or p.startswith(".henke/runs/")
                 or p.startswith(".henke/evidence/")):
-            continue
-        # Locks transitórios de runtime (auto-writer, install, *-state) —
-        # artefatos commitados de .henke/ (fence.json, baseline, PROJECT.json)
-        # NÃO são excluídos: adulterá-los continua sendo drift.
-        if p.startswith(".henke/") and p.endswith(".lock"):
-            continue
-        if p.startswith(".agents/") or p.startswith(".agents\\") or p == ".agents":
             continue
         if p in ignored_exact:
             continue
@@ -199,12 +175,22 @@ def get_touched_files(git_root: Path, against: str | None = None, active_spec: P
     return clean_touched
 
 
+def _is_wildcard_scope(decl: str) -> bool:
+    """Escopo curinga irrestrito? Normaliza (`*/`→`*`, `/**/`→`**`, `./**`→`**`)
+    antes de comparar — um decl reduzido a só `*`, `/` e `.` cobre o repo inteiro."""
+    norm = decl.replace("\\", "/").strip()
+    if norm in _FORBIDDEN_WILDCARD_SCOPES:
+        return True
+    reduced = norm.strip("/")
+    return not reduced.strip("./").strip("*")
+
+
 def is_path_in_scope(touched_file: str, declared_paths: list[str]) -> bool:
     """Verifica se um arquivo tocado corresponde ou está dentro de algum caminho declarado."""
     norm_touched = touched_file.replace("\\", "/").strip("/")
     for decl in declared_paths:
         norm_decl = decl.replace("\\", "/").strip()
-        if norm_decl in _FORBIDDEN_WILDCARD_SCOPES:
+        if _is_wildcard_scope(norm_decl):
             continue
         if norm_decl.endswith("/**"):
             base = norm_decl[:-3].rstrip("/").strip("/")
@@ -255,7 +241,7 @@ def check_spec_drift(
     if not declared_scope:
         errors.append(f"Seção '## 4. Escopo Declarado' vazia ou ausente em '{spec_path.name}'.")
     for decl in declared_scope:
-        if decl.strip() in _FORBIDDEN_WILDCARD_SCOPES:
+        if _is_wildcard_scope(decl):
             errors.append(
                 f"WILDCARD-SCOPE-FORBIDDEN: escopo curinga irrestrito '{decl}' não é permitido na spec."
             )
@@ -276,6 +262,21 @@ def check_spec_drift(
                 "Referência base para comparação não encontrada: forneça '--against <commit>' "
                 "ou inicialize o baseline com 'henke_gate.py baseline'."
             ]
+
+    # A ref-âncora do diff é dado sensível (pode vir de .henke/gate-baseline.json,
+    # arquivo ao alcance de escrita do driver): rejeita flags (`--output=...`) e
+    # exige commit verificável antes de alimentar o argv do git.
+    if against.startswith("-"):
+        return False, [f"Ref '--against' inválida (parece flag): {against!r}"]
+    vres = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{against}^{{commit}}"],
+        cwd=str(git_root), capture_output=True, text=True,
+    )
+    if vres.returncode != 0:
+        return False, [
+            f"Ref '--against' não resolve para commit: {against!r} — "
+            "âncora do diff corrompida ou inválida (fail-closed)."
+        ]
 
     touched = get_touched_files(git_root, against=against, active_spec=spec_path)
     unauthorized = []

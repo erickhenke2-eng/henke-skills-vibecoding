@@ -127,15 +127,27 @@ _JS_EXEC_RE = re.compile(r"(?<![.\w$])(?:child_process\s*\.\s*)?exec(?:Sync)?\s*
 _RS_SHELL_RE = re.compile(r'Command::new\s*\(\s*\)\s*|\bCommand::new\s*\([^)]*\)\s*\.\s*arg\s*\(\s*"(?:-c|/c)"')
 _WEAK_RAND_RE = re.compile(r"\b(?:Math\.random|random\.random|random\.randint|rand::random)\s*\(")
 _AUTH_TOKEN_WORDS_RE = re.compile(r"(?i)(?:token|secret|password|senha|session_?id|nonce|api_?key|jwt|csrf|auth_?code)")
-_FILE_SINK_RE = re.compile(r"\b(?:readFileSync|readFile|writeFileSync|writeFile|sendFile|createReadStream)\s*\(\s*(?![`'\"])([A-Za-z_$][\w$.]*)")
+_FILE_SINK_RE = re.compile(
+    r"\b(?:readFileSync|readFile|writeFileSync|writeFile|sendFile|createReadStream|"
+    r"send_file|send_from_directory|open)\s*\(\s*(?![`'\"])([A-Za-z_$][\w$.]*)"
+    r"|\.(?:read_text|read_bytes|write_text|write_bytes)\s*\(\s*\)"
+    r"|Path\s*\(\s*([A-Za-z_$][\w$.]*)\s*\)"
+)
 _EXT_SOURCE_RE = re.compile(r"\b(?:req|request|params|query|userPath|inputPath|filePathFromUser)\b")
 _PATH_SAFE_RE = re.compile(r"\b(?:resolve|normalize|basename|relpath|is_relative_to|safe_join|safe_member)\b")
 _UNBOUNDED_CONC_RE = re.compile(r"\b(?:Promise\.all|asyncio\.gather)\s*\(")
 _PROMISE_ALL_RE = _UNBOUNDED_CONC_RE
 _HEAVY_EXEC_RE = re.compile(r"\b(?:spawn|exec|execFile|subprocess|ffmpeg|ffprobe|runGpu)\b")
 _SEMAPHORE_RE = re.compile(r"\b(?:pLimit|p-limit|Semaphore|BoundedSemaphore|Bottleneck|runGpuBounded|maxConcurrency)\b")
-_UNSAFE_DESER_RE = re.compile(r"(?<![.\w$])eval\s*\(|\bnew\s+Function\s*\(|\bpickle\.loads?\s*\(|\byaml\.load\s*\(")
-_XSS_HTML_RE = re.compile(r"\bdangerouslySetInnerHTML\b|\.innerHTML\s*=(?!=)|\bv-html\s*=|\{@html\b")
+_UNSAFE_DESER_RE = re.compile(
+    r"(?<![.\w$])eval\s*\(|\bnew\s+Function\s*\(|\bpickle\.loads?\s*\("
+    r"|\byaml\.(?:load|load_all|unsafe_load|full_load)\s*\("
+)
+_XSS_HTML_RE = re.compile(
+    r"\bdangerouslySetInnerHTML\b|\.innerHTML\s*\+?=(?!=)|\.outerHTML\s*\+?=(?!=)"
+    r"|\binsertAdjacentHTML\s*\(|\bdocument\.write\s*\(|\bv-html\s*=|\{@html\b"
+    r"|\.html\s*\(\s*(?![`'\"]\s*\))"
+)
 _SANITIZER_RE = re.compile(r"(?i)\b(?:DOMPurify|sanitize|escapeHtml)\b")
 _ELECTRON_INSEC_RE = re.compile(r"\bnodeIntegration\s*:\s*true\b|\bcontextIsolation\s*:\s*false\b")
 
@@ -399,8 +411,13 @@ _AST_DESER_FUNCS = {
     "pickle.load", "pickle.loads", "dill.load", "dill.loads",
     "marshal.load", "marshal.loads", "shelve.open",
 }
-_AST_YAML_LOAD = {"yaml.load"}
+_AST_YAML_LOAD = {"yaml.load", "yaml.load_all"}
+# unsafe_load/full_load nunca são seguras — nem com kwarg (A7-banca)
+_AST_YAML_ALWAYS_UNSAFE = {"yaml.unsafe_load", "yaml.full_load"}
 _AST_EXEC_BUILTINS = {"eval", "exec"}
+# Interpretadores de comando quando passados como argv[0] com flag de comando
+_AST_SHELL_BINS = {"sh", "bash", "zsh", "dash", "ash", "ksh", "csh",
+                   "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"}
 
 
 def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]:
@@ -444,6 +461,19 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
             out.append(("SHELL-INJECTION", line, scope, f"shell invocation via {name}() (AST)"))
             continue
         if name in _AST_SUBPROC_SHELL_KW:
+            # Shell explícito por argv — ["sh","-c",x] / ["cmd","/c",x] — não
+            # precisa de shell=True para executar via interpretador (A8-banca).
+            if node.args and isinstance(node.args[0], (ast.List, ast.Tuple)):
+                elts = node.args[0].elts
+                if (len(elts) >= 2
+                        and isinstance(elts[0], ast.Constant) and isinstance(elts[0].value, str)
+                        and isinstance(elts[1], ast.Constant) and isinstance(elts[1].value, str)):
+                    exe = elts[0].value.replace("\\", "/").rsplit("/", 1)[-1].lower()
+                    flag = elts[1].value.lower()
+                    if exe in _AST_SHELL_BINS and flag in ("-c", "/c", "-command", "-enc", "-encodedcommand"):
+                        out.append(("SHELL-INJECTION", line, scope,
+                                   f"{name}() invokes {exe} {flag} (AST)"))
+                        continue
             for kw in node.keywords:
                 if kw.arg == "shell":
                     if isinstance(kw.value, ast.Constant) and not kw.value.value:
@@ -454,10 +484,21 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
         if name in _AST_DESER_FUNCS:
             out.append(("UNSAFE-DESERIALIZE", line, scope, f"unsafe deserialization via {name}() (AST)"))
             continue
-        if name in _AST_YAML_LOAD:
+        if name in _AST_YAML_LOAD or name in _AST_YAML_ALWAYS_UNSAFE:
+            if name in _AST_YAML_ALWAYS_UNSAFE:
+                # unsafe_load/full_load são perigosos INDEPENDENTE de kwargs
+                out.append(("UNSAFE-DESERIALIZE", line, scope, f"{name}() is never safe (AST)"))
+                continue
             line_txt = raw_lines[line - 1] if line <= len(raw_lines) else ""
-            loader_kw = any(kw.arg == "Loader" or kw.arg == "loader" for kw in node.keywords)
-            if loader_kw or "SafeLoader" in line_txt or "UniqueKeyLoader" in line_txt:
+            # Só isenta com loader comprovadamente seguro no kwarg — qualquer
+            # outro Loader (yaml.Loader == UnsafeLoader, UnsafeLoader explícito,
+            # FullLoader) NÃO isenta (A7-banca).
+            safe_loader = any(
+                (kw.arg in ("Loader", "loader"))
+                and ("SafeLoader" in ast.unparse(kw.value) or "UniqueKeyLoader" in ast.unparse(kw.value))
+                for kw in node.keywords
+            )
+            if safe_loader or "SafeLoader" in line_txt or "UniqueKeyLoader" in line_txt:
                 continue
             out.append(("UNSAFE-DESERIALIZE", line, scope, "yaml.load() without SafeLoader (AST)"))
             continue

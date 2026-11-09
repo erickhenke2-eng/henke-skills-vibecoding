@@ -266,6 +266,27 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
         l_idx = bisect.bisect_right(line_starts, pos) - 1
         return l_idx + 1, pos - line_starts[l_idx]
 
+    def _regex_end(text: str, start: int) -> int:
+        """Posição após o '/' de fechamento de um regex literal; -1 se não fecha
+        antes do fim da linha (regex JS não cruza \n — então não era regex)."""
+        i = start + 1
+        in_class = False
+        while i < len(text):
+            ch = text[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "[":
+                in_class = True
+            elif ch == "]":
+                in_class = False
+            elif ch == "/" and not in_class:
+                return i + 1
+            elif ch == "\n":
+                return -1
+            i += 1
+        return -1
+
     i, n = 0, len(text)
     is_hash_lang = lang in ("py", "python", "tf", "tfvars", "toml", "yaml", "yml", "dockerfile", "sh", "bash")
     can_html_comment = lang not in ("rs", "go")
@@ -305,6 +326,20 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
                 i += 1
                 continue
             i = _template_end(text, i) if c == "`" else _string_end(text, i, c)
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+            # Regex literal JS: `/a\/*/` contém `/*` que, lido como comentário,
+            # engole o resto da linha — inclusive um marker de supressão forjado
+            # logo depois (A15/A11-banca). Heurística padrão divisão-vs-regex:
+            # char anterior não-espaço em posição de operando → é regex.
+            j = i - 1
+            while j >= 0 and text[j] in " \t":
+                j -= 1
+            prev = text[j] if j >= 0 else ""
+            if prev == "" or prev in "(,=:[!&|?{};+-*/%^~<>\n":
+                end = _regex_end(text, i)
+                i = end if end != -1 else i + 1
+            else:
+                i += 1
         else:
             i += 1
     return spans

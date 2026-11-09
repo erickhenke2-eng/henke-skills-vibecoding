@@ -82,6 +82,20 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    # fence com zero arestas internas não tem o que verificar: exit 3 (n/a
+    # honesto) — não é verde (não conta para all_green) nem vermelho. Repo de
+    # arquivo único ou sem imports internos não pode ser punido nem premiado.
+    # Distinto de coletor quebrado (exit 2 acima): aqui o coletor rodou e o
+    # resultado legítimo foi "sem arestas".
+    if gate == "fence":
+        try:
+            edges = json.loads(collector.stdout)
+        except Exception:
+            edges = None
+        if isinstance(edges, list) and not edges:
+            print("N/A: nenhuma aresta interna no repo — fence não tem o que verificar")
+            return 3
+
     ev_dir = repo / ".henke" / "evidence" / "pipeline"
     ev_dir.mkdir(parents=True, exist_ok=True)
     artifact = ev_dir / EVIDENCE_NAME[gate]

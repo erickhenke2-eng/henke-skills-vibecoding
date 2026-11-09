@@ -123,8 +123,22 @@ _SKIP_REASONS = {
 }
 
 
+def _spec_hash(spec_path: Path) -> str:
+    """sha256 da spec na forma NORMALIZADA (a mesma que spec_drift verifica) —
+    hashear read_bytes cru quebraria em spec CRLF (Windows) com falso-vermelho."""
+    try:
+        from scripts.spec_drift import compute_spec_hash
+    except ImportError:
+        try:
+            from spec_drift import compute_spec_hash
+        except ImportError:
+            return hashlib.sha256(spec_path.read_bytes()).hexdigest()
+    return compute_spec_hash(spec_path)
+
+
 def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None = None,
-                       test_cmd: str | None = None) -> list[str] | None:
+                       test_cmd: str | None = None, spec_hash: str | None = None,
+                       head_start: str | None = None) -> list[str] | None:
     """Args por portão, espelhando `henke gate`/check. `None` = não autoexecutável
     neste contexto — o veredito vira `skipped` (não-veredito), nunca verde."""
     if name in _GATES_COM_REPO_ARG:
@@ -145,8 +159,14 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
         return ["metrics", "--root", str(repo_root)]
     if name == "drift":
         if spec_path and spec_path.is_file():
-            return ["--repo", str(repo_root), "--spec", str(spec_path),
-                    "--expected-hash", hashlib.sha256(spec_path.read_bytes()).hexdigest()]
+            args = ["--repo", str(repo_root), "--spec", str(spec_path),
+                    "--expected-hash", spec_hash or _spec_hash(spec_path)]
+            # Âncora do diff: head_start gravado no nascimento da run vence HEAD
+            # vivo — commits feitos pelo driver durante a execução não escondem
+            # o próprio trabalho do diff.
+            if head_start:
+                args += ["--against", head_start]
+            return args
         return None
     if name == "contracts":
         return ["--repo", str(repo_root), "--spec", str(spec_path)] if spec_path and spec_path.is_file() else None
@@ -163,7 +183,8 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
 
 
 def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
-                  test_cmd: str | None = None) -> tuple[str, list[str] | None] | None:
+                  test_cmd: str | None = None, spec_hash: str | None = None,
+                  head_start: str | None = None) -> tuple[str, list[str] | None] | None:
     """Resolve um item de `gates` para (gate_id_canônico, cmd_ou_None).
     None = desconhecido; cmd=None = conhecido mas não autoexecutável aqui."""
     if not token:
@@ -172,7 +193,7 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
         script = Path(GATE_MAP[token])
         if not script.is_file():
             return None
-        args = _default_gate_args(token, repo_root, spec_path, test_cmd)
+        args = _default_gate_args(token, repo_root, spec_path, test_cmd, spec_hash, head_start)
         if args is None:
             return script.stem, None
         if script.stem in _PIPELINE_GATES:
@@ -193,7 +214,7 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
     resolved = cand.resolve()
     path_to_name = {os.path.normcase(str(Path(p).resolve())): n for n, p in GATE_MAP.items()}
     name = path_to_name.get(os.path.normcase(str(resolved)))
-    args = _default_gate_args(name, repo_root, spec_path, test_cmd) if name else [str(repo_root)]
+    args = _default_gate_args(name, repo_root, spec_path, test_cmd, spec_hash, head_start) if name else [str(repo_root)]
     if args is None:
         return resolved.stem, None
     if name in _PIPELINE_GATES:
@@ -223,6 +244,7 @@ def _record_gate_verdict(
     *,
     command: str | None = None,
     evidence_file: str | Path | None = None,
+    manual: bool = False,
 ) -> None:
     """Grava o veredito na run. Levanta FileNotFoundError se a run não existe."""
     if not run_path.is_file():
@@ -231,7 +253,7 @@ def _record_gate_verdict(
     if _rs_record_gate is not None:
         _rs_record_gate(
             run_path, gate_id, int(exit_code), summary,
-            command=command, evidence_file=evidence_file,
+            command=command, evidence_file=evidence_file, manual=manual,
         )
         return
     res = subprocess.run(  # fallback subprocess (mesma CLI real de run_state.py)
@@ -290,9 +312,15 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     child_env["PYTHONIOENCODING"] = "utf-8"
 
     spec_path: Path | None = None
+    spec_hash: str | None = None
+    head_start: str | None = None
     if run_path is not None:
         try:
-            spec_path = Path(json.loads(run_path.read_text(encoding="utf-8")).get("spec_path") or "")
+            run_meta = json.loads(run_path.read_text(encoding="utf-8"))
+            spec_path = Path(run_meta.get("spec_path") or "")
+            # Âncoras de nascimento: vencem qualquer estado vivo do repo.
+            spec_hash = run_meta.get("spec_sha256") or None
+            head_start = run_meta.get("head_start") or None
         except (OSError, ValueError):
             spec_path = None
 
@@ -300,7 +328,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     skipped: list[dict] = []
     for raw in gates:
         token = str(raw).strip()
-        resolved = _resolve_gate(token, root, spec_path, test_cmd)
+        resolved = _resolve_gate(token, root, spec_path, test_cmd, spec_hash, head_start)
         if resolved is None:
             gate_id = _gate_id_of(token)
             cmd_str = ""
@@ -314,21 +342,28 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
             gate_id, cmd = resolved
             cmd_str = shlex.join(cmd)
             t0 = time.monotonic()
+            # Popen + árvore: timeout mata o processo E seus filhos (pipeline
+            # spawna repo_signals + portão real) — subprocess.run só mata o filho
+            # direto e deixaria netos órfãos escrevendo evidência.
+            proc = None
             try:
-                res = subprocess.run(
-                    cmd, cwd=str(root), capture_output=True, text=True,
-                    encoding="utf-8", errors="replace", env=child_env,
-                    timeout=timeout_sec,
+                proc = subprocess.Popen(
+                    cmd, cwd=str(root), stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                    errors="replace", env=child_env,
+                    start_new_session=(os.name != "nt"),
                 )
+                try:
+                    out, err = proc.communicate(timeout=timeout_sec)
+                    exit_code = proc.returncode
+                except subprocess.TimeoutExpired:
+                    _kill_tree(proc)
+                    out, err = proc.communicate()
+                    exit_code = 2
+                    err = (err or "") + f"\n[TIMEOUT] expirou após {timeout_sec}s (árvore encerrada)"
                 ms = int(round((time.monotonic() - t0) * 1000))
-                exit_code = res.returncode
-                out = res.stdout or ""
-                err = res.stderr or ""
-            except subprocess.TimeoutExpired as exc:
-                ms = int(round((time.monotonic() - t0) * 1000))
-                exit_code = 2
-                out = _to_text(exc.stdout)
-                err = (_to_text(exc.stderr) + f"\n[TIMEOUT] expirou após {timeout_sec}s").strip()
+                out = out or ""
+                err = (err or "").strip()
             except OSError as exc:
                 ms = int(round((time.monotonic() - t0) * 1000))
                 exit_code, out, err = 2, "", f"ERRO ao lançar processo: {exc}"
@@ -347,10 +382,19 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
             except OSError:
                 evidence_file = None
         if run_path is not None:
-            _record_gate_verdict(
-                run_path, gate_id, exit_code, sha, ms,
-                command=cmd_str or f"gate-token:{token}", evidence_file=evidence_file,
-            )
+            if cmd_str and evidence_file is None:
+                # Evidência não pôde ser escrita → não existe tríade → não-veredito
+                # honesto (atestação manual exit 2), nunca crash nem verde.
+                _record_gate_verdict(
+                    run_path, gate_id, 2, sha, ms,
+                    command=None, evidence_file=None, manual=True,
+                )
+                exit_code, cmd_str = 2, f"{cmd_str} [EVIDENCE-WRITE-FAILED]"
+            else:
+                _record_gate_verdict(
+                    run_path, gate_id, exit_code, sha, ms,
+                    command=cmd_str or f"gate-token:{token}", evidence_file=evidence_file,
+                )
         verdicts.append({
             "gate": gate_id,
             "cmd": cmd_str,
@@ -371,6 +415,24 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
         ),
         "ran": len(verdicts),
     }
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Mata o processo e TODA a árvore (netos inclusos) — taskkill /T no Windows,
+    killpg no POSIX."""
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True, timeout=10,
+            )
+        else:
+            os.killpg(os.getpgid(proc.pid), 9)
+    except (OSError, subprocess.SubprocessError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
 
 
 def _load_route_gates(route_path: Path) -> list[str]:

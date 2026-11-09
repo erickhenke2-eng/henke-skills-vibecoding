@@ -181,8 +181,9 @@ def _iter_module_level_nodes(stmts: list[ast.stmt]):
                             yield from _iter_module_level_nodes(item.body)
                         elif isinstance(item, ast.stmt):
                             yield from _iter_module_level_nodes([item])
-        elif isinstance(node, ast.ClassDef):
-            yield from _iter_module_level_nodes(node.body)
+        # NÃO descer em ClassDef: métodos não são símbolos de nível de módulo —
+        # `class A: def sym` não satisfaz `ponte: a.py::sym` (A13-banca). O
+        # próprio ClassDef já foi yielded acima, então `class sym` ainda conta.
 
 
 def _is_top_level_symbol(src_raw: str, src_code: str, ext: str, sym: str) -> bool:
@@ -220,8 +221,22 @@ def _is_top_level_symbol(src_raw: str, src_code: str, ext: str, sym: str) -> boo
         ):
             return True
         fns = list(_pg.find_functions(src_raw, ext))
+        # Linhas cobertas por corpos de `class { }` — métodos não são símbolos
+        # de nível de módulo (A13-banca: `sym() {}` dentro de classe não conta).
+        class_lines: set[int] = set()
+        _masked = _pg.mask_c_like(src_raw, ext)
+        for cm in re.finditer(r"\bclass\b", _masked):
+            bpos = _masked.find("{", cm.end())
+            if bpos == -1:
+                continue
+            bend = _pg._brace_end(_masked, bpos)
+            if bend == -1:
+                continue
+            first = _masked.count("\n", 0, bpos) + 1
+            last = _masked.count("\n", 0, bend) + 1
+            class_lines.update(range(first, last + 1))
         for fn_name, _sl, _el, _ in fns:
-            if fn_name == sym:
+            if fn_name == sym and _sl not in class_lines:
                 return True
         code_lines = src_code.splitlines(keepends=True)
         top_lines = list(code_lines)

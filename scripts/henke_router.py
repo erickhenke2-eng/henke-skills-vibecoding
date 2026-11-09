@@ -484,15 +484,18 @@ def _touched_files(repo_root: Path | None) -> list[str]:
         return []
     try:
         res = subprocess.run(
-            ["git", "-c", "core.quotePath=false", "status", "--porcelain"],
-            cwd=str(repo_root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
+            ["git", "-c", "core.quotePath=false", "status", "--porcelain", "-z"],
+            cwd=str(repo_root), capture_output=True, timeout=5,
         )
         if res.returncode != 0:
             return []
         files = []
-        for line in res.stdout.splitlines():
-            if len(line) > 3:
-                files.append(line[3:].strip().strip('"').replace("\\", "/"))
+        for rec in res.stdout.split(b"\0"):
+            # Formato -z: XY<espaço>path — nomes com \n/aspas passam intactos.
+            if len(rec) > 3:
+                files.append(
+                    rec[3:].decode("utf-8", errors="replace").strip('"').replace("\\", "/")
+                )
         return files
     except Exception:
         return []
@@ -652,12 +655,15 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
     if is_compound_exec:
         archetype = "CARPINTEIRO"
         gates_required = list(MODE_GATES["EXECUTAR_COMPOUND"])
+    elif mode == "PLANEJAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-plan-", "henke-arch-"))):
+        # Modo antes de skill: PLANEJAR com lead henke-audit-* NÃO pode cair na
+        # matriz ANALISAR — perderia spec_drift, o único portão que impõe o
+        # escopo declarado da spec (ALTO-7 da banca).
+        archetype = "ESTADISTA"
+        gates_required = list(MODE_GATES["PLANEJAR"])
     elif mode == "ANALISAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-audit-", "henke-debug-"))):
         archetype = "SHERLOCK"
         gates_required = list(MODE_GATES["ANALISAR"])
-    elif mode == "PLANEJAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-plan-", "henke-arch-"))):
-        archetype = "ESTADISTA"
-        gates_required = list(MODE_GATES["PLANEJAR"])
     else:
         archetype = "CARPINTEIRO"
         gates_required = list(MODE_GATES["EXECUTAR"])

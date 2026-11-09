@@ -453,8 +453,10 @@ def _cmd_exec(
             with open(exec_log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
 
-            # Atualiza .henke/LEDGER.json atomicamente apenas para runners de testes
-            if is_test_command(cmd_tokens, cmd_str) or discovered > 0:
+            # Atualiza .henke/LEDGER.json apenas quando o COMANDO é de testes —
+            # qualquer saída contendo "N tests" (ex.: um README impresso por cat)
+            # não pode entrar no ledger sem ser um runner real (ALTO-6 banca).
+            if is_test_command(cmd_tokens, cmd_str):
                 existing_ledger: list[dict] = []
                 if ledger_path.is_file():
                     try:
@@ -510,7 +512,8 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
             args = [str(repo_root / "tests")]
         else:
             args = [str(repo_root)]
-    res = subprocess.run([sys.executable, str(script_path), *args])
+    res = subprocess.run([sys.executable, str(script_path), *args],
+                         cwd=str(repo_root))
     return res.returncode
 
 
@@ -613,7 +616,9 @@ def _cmd_check(
             encoding="utf-8",
             errors="replace",
         )
-        passed = res.returncode == 0
+        # exit 3 = n/a honesto (portão rodou, nada a verificar) — não é falha,
+        # mesma semântica de run_state/henke_gates; nunca conta como verde.
+        passed = res.returncode in (0, 3)
         if not passed:
             overall_ok = False
         results.append({
@@ -780,7 +785,13 @@ def _resolve_run_ref(repo_root: Path, run_ref: str | None) -> Path | None:
             return None  # C3-banca: recusa caminho fora de .henke/runs (traversal)
         return real
     name = run_ref if run_ref.endswith(".json") else f"{run_ref}.json"
-    path = runs_dir / name
+    if Path(name).name != name:  # '..' ou separador embutido → nunca vira path
+        return None
+    path = (runs_dir / name).resolve()
+    try:
+        path.relative_to(runs_dir)
+    except ValueError:
+        return None
     return path if path.is_file() else None
 
 
@@ -1054,23 +1065,9 @@ def _cmd_auto(
         timeout=timeout,
         resume=resume,
     )
-    # Onda 2: um único escritor por worktree — o lock cobre a run inteira,
-    # não só o read-modify-write de estado. Stale lock (crash) informa o
-    # caminho para remoção manual.
-    from scripts import run_state as _rs
-    lock_target = Path(repo).resolve() / ".henke" / "auto-writer"
-    try:
-        with _rs._file_lock(lock_target, timeout=2.0):
-            return int(run_auto(ns))
-    except TimeoutError:
-        print(
-            "ERRO: outra run `auto`/`trigger` ativa nesta worktree (single-writer). "
-            "Se a run anterior morreu, remova '.henke/auto-writer.lock'.",
-            file=sys.stderr,
-        )
-        return 2
-    except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 2
+    # Onda 2+: o single-writer vive dentro de run_auto — cobre `henke auto`,
+    # `trigger` e a execução direta de scripts/henke_auto.py.
+    return int(run_auto(ns))
 
 
 def _cmd_trigger(kind: str, target: str | None, repo: Path, **kw) -> int:

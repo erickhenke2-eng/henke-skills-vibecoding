@@ -255,7 +255,14 @@ class TestMetricGates(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tp = Path(tmp)
             rf = init_run(tp, "r-gf", mode="ANALISAR", archetype="SHERLOCK")
-            record_gate(rf, "hazard_scan", 0, "ok")
+            # Portão físico exige tríade (command+arquivo+sha) — atestação nua
+            # não verifica mais (regra anti-forja da banca v5).
+            ev_dir = tp / ".henke" / "evidence" / "r-gf"
+            ev_dir.mkdir(parents=True, exist_ok=True)
+            ev = ev_dir / "hazard_scan.out"
+            ev.write_text("ok\n", encoding="utf-8")
+            record_gate(rf, "hazard_scan", 0, "ok",
+                        command="hazard_scan", evidence_file=str(ev))
             rc_ver = run_state_main(["verify", "--run", str(rf), "--json"])
             self.assertEqual(rc_ver, 0)
             mod = tp / "calc.py"
