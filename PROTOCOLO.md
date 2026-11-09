@@ -235,6 +235,20 @@ Nenhum portão prova que a LLM nunca alucinará. Eles tornam violações especí
 
 ---
 
+## 12. Checklist canônico de entrega (todas as skills)
+
+Fonte única do checklist referenciado pelos SKILL.md (seção "Verificação de
+Entrega & Custódia"). Skills com verificações específicas adicionais declaram
+**apenas os itens extras** — nunca duplicam estes.
+
+- [ ] **Entrega Real (Zero Stubs)**: Funcionalidade entregue de verdade até a ponta, sem cascas vazias, mocks permanentes ou comentários delegando a solução para depois.
+- [ ] **Regra Portão vs Produto**: Se o teste conflitou com a nova exigência, o teste foi corrigido — sem hacks como `.sr-only`, textos invisíveis ou dados falsos.
+- [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
+- [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
+- [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+
+---
+
 ## Delta v3.0 → v3.1 (registro de auditoria)
 
 Correções incorporadas das perícias Devin + Astra (commit `8735048`):
