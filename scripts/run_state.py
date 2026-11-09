@@ -213,8 +213,19 @@ def _safe_run_id(run_id: str) -> str:
 _EVIDENCE_MAX_BYTES = 64 * 1024 * 1024
 
 
-def _evidence_manifest_path(run_id: str) -> Path:
+def _evidence_manifest_path(run_id: str, run_path: Path | None = None) -> Path:
     safe = _safe_run_id(run_id) or "run"
+    # A3 (banca v10): chavear só por run_id colidia cross-repo e deixava
+    # `record-gate` num path arbitrário envenenar o manifesto da run
+    # homônima — o arquivo agora também carrega o hash do repo que contém
+    # a run (.henke/runs/x.json → repo = 3 níveis acima).
+    if run_path is not None:
+        try:
+            repo = Path(run_path).resolve().parents[2]
+            tag = hashlib.sha256(str(repo).encode("utf-8")).hexdigest()[:12]
+            safe = f"{tag}-{safe}"
+        except (IndexError, OSError):
+            pass
     return _config_dir() / "evidence-manifest" / f"{safe}.json"
 
 
@@ -222,7 +233,8 @@ def _append_evidence_manifest(run_id: str, gate: str,
                               evidence_file: str | None,
                               evidence_sha256: str | None, command: str | None,
                               exit_code: int, manual: bool,
-                              external: bool = False) -> None:
+                              external: bool = False,
+                              run_path: Path | None = None) -> None:
     """Acrescenta o veredito ao manifesto LOCAL (~/.config/henke/evidence-manifest/).
 
     A tríade gravada na run prova "existiu um arquivo com este sha"; o manifesto
@@ -232,7 +244,7 @@ def _append_evidence_manifest(run_id: str, gate: str,
     (C2: deletar um portão vermelho do JSON era indetectável — o manifesto
     passa a exigir manifest ⊆ run.gates com campos iguais).
     """
-    p = _evidence_manifest_path(run_id)
+    p = _evidence_manifest_path(run_id, run_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -258,9 +270,9 @@ def _append_evidence_manifest(run_id: str, gate: str,
     _atomic_write_json(p, data)
 
 
-def _load_evidence_manifest(run_id: str) -> dict | None:
+def _load_evidence_manifest(run_id: str, run_path: Path | None = None) -> dict | None:
     """Lê o manifesto LOCAL de evidência (None se ausente/inválido)."""
-    p = _evidence_manifest_path(run_id)
+    p = _evidence_manifest_path(run_id, run_path)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -342,6 +354,11 @@ def load_anchor_sidecar(run_id: str, repo_root: Path | str | None = None) -> dic
     return data
 
 
+# A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
+# no ambiente redirecionariam o git das âncoras/vereditos para outro repo/index.
+_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def _git_head(repo_root: Path) -> str | None:
     """HEAD atual do repo (None se git indisponível/sem commits — nunca inventa)."""
     try:
@@ -350,7 +367,7 @@ def _git_head(repo_root: Path) -> str | None:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "rev-parse", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=10,
+            timeout=10, env=_GIT_ENV,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -369,7 +386,7 @@ def _git_ignored(repo_root: Path) -> list[str] | None:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "status", "--porcelain", "-uall", "--ignored", "-z"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=30,
+            timeout=30, env=_GIT_ENV,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -661,7 +678,7 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     # registrou CADA entrada — run plantada por clone não tem manifesto.
     # Bidirecional (banca v9 — C1/C2): exit_code e flag manual ancorados,
     # e órfãos no manifesto = veredito deletado da run.
-    manifest = _load_evidence_manifest(run_id)
+    manifest = _load_evidence_manifest(run_id, p)
     m_entries = (manifest or {}).get("entries") or {}
     run_gates = {
         k: v for k, v in (data.get("gates") or {}).items()
@@ -857,7 +874,13 @@ def init_run(
     derived, reasons = derive_run_outcome(data)
     data["outcome"] = derived
     data["reasons"] = reasons
-    _atomic_write_json(run_path, data)
+    # A8 (banca v10): check→write sem lock — dois inits concorrentes do mesmo
+    # run_id clobberavam a run (e portões já gravados viravam órfãos).
+    with _file_lock(run_path):
+        if run_path.is_file():
+            raise FileExistsError(
+                f"run já existe (não sobrescrevo silenciosamente): {run_path}")
+        _atomic_write_json(run_path, data)
     # Sidecar de âncoras para TODA run — não só `henke auto`: sem ele, run_gates
     # cai no fallback de ler head_start/spec_sha256 do arquivo de run mutável
     # (banca v7 — A3). `fields` ancora os campos de decisão do outcome (F-03).
@@ -996,7 +1019,7 @@ def record_gate(
                 str(evidence_path) if evidence_sha is not None else None,
                 evidence_sha,
                 str(command) if evidence_sha is not None else None,
-                int(exit_code), manual, external,
+                int(exit_code), manual, external, run_path,
             )
         except OSError as exc:
             raise ValueError(
@@ -1078,8 +1101,11 @@ def approve_run(run_path: Path, approver: str = "human") -> dict:
         # plantada via clone (binding forjado mas self-consistente) não tem
         # token na máquina da vítima e é recusada.
         if isinstance(data.get("approval_binding"), dict):
-            write_approval_token(data["approval_binding"],
-                                 data["approved_by"], run_path)
+            # A9 (banca v10): falha silenciosa deixava approve "OK" sem token —
+            # --resume recusava depois sem explicação.
+            if write_approval_token(data["approval_binding"],
+                                    data["approved_by"], run_path) is None:
+                raise OSError("falha ao gravar o token de aprovação local")
     return data
 
 

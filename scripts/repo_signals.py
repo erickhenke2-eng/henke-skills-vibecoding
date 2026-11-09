@@ -240,7 +240,9 @@ def _cov_lookup(cov: dict, rel: str, py: Path) -> float:
     if ap in cov:
         return cov[ap]
     hits = [v for k, v in cov.items() if k.endswith("/" + rel)]
-    if hits:
+    # A10 (banca v10): sufixo ambíguo (2+ hits) creditava o hits[0]
+    # arbitrário — sem match único não há crédito.
+    if len(hits) == 1:
         return hits[0]
     by_name = [v for k, v in cov.items()
                if k == py.name or k.endswith("/" + py.name)]

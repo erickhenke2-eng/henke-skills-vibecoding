@@ -57,6 +57,10 @@ for _p in (str(_HERE), str(_SCRIPTS)):
 import repo_signals as _rs  # noqa: E402
 import hazard_scan as _hs   # noqa: E402
 
+# A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
+# no ambiente redirecionariam o git dos vereditos para outro repo/index.
+_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
 VALID_PROFILES = ("quick", "standard", "deep")
 VALID_UNIT_STATUS = ("pending", "covered", "finding_confirmed", "needs_validation", "deferred", "out_of_scope")
 VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
@@ -329,6 +333,7 @@ def verify_ledger(
                 ["git", "rev-parse", "--verify", f"{against}^{{commit}}"],
                 cwd=str(root), capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
+                env=_GIT_ENV,
             )
             if _rc.returncode != 0:
                 errors.append(f"INVALID-AGAINST: ref '{against}' não resolve para commit")
@@ -337,6 +342,7 @@ def verify_ledger(
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "diff", "--name-status", against, "--"],
             cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=_GIT_ENV,
         )
         if res_added.returncode == 0:
             added_files = {

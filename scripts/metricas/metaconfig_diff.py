@@ -151,12 +151,17 @@ def _is_protected(rel: str) -> str | None:
 _is_metaconfig = _is_protected
 
 
+# A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
+# no ambiente redirecionariam o git dos vereditos para outro repo/index.
+_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def _git(repo: Path, *args) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-c", "core.quotePath=false",
          "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
         cwd=str(repo), capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=30,
+        encoding="utf-8", errors="replace", timeout=30, env=_GIT_ENV,
     )
 
 

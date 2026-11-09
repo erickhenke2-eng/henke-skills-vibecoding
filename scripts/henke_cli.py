@@ -489,47 +489,55 @@ def _cmd_exec(
                 "entry_hash": entry_hash,
             }
             exec_log_path.parent.mkdir(parents=True, exist_ok=True)
+            _pre_size = exec_log_path.stat().st_size if exec_log_path.is_file() else 0
             with open(exec_log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-
-            # Atualiza .henke/LEDGER.json apenas quando o COMANDO é de testes —
-            # qualquer saída contendo "N tests" (ex.: um README impresso por cat)
-            # não pode entrar no ledger sem ser um runner real (ALTO-6 banca).
-            if is_test_command(cmd_tokens, cmd_str):
-                existing_ledger: list[dict] = []
-                if ledger_path.is_file():
-                    try:
-                        loaded = json.loads(ledger_path.read_text(encoding="utf-8"))
-                        if not isinstance(loaded, list):
-                            print(f"ERRO: Formato inválido em '{ledger_path}' (esperava lista JSON).", file=sys.stderr)
+            try:
+                # Atualiza .henke/LEDGER.json apenas quando o COMANDO é de testes —
+                # qualquer saída contendo "N tests" (ex.: um README impresso por cat)
+                # não pode entrar no ledger sem ser um runner real (ALTO-6 banca).
+                if is_test_command(cmd_tokens, cmd_str):
+                    existing_ledger: list[dict] = []
+                    if ledger_path.is_file():
+                        try:
+                            loaded = json.loads(ledger_path.read_text(encoding="utf-8"))
+                            if not isinstance(loaded, list):
+                                print(f"ERRO: Formato inválido em '{ledger_path}' (esperava lista JSON).", file=sys.stderr)
+                                return 2
+                            existing_ledger = loaded
+                        except Exception as exc:
+                            print(f"ERRO: Ledger corrompido em '{ledger_path}': {exc}", file=sys.stderr)
                             return 2
-                        existing_ledger = loaded
-                    except Exception as exc:
-                        print(f"ERRO: Ledger corrompido em '{ledger_path}': {exc}", file=sys.stderr)
-                        return 2
 
-                ledger_item = {
-                    "cmd": cmd_str,
-                    "exit": res.returncode,
-                    "testes_descobertos": discovered,
-                    "testes_passados": passed,
-                    "stdout_sha256": stdout_sha256,
-                    "entry_hash": entry_hash,
-                }
-                existing_ledger.append(ledger_item)
-                _atomic_write_json(ledger_path, existing_ledger)
+                    ledger_item = {
+                        "cmd": cmd_str,
+                        "exit": res.returncode,
+                        "testes_descobertos": discovered,
+                        "testes_passados": passed,
+                        "stdout_sha256": stdout_sha256,
+                        "entry_hash": entry_hash,
+                    }
+                    existing_ledger.append(ledger_item)
+                    _atomic_write_json(ledger_path, existing_ledger)
 
-            # Âncora LOCAL da ponta da cadeia (F-13): a cadeia prova só
-            # consistência interna — truncar/reescrever o rabinho do jsonl
-            # produzia cadeia "válida". Com a ponta fora do repo, qualquer
-            # reescrita diverge do tip gravado nesta máquina. Só o caminho
-            # canônico ancora (B9).
-            if _is_canonical:
-                try:
+                # Âncora LOCAL da ponta da cadeia (F-13): a cadeia prova só
+                # consistência interna — truncar/reescrever o rabinho do jsonl
+                # produzia cadeia "válida". Com a ponta fora do repo, qualquer
+                # reescrita diverge do tip gravado nesta máquina. Só o caminho
+                # canônico ancora (B9).
+                if _is_canonical:
                     _rs.record_exec_tip(repo_root, entry_hash)
-                except OSError as exc:
-                    print(f"ERRO: falha ao ancorar ponta do exec_log localmente: {exc}", file=sys.stderr)
-                    return 2
+            except (OSError, ValueError) as exc:
+                # A5 (banca v10): falha pós-append deixava rabo não-ancorado e
+                # wedgiava o log para sempre — rollback trunca a linha nova.
+                try:
+                    with open(exec_log_path, "r+b") as f:
+                        f.truncate(_pre_size)
+                except OSError:
+                    pass
+                print(f"ERRO: exec_log revertido após falha de custódia: {exc}",
+                      file=sys.stderr)
+                return 2
     except TimeoutError as exc:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 2

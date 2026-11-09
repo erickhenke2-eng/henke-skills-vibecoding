@@ -296,7 +296,8 @@ def _is_top_level_symbol(src_raw: str, src_code: str, ext: str, sym: str) -> boo
     return True
 
 
-def _has_valid_import(dst_nc: str, dst_code: str, src_rel: str, src_stem: str, sym: str) -> bool:
+def _has_valid_import(dst_nc: str, dst_code: str, src_rel: str, src_stem: str,
+                      sym: str, dst_rel: str = "") -> bool:
     esc_stem = re.escape(src_stem)
     esc_sym = re.escape(sym)
     esc_name = re.escape(Path(src_rel).name)
@@ -305,10 +306,22 @@ def _has_valid_import(dst_nc: str, dst_code: str, src_rel: str, src_stem: str, s
     # A8 (banca v9): keyword de import só conta fora de strings — o conjunto
     # de linhas legítimas vem do texto com strings mascaradas; `from` dentro
     # de docstring/template-literal é descartado.
+    _code_lines = dst_code.split("\n")
     imp_lineno_ok = {
-        i for i, ln in enumerate(dst_code.split("\n"))
+        i for i, ln in enumerate(_code_lines)
         if re.match(r"[ \t]*(?:from|import|export\s+.*?\bfrom|use|pub\s*use|mod)\b", ln)
     }
+    # A8 (banca v10): `from x import sym` dentro de `if TYPE_CHECKING:` nunca
+    # executa em runtime — a ponte morre na primeira chamada real. Linhas do
+    # bloco (indentadas sob o if) saem do conjunto legítimo.
+    for i, ln in enumerate(_code_lines):
+        if re.match(r"[ \t]*if\s+(?:typing\.)?TYPE_CHECKING\b.*:\s*$", ln):
+            base = len(ln) - len(ln.lstrip())
+            for j in range(i + 1, len(_code_lines)):
+                l2 = _code_lines[j]
+                if l2.strip() and len(l2) - len(l2.lstrip()) <= base:
+                    break
+                imp_lineno_ok.discard(j)
 
     # Linhas de import que nomeiam o módulo-alvo (stem/nome de arquivo —
     # target_pat completo incluiria o símbolo e deixaria `import {sym} from
@@ -337,7 +350,11 @@ def _has_valid_import(dst_nc: str, dst_code: str, src_rel: str, src_stem: str, s
     # Uso no corpo avaliado sobre dst_code (strings mascaradas) — símbolo ou
     # `mod.sym` dentro de literal não é referência real.
     non_imp = re.sub(
-        r"(?m)^[ \t]*(?:from|import|export|use|pub\s*use|mod)\b[^\n;]*", "", dst_code
+        # `export` puro NÃO é cláusula de import: `export const api = () =>
+        # buildClip()` é uso real do símbolo. Só `export ... from`/`export *`
+        # (re-exports) saem do texto de corpo.
+        r"(?m)^[ \t]*(?:from|import|use|pub\s*use|mod|export(?=[^\n;]*\bfrom\b|\s*\*))\b[^\n;]*",
+        "", dst_code,
     )
     # Vínculo símbolo↔módulo (banca v9 A7): `import auth` + `def verificaToken`
     # local fechava a ponte sem dependência real. Bare-import exige referência
@@ -353,7 +370,13 @@ def _has_valid_import(dst_nc: str, dst_code: str, src_rel: str, src_stem: str, s
     if re.search(rf"(?:{qual_pat})\s*\.\s*{esc_sym}\b", non_imp):
         return True
     if any(re.search(rf"\b{esc_sym}\b", ln) for ln in imp_lines):
-        return True
+        # A8 (banca v10): `from x import sym` MORTO (símbolo só aparece na
+        # cláusula) fechava ponte cujo contrato diz "importado E referenciado".
+        # Requer uso no corpo — re-export em __init__.py é idiom legítimo.
+        if Path(dst_rel).name == "__init__.py" or re.search(
+            rf"\b{esc_sym}\b", non_imp
+        ):
+            return True
     # require()/import() dinâmico resolve o módulo fora da sintaxe de import:
     # o símbolo bare no corpo segue sendo a evidência disponível.
     if has_dyn and re.search(rf"\b{esc_sym}\b", non_imp):
@@ -484,7 +507,8 @@ def check_contract_closure(
 
             if not pat.search(dst_code):
                 errors.append(f"BROKEN-BRIDGE-SYMBOL-DST: símbolo '{sym}' não referenciado no destino '{dst_rel}'")
-            elif not _has_valid_import(dst_nc, dst_code, src_rel, src_path.stem, sym):
+            elif not _has_valid_import(dst_nc, dst_code, src_rel, src_path.stem,
+                                       sym, dst_rel):
                 errors.append(f"BROKEN-BRIDGE-IMPORT: destino '{dst_rel}' referencia '{sym}' mas não importa '{src_rel}'")
 
     return len(errors) == 0, errors

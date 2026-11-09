@@ -133,6 +133,11 @@ def _collect_mutants(tree: ast.AST, diff_lines: set[int] | None, max_mutants: in
     return candidates
 
 
+# A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
+# no ambiente redirecionariam o git dos vereditos para outro repo/index.
+_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def extract_diff_lines(target: Path, git_ref: str = "HEAD") -> set[int] | None:
     """Extrai o conjunto de linhas modificadas/adicionadas em `target` via `git diff -U0`."""
     t = Path(target).resolve()
@@ -144,6 +149,7 @@ def extract_diff_lines(target: Path, git_ref: str = "HEAD") -> set[int] | None:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env=_GIT_ENV,
             errors="replace",
             timeout=5,
         )
@@ -377,7 +383,7 @@ def _git_z(repo: Path, *args: str) -> list[str] | None:
         res = subprocess.run(
             ["git", "-C", str(repo),
              "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
-            capture_output=True, timeout=10,
+            capture_output=True, timeout=10, env=_GIT_ENV,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -584,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
             ["git", "rev-parse", "--verify", "--quiet",
              f"{args.diff_against}^{{commit}}"],
             cwd=str(target_path.parent), capture_output=True, timeout=10,
+            env=_GIT_ENV,
         )
         if _v.returncode != 0:
             # Modo single-target: a ref só ESTREITA o escopo do arquivo alvo

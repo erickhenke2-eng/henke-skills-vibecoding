@@ -31,13 +31,17 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
 
 DEFAULT_BASELINE = ".henke/gate-baseline.json"
 
+# A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
+# no ambiente redirecionariam o git dos vereditos para outro repo/index.
+_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
 
 def git(cwd, *args, check=True):
     result = subprocess.run(
         ["git", "-C", str(cwd), "-c", "core.quotePath=false",
          "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=30,
+        timeout=30, env=_GIT_ENV,
     )
     if check and result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} falhou: {result.stderr.strip()}")

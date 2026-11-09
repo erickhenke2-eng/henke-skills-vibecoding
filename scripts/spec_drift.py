@@ -98,6 +98,11 @@ def parse_declared_symbols(spec_path: Path) -> list[tuple[str, str]]:
     return _parse_symbols_text(_decode_spec(spec_path.read_bytes()))
 
 
+# A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
+# no ambiente redirecionariam o git dos vereditos para outro repo/index.
+_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def get_git_root(cwd: Path) -> Path:
     try:
         res = subprocess.run(
@@ -107,6 +112,7 @@ def get_git_root(cwd: Path) -> Path:
             text=True,
             check=True,
             timeout=30,
+            env=_GIT_ENV,
         )
         return Path(res.stdout.strip()).resolve()
     except Exception as e:
@@ -143,6 +149,7 @@ def _git_paths_z(git_root: Path, *args: str) -> list[str]:
          "-c", "core.fsmonitor=false", "-c", "diff.external=",
          *args],
         cwd=str(git_root), capture_output=True, check=True, timeout=60,
+        env=_GIT_ENV,
     )
     return [p for p in res.stdout.decode("utf-8", errors="replace").split("\0") if p]
 
@@ -159,6 +166,7 @@ def get_touched_files(git_root: Path, against: str | None = None, active_spec: P
         vres = subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", f"{against}^{{commit}}"],
             cwd=str(git_root), capture_output=True, timeout=30,
+            env=_GIT_ENV,
         )
         if vres.returncode != 0:
             raise ValueError(f"ref '--against' não resolve para commit: {against!r}")
@@ -369,6 +377,7 @@ def check_spec_drift(
     vres = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"{against}^{{commit}}"],
         cwd=str(git_root), capture_output=True, text=True, timeout=30,
+        env=_GIT_ENV,
     )
     if vres.returncode != 0:
         return False, [
