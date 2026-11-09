@@ -33,6 +33,7 @@ Códigos de saída:
 from __future__ import annotations
 
 import argparse
+import ast
 import fnmatch
 import io
 import json
@@ -379,6 +380,92 @@ DIST_EXTS = {".js", ".mjs", ".cjs", ".map", ".html", ".json"}
 DIST_MAX_FILE_BYTES = 8 * 1024 * 1024
 
 
+# ---------------------------------------------------------------------------
+# Pass AST (.py) — resolve aliases de import que o regex não enxerga:
+# `from subprocess import run` → `run(..., shell=True)`, `import os as o` →
+# `o.popen(...)`. Só roda em arquivos .py; SyntaxError simplesmente omite o
+# pass (os regexes de Pass 1/2 ainda cobrem o arquivo).
+# ---------------------------------------------------------------------------
+_AST_SHELL_FUNCS = {
+    "os.system", "os.popen",
+    "asyncio.create_subprocess_shell",
+    "commands.getoutput", "commands.getstatusoutput",
+}
+_AST_SUBPROC_SHELL_KW = {
+    "subprocess.run", "subprocess.Popen", "subprocess.call",
+    "subprocess.check_output", "subprocess.check_call",
+}
+_AST_DESER_FUNCS = {
+    "pickle.load", "pickle.loads", "dill.load", "dill.loads",
+    "marshal.load", "marshal.loads", "shelve.open",
+}
+_AST_YAML_LOAD = {"yaml.load"}
+_AST_EXEC_BUILTINS = {"eval", "exec"}
+
+
+def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]:
+    """Findings AST (rule, lineno, scope, msg) com resolução de alias de import."""
+    try:
+        tree = ast.parse(raw)
+    except (SyntaxError, ValueError, MemoryError, RecursionError):
+        return []
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                # `import a.b as x` → x resolve p/ a.b; sem alias, o nome raiz
+                aliases[a.asname or a.name.split(".")[0]] = a.name
+        elif isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            for a in node.names:
+                if a.name == "*":
+                    continue
+                aliases[a.asname or a.name] = f"{mod}.{a.name}"
+
+    def resolve(func) -> str:
+        if isinstance(func, ast.Name):
+            return aliases.get(func.id, func.id)
+        if isinstance(func, ast.Attribute):
+            base = resolve(func.value)
+            return f"{base}.{func.attr}" if base else func.attr
+        return ""
+
+    out: list[tuple[str, int, str, str]] = []
+    raw_lines = raw.splitlines()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = resolve(node.func)
+        if not name:
+            continue
+        line = node.lineno
+        scope = f"line:{line}"
+        if name in _AST_SHELL_FUNCS or name.startswith("os.spawn"):
+            out.append(("SHELL-INJECTION", line, scope, f"shell invocation via {name}() (AST)"))
+            continue
+        if name in _AST_SUBPROC_SHELL_KW:
+            for kw in node.keywords:
+                if kw.arg == "shell":
+                    if isinstance(kw.value, ast.Constant) and not kw.value.value:
+                        break  # shell=False explícito — seguro
+                    out.append(("SHELL-INJECTION", line, scope, f"{name}(shell=...) truthy/dynamic (AST)"))
+                    break
+            continue
+        if name in _AST_DESER_FUNCS:
+            out.append(("UNSAFE-DESERIALIZE", line, scope, f"unsafe deserialization via {name}() (AST)"))
+            continue
+        if name in _AST_YAML_LOAD:
+            line_txt = raw_lines[line - 1] if line <= len(raw_lines) else ""
+            loader_kw = any(kw.arg == "Loader" or kw.arg == "loader" for kw in node.keywords)
+            if loader_kw or "SafeLoader" in line_txt or "UniqueKeyLoader" in line_txt:
+                continue
+            out.append(("UNSAFE-DESERIALIZE", line, scope, "yaml.load() without SafeLoader (AST)"))
+            continue
+        if name in _AST_EXEC_BUILTINS:
+            out.append(("UNSAFE-DESERIALIZE", line, scope, f"dynamic code execution via {name}() (AST)"))
+    return out
+
+
 def scan_file(path: Path, extra_exts: set | None = None,
               max_bytes: int = MAX_FILE_BYTES,
               legacy_file_scope: bool = False,
@@ -569,6 +656,11 @@ def scan_file(path: Path, extra_exts: set | None = None,
         if top_level_body.strip() or top_level_nc_body.strip():
             fn_iter.append(("<top-level>", 1, len(c_lines), top_level_body, top_level_nc_body))
 
+    # --- Pass AST (.py): aliases de import que o regex não resolve ---
+    if ext == ".py":
+        for rule, line_no, scope, msg in _py_ast_findings(raw, path_str):
+            add(rule, line_no, scope, msg)
+
     for fn_name, sl, _el, fn_body, fn_body_nc in fn_iter:
         if not legacy_file_scope:
             for m_xss in _XSS_HTML_RE.finditer(fn_body):
@@ -625,6 +717,10 @@ def scan_file(path: Path, extra_exts: set | None = None,
                 line_hit = sl + fn_body.count("\n", 0, m_di.start())
                 add("DYNAMIC-DISPATCH-IPC", line_hit, fn_name, f"blind dynamic dispatch inside IPC handler ({m_di.group(0)})")
 
+    # Dedup (rule, location): regex e AST cobrem o mesmo call-site.
+    if len(findings) > 1:
+        _seen: set[tuple[str, str]] = set()
+        findings = [f for f in findings if (f[0], f[1]) not in _seen and not _seen.add((f[0], f[1]))]
     return 1, findings, False
 
 

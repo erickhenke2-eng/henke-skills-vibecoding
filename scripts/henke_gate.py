@@ -47,14 +47,23 @@ def file_hash(path):
 
 
 def dirty_state(cwd):
-    """Mapa relpath -> {status, hash} de tudo que difere do HEAD/index."""
-    out = git(cwd, "status", "--porcelain=v1", "--untracked-files=all").stdout
+    """Mapa relpath -> {status, hash} de tudo que difere do HEAD/index.
+
+    `-z` emite paths verbatim separados por NUL — sem quoting C-style e sem
+    quebrar em nomes com newline/aspas (parsing por linha é forjável)."""
+    out = git(cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all").stdout
     state = {}
-    for line in out.splitlines():
-        if not line.strip():
+    fields = out.split("\0")
+    i = 0
+    while i < len(fields):
+        field = fields[i]
+        i += 1
+        if len(field) < 4 or not field.strip():
             continue
-        status, raw = line[:2], line[3:]
-        rel = raw.split(" -> ")[-1].strip('"')
+        status, rel = field[:2], field[3:]
+        # rename/cópia com -z: "XY <novo>\0<orig>\0" — descarta o campo orig
+        if "R" in status or "C" in status:
+            i += 1
         if rel.startswith(".agents/") or rel.startswith(".agents\\") or rel == ".agents":
             continue
         state[rel] = {"status": status, "hash": file_hash(Path(cwd) / rel)}
@@ -63,15 +72,57 @@ def dirty_state(cwd):
 
 def get_staged_blobs(cwd):
     blobs = {}
-    ls_out = git(cwd, "ls-files", "-s").stdout
-    for line in ls_out.splitlines():
-        meta, sep, path = line.partition("\t")
-        if not sep:
+    ls_out = git(cwd, "ls-files", "-s", "-z").stdout
+    for entry in ls_out.split("\0"):
+        meta, sep, path = entry.partition("\t")
+        if not sep or not path:
             continue
         parts = meta.split()
         if len(parts) >= 3:
-            blobs[path.strip('"')] = parts[1]
+            blobs[path] = parts[1]
     return blobs
+
+
+def _git_config_fingerprint(cwd):
+    """sha256 do `git config --local --list` ordenado — captura core.hooksPath,
+    remotes e aliases (superfícies de ataque invisíveis ao `git status`)."""
+    res = git(cwd, "config", "--local", "--list", check=False)
+    if res.returncode != 0:
+        return None
+    lines = sorted(l for l in res.stdout.splitlines() if l.strip())
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def _hooks_fingerprint(cwd):
+    """{nome: sha256} dos arquivos no diretório de hooks efetivo.
+
+    `git rev-parse --git-path hooks` já resolve core.hooksPath — cobre o caso
+    de hooks fora de .git/hooks."""
+    res = git(cwd, "rev-parse", "--git-path", "hooks", check=False)
+    if res.returncode != 0:
+        return None
+    raw = res.stdout.strip()
+    hooks_dir = Path(raw) if Path(raw).is_absolute() else (Path(cwd) / raw)
+    if not hooks_dir.is_dir():
+        return {}
+    out = {}
+    for p in sorted(hooks_dir.iterdir()):
+        if p.is_file() and not p.name.endswith(".sample"):
+            out[p.name] = file_hash(p)
+    return out
+
+
+def _ignored_fingerprint(cwd):
+    """{count, sha256} dos arquivos ignorados — visibilidade do que o
+    `git status` normal esconde (carga útil descartável via .gitignore)."""
+    res = git(cwd, "ls-files", "--others", "--ignored", "--exclude-standard", "-z", check=False)
+    if res.returncode != 0:
+        return None
+    paths = sorted(p for p in res.stdout.split("\0") if p.strip())
+    return {
+        "count": len(paths),
+        "sha256": hashlib.sha256("\0".join(paths).encode("utf-8", "replace")).hexdigest(),
+    }
 
 
 def capture_baseline(cwd):
@@ -86,6 +137,9 @@ def capture_baseline(cwd):
         "head": head,
         "dirty": dirty_state(cwd),
         "staged": get_staged_blobs(cwd),
+        "git_config_sha256": _git_config_fingerprint(cwd),
+        "hooks": _hooks_fingerprint(cwd),
+        "ignored": _ignored_fingerprint(cwd),
     }
 
 
@@ -136,7 +190,10 @@ def check_baseline(baseline, cwd, scope, allow_commit):
         elif git(cwd, "merge-base", "--is-ancestor", baseline["head"], "HEAD", check=False).returncode != 0:
             violations.append(f"Histórico reescrito: {baseline['head'][:8]} não é ancestral de HEAD")
         else:
-            touched = git(cwd, "diff", "--name-only", baseline["head"], "HEAD").stdout.splitlines()
+            touched = [
+                t for t in git(cwd, "diff", "--name-only", "-z", baseline["head"], "HEAD").stdout.split("\0")
+                if t.strip()
+            ]
             for rel in touched:
                 if rel.startswith(".agents/") or rel.startswith(".agents\\") or rel == ".agents":
                     continue
@@ -180,6 +237,20 @@ def check_baseline(baseline, cwd, scope, allow_commit):
             continue
         if rel not in baseline_dirty and not in_scope(rel, scope):
             violations.append(f"Mutação fora do escopo declarado: {rel} ('{now['status']}')")
+
+    # Superfícies fora do `git status` (A4): config local redireciona hooks,
+    # hooks executam código em qualquer git comando, ignorados escondem payload.
+    base_cfg = baseline.get("git_config_sha256")
+    if base_cfg is not None and _git_config_fingerprint(cwd) != base_cfg:
+        violations.append("Config local do Git diverge do baseline (core.hooksPath/remotes/aliases podem ter sido alterados)")
+    base_hooks = baseline.get("hooks")
+    if base_hooks is not None and (_hooks_fingerprint(cwd) or {}) != base_hooks:
+        violations.append("Hooks do Git adicionados/alterados/removidos desde o baseline — possível injeção de execução via git")
+    base_ign = baseline.get("ignored")
+    if base_ign:
+        now_ign = _ignored_fingerprint(cwd)
+        if now_ign and (now_ign["count"] != base_ign["count"] or now_ign["sha256"] != base_ign["sha256"]):
+            warnings.append(f"Conjunto de arquivos ignorados mudou desde o baseline ({base_ign['count']} -> {now_ign['count']} arquivos)")
     return violations, warnings
 
 

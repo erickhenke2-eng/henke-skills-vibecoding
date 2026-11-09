@@ -40,19 +40,36 @@ Regras:
 
 ```json
 {
+  "version": 1,
   "run_id": "uuid",
-  "modo": "ANALISAR|PLANEJAR|EXECUTAR",
-  "trilha": "T1..T6",
-  "skills_rodadas": ["..."],
-  "spec": {"path": "docs/designs/x.md", "sha256": "..."},
-  "code_snapshot": {"head": "sha", "baseline_dirty": ["arquivos pré-existentes"]},
-  "escopo_declarado": ["paths/símbolos"],
-  "checks": [{"cmd": "...", "exit": 0}],
-  "achados_pendentes": 0,
-  "capacidades": {"subagentes": true},
-  "review_status": "goldfish_certified|goldfish_unavailable|not_required"
+  "mode": "ANALISAR|PLANEJAR|EXECUTAR",
+  "archetype": "CARPINTEIRO|...",
+  "spec_path": "docs/designs/x.md",
+  "requires_human_auth": false,
+  "review_status": "pending|approved|not_required",
+  "mandatory_gates": ["scripts/metricas/hazard_scan.py", "..."],
+  "gates": {
+    "<gate>": {
+      "exit_code": 0,
+      "command": "python scripts/metricas/hazard_scan.py .",
+      "evidence_file": ".henke/evidence/<run_id>/<gate>.out",
+      "evidence_sha256": "...",
+      "recorded_at": "iso-8601"
+    }
+  },
+  "scope_amendments": [{"file": "...", "reason": "...", "amended_at": "..."}],
+  "approval_binding": {"head": "sha", "scope_sha256": "...", "bound_at": "..."},
+  "skills_rodadas": [{"name": "...", "sha256": "..."}],
+  "outcome": "verified|failed|blocked|unverified",
+  "reasons": []
 }
 ```
+
+Campos mecânicos efetivos em `scripts/run_state.py` — qualquer divergência entre
+este bloco e o código é bug do documento, não do código. `gates.<g>` sem
+`command`/`evidence_sha256` é **atestação manual** (`manual: true`) e nunca
+conta como portão físico. `capacidades.subagentes` vive no manifesto de
+instalação (`henke setup`), não na run.
 
 **Estados terminais derivados — dois eixos, nunca texto fixo:**
 

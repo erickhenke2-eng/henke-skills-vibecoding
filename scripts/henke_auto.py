@@ -446,6 +446,46 @@ def _git_head(repo_root: Path) -> str | None:
     return None
 
 
+# --- Redação de segredos (crouton R2): prompt/memória vão para disco em
+# .henke/runs/*.json (rastreado) e para o stdin do driver (processo externo).
+# Redigir ANTES de persistir/despachar protege os dois lados.
+_SECRET_REDACT_RES = (
+    re.compile(r"\bsk-(?:proj-|live-)?[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
+    re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{20,}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b"),
+    re.compile(
+        r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.*?"
+        r"-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
+        re.DOTALL,
+    ),
+    re.compile(r"(https?://[A-Za-z0-9._%-]+):([^/\s'\"@]{3,})@"),
+)
+
+
+def _redact_secrets(text: str) -> tuple[str, int]:
+    """Substitui padrões de credencial por <REDACTED-SECRET>; retorna (texto, n)."""
+    count = 0
+
+    def _bump(m):
+        nonlocal count
+        count += 1
+        return "<REDACTED-SECRET>"
+
+    def _bump_url(m):
+        nonlocal count
+        count += 1
+        return f"{m.group(1)}:<REDACTED-SECRET>@"
+
+    out = text
+    for pat in _SECRET_REDACT_RES[:-1]:
+        out = pat.sub(_bump, out)
+    out = _SECRET_REDACT_RES[-1].sub(_bump_url, out)
+    return out, count
+
+
 def _approval_fingerprint(prompt: str, route_snapshot: dict | None) -> str:
     """sha256 do escopo aprovado (prompt + route_snapshot normalizados)."""
     payload = json.dumps(
@@ -506,7 +546,9 @@ def _build_envelope(
         try:
             f = repo_root / ".henke" / fname
             if f.is_file():
-                memory[key] = f.read_text(encoding="utf-8", errors="replace")[-6000:]
+                memory[key], _ = _redact_secrets(
+                    f.read_text(encoding="utf-8", errors="replace")[-6000:]
+                )
         except OSError:
             pass
     if memory:
@@ -901,6 +943,9 @@ def run_auto(args: argparse.Namespace) -> int:
     if not prompt:
         print("ERRO: prompt vazio. Uso: henke auto \"<frase>\"", file=sys.stderr)
         return 2
+    prompt, n_redacted = _redact_secrets(prompt)
+    if n_redacted:
+        print(f"AVISO: {n_redacted} possível(is) segredo(s) redigido(s) do prompt antes de persistir/despachar.", file=sys.stderr)
     repo_root = Path(getattr(args, "repo", ".") or ".").resolve()
     if not repo_root.is_dir():
         print(f"ERRO: diretório --repo inexistente: {repo_root}", file=sys.stderr)

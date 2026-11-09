@@ -186,7 +186,9 @@ def _diff_pkg_keys(old_text: str | None, new_text: str | None) -> list[str]:
 
 def _toml_sections(text: str) -> dict:
     if tomllib is None:
-        return {}
+        # py<3.11 sem parser TOML: fail-closed — arquivo não-vazio que não
+        # podemos parsear conta como mutação, nunca como "sem diff".
+        return {"_unparsed": text} if text.strip() else {}
     try:
         return tomllib.loads(text)
     except Exception:

@@ -1054,14 +1054,32 @@ def _cmd_auto(
         timeout=timeout,
         resume=resume,
     )
+    # Onda 2: um único escritor por worktree — o lock cobre a run inteira,
+    # não só o read-modify-write de estado. Stale lock (crash) informa o
+    # caminho para remoção manual.
+    from scripts import run_state as _rs
+    lock_target = Path(repo).resolve() / ".henke" / "auto-writer"
     try:
-        return int(run_auto(ns))
+        with _rs._file_lock(lock_target, timeout=2.0):
+            return int(run_auto(ns))
+    except TimeoutError:
+        print(
+            "ERRO: outra run `auto`/`trigger` ativa nesta worktree (single-writer). "
+            "Se a run anterior morreu, remova '.henke/auto-writer.lock'.",
+            file=sys.stderr,
+        )
+        return 2
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 2
 
 
 def _cmd_trigger(kind: str, target: str | None, repo: Path, **kw) -> int:
-    """`henke trigger`: evento → prompt → mesma máquina `auto` (entrada não-interativa)."""
+    """`henke trigger`: evento → prompt → mesma máquina `auto` (entrada não-interativa).
+
+    Onda 2 (Kimi): triggers não-interativos nunca rodam policy=yolo e o
+    alvo de `file` é normalizado para um relpath dentro do repositório —
+    o caminho cru do evento nunca é interpolado no prompt."""
+    repo_root = Path(repo).resolve()
     if kind == "commit":
         prompt = (
             "revisa o último commit (HEAD) e corrige qualquer problema real "
@@ -1073,10 +1091,21 @@ def _cmd_trigger(kind: str, target: str | None, repo: Path, **kw) -> int:
         if not target:
             print("ERRO: `henke trigger file` exige um caminho alvo.", file=sys.stderr)
             return 2
-        prompt = f"revisa o arquivo '{target}' e corrige problemas reais encontrados"
+        tp = Path(target)
+        cand = tp.resolve() if tp.is_absolute() else (repo_root / tp).resolve()
+        try:
+            rel = cand.relative_to(repo_root).as_posix()
+        except ValueError:
+            print(f"ERRO: alvo do trigger fora do repositório: {target}", file=sys.stderr)
+            return 2
+        prompt = f"revisa o arquivo '{rel}' e corrige problemas reais encontrados"
     else:
         return 2
-    return _cmd_auto(prompt, repo, dry_run=False, **kw)
+    if kw.get("policy") != "strict":
+        if kw.get("policy") == "yolo":
+            print("AVISO: trigger não-interativo não aceita policy=yolo — usando 'balanced'.", file=sys.stderr)
+        kw["policy"] = "balanced"
+    return _cmd_auto(prompt, repo_root, dry_run=False, **kw)
 
 
 def _cmd_report(repo_root: Path, run_ref: str) -> int:
