@@ -25,13 +25,22 @@ _DEFAULT_MODELS = {
     "opencode": "opencode/deepseek-v4.1-flash-free",
 }
 
-# {prompt} obrigatório; {env} e {model} opcionais (expandem só se presentes)
+# {prompt} obrigatório; {env} e {model} opcionais (expandem só se presentes).
+# Marcado ✓verificado = sintaxe conferida contra o --help do CLI instalado.
 PRESETS: dict[str, list[str]] = {
     "opencode": ["opencode", "run", "-m", "{model}", "--auto", "-f", "{env}", "{prompt}"],
     "claude":   ["claude", "-p", "{prompt}", "--permission-mode", "acceptEdits"],
     "codex":    ["codex", "exec", "--full-auto", "{prompt}"],
     "gemini":   ["gemini", "-p", "{prompt}", "-y"],
     "aider":    ["aider", "--yes", "--no-auto-commits", "--message", "{prompt}"],
+    # ✓verificado: devin [OPTIONS] [PATH] [-- <PROMPT>]; 'accept-edits' aprova edições no workspace.
+    "devin":    ["devin", "--permission-mode", "accept-edits", "--", "{prompt}"],
+    # ✓verificado: agy -p (print mode não-interativo); accept-edits + skip-permissions p/ rodar sem prompt.
+    "agy":      ["agy", "-p", "{prompt}", "--mode", "accept-edits", "--dangerously-skip-permissions"],
+    # ✓binário existe: kiro-cli chat aceita mensagem posicional; --trust-all-tools p/ não promptar.
+    "kiro":     ["kiro-cli", "chat", "--no-interactive", "--trust-all-tools", "{prompt}"],
+    # não-verificado: sem CLI instalada; preset best-effort (falha honesto se inexistente).
+    "qoder":    ["qoder", "-p", "{prompt}"],
 }
 
 _INSTR = (
