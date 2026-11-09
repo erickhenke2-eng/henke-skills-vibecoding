@@ -332,7 +332,9 @@ def verify_ledger(
             if _rc.returncode != 0:
                 errors.append(f"INVALID-AGAINST: ref '{against}' não resolve para commit")
         res_added = subprocess.run(
-            ["git", "-c", "core.quotePath=false", "diff", "--name-status", against, "--"],
+            ["git", "-c", "core.quotePath=false",
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "diff", "--name-status", against, "--"],
             cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         if res_added.returncode == 0:

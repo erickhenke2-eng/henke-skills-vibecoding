@@ -40,7 +40,15 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
 
 def _norm(text: str) -> str:
     nfkd = unicodedata.normalize("NFKD", text.lower())
-    return "".join(c for c in nfkd if not unicodedata.combining(c))
+    # Além de marcas combinantes: caracteres de FORMATO/controle invisíveis
+    # (Cf/Cc/Cs/Co/Cn — ZWSP U+200B, ZWJ, WJ, BOM, soft-hyphen) quebram o \b
+    # do _has_signal sem mudar a aparência para o humano — "dele​ta" evade
+    # DESTRUCTIVE_VERBS (banca v7 — F-04).
+    return "".join(
+        c for c in nfkd
+        if not unicodedata.combining(c)
+        and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn")
+    )
 
 
 def _has_signal(text: str, sig: str) -> bool:
@@ -484,7 +492,9 @@ def _touched_files(repo_root: Path | None) -> list[str]:
         return []
     try:
         res = subprocess.run(
-            ["git", "-c", "core.quotePath=false", "status", "--porcelain", "-z"],
+            ["git", "-c", "core.quotePath=false",
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "status", "--porcelain", "-z"],
             cwd=str(repo_root), capture_output=True, timeout=5,
         )
         if res.returncode != 0:

@@ -139,9 +139,15 @@ def _now_iso() -> str:
 
 
 def _norm(text: str) -> str:
-    """Normalização idêntica à do henke_router (NFKD, minúsculas, sem acentos)."""
+    """Normalização idêntica à do henke_router (NFKD, minúsculas, sem acentos,
+    sem caracteres de formato/controle — ZWSP & cia não podem quebrar o \b
+    de _has_signal, banca v7 — F-04)."""
     nfkd = unicodedata.normalize("NFKD", text.lower())
-    return "".join(c for c in nfkd if not unicodedata.combining(c))
+    return "".join(
+        c for c in nfkd
+        if not unicodedata.combining(c)
+        and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn")
+    )
 
 
 def _has_signal(text: str, sig: str) -> bool:
@@ -214,6 +220,8 @@ def _patch_run(run_path: Path, mutator) -> dict:
     concorrente perde a aprovação num lost-update de read-modify-write."""
     with _file_lock(Path(run_path)):
         data = json.loads(Path(run_path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError(f"run file não é objeto JSON: {run_path}")
         mutator(data)
         derived, reasons = derive_run_outcome(data)
         data["outcome"] = derived
@@ -457,7 +465,9 @@ def _git_head(repo_root: Path) -> str | None:
     """HEAD atual do repo (None se sem git/sem commits) — vínculo do --resume."""
     try:
         res = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            ["git", "-C", str(repo_root),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "rev-parse", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=15,
         )
@@ -1033,6 +1043,19 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         print(f"ERRO no estágio route: {exc}", file=sys.stderr)
         return 2
     project = _detect_project(repo_root)
+    # .henke/PROJECT.json explícito do usuário SOBREPÕE a detecção — é a fonte
+    # documentada do test_cmd no relatório ("test_cmd ausente em
+    # .henke/PROJECT.json"). Malformado → detecção pura (fail-safe, como a
+    # policy); campo vazio/None não apaga o detectado.
+    _proj_file = repo_root / ".henke" / "PROJECT.json"
+    if _proj_file.is_file():
+        try:
+            _pj = json.loads(_proj_file.read_text(encoding="utf-8"))
+            if isinstance(_pj, dict):
+                project.update({k: v for k, v in _pj.items()
+                                if v is not None and v != ""})
+        except Exception:
+            pass
     policy_doc, policy_source = _load_policy(repo_root)
     policy_name = _effective_policy_name(policy_flag, policy_doc)
     if policy_name is None:
@@ -1136,16 +1159,11 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     # ---- estágio 2: garantias .henke/ + run ----
     henke_dir = repo_root / ".henke"
     (henke_dir / "runs").mkdir(parents=True, exist_ok=True)
-    project_path = henke_dir / "PROJECT.json"
-    if not project_path.is_file():
-        _write_project(repo_root, project)
-        try:
-            project = json.loads(project_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    policy_path = henke_dir / "POLICY.json"
-    if not policy_path.is_file():
-        _atomic_write_json(policy_path, POLICY_DEFAULT)
+    # Custódia: a pipeline NUNCA materializa .henke/PROJECT.json|POLICY.json —
+    # ambos constam na lista protegida do metaconfig, então cada primeiro
+    # `henke auto` num repo novo se auto-flagava como mutação não autorizada.
+    # Defaults vivem em memória (detect/_load_policy); o usuário que quiser
+    # customizar cria os arquivos explicitamente (e commita).
 
     # ---- estágio 3: autorização por escopo (M8) — ANTES de qualquer despacho ----
     prompt_norm = _norm(prompt)
@@ -1200,6 +1218,9 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         run_patch["approval_binding"] = {
             "head": _git_head(repo_root),
             "scope_sha256": _approval_fingerprint(prompt, route_snapshot, driver),
+            "driver": driver,
+            "run_id": run_id,
+            "repo": str(repo_root.resolve()),
             "bound_at": _now_iso(),
         }
     _patch_run(run_path, lambda d: d.update(run_patch))
@@ -1213,6 +1234,8 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             _run_now.get("spec_path"),
             _run_now.get("spec_sha256"),
             _run_now.get("head_start"),
+            repo_root=repo_root,
+            fields=_run_now,
         )
     except (OSError, ValueError):
         pass
@@ -1335,22 +1358,74 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         # (exit 1 manual reprova a run). .henke/ e artefatos de run não contam.
         if not is_analisar and isinstance(driver, str) and driver.startswith(("cmd:", "opencode", "agent:")):
             try:
+                # Âncora preferida: sidecar fora do repo — o JSON da run é
+                # editável pelo driver (worktree), o sidecar não está no caminho
+                # de escrita declarado (residual: driver com shell ainda pode
+                # adulterá-lo — mitigado pelos portões de conteúdo que não
+                # dependem de âncora).
                 _anchor = None
-                _rd = json.loads(run_path.read_text(encoding="utf-8"))
-                _anchor = _rd.get("head_start") or None
+                try:
+                    from scripts.run_state import load_anchor_sidecar as _las
+                    _sc = _las(run_path.stem, repo_root=repo_root)
+                    if isinstance(_sc, dict):
+                        _anchor = _sc.get("head_start") or None
+                except Exception:
+                    _sc = None
+                if _anchor is None:
+                    _rd = json.loads(run_path.read_text(encoding="utf-8"))
+                    _anchor = _rd.get("head_start") or None
                 from scripts.spec_drift import get_touched_files as _gtf
                 touched = set(_gtf(repo_root, against=_anchor))
+                # Normalização literal: NÃO usar lstrip("./") — devora o ponto de
+                # dotfiles (.env → env) e casa declarações erradas.
                 declared = {
-                    str(f).replace("\\", "/").strip().lstrip("./")
+                    str(f).replace("\\", "/").strip().removeprefix("./")
                     for f in declared_changes
                 }
                 undeclared = sorted(
                     t for t in touched
                     if t not in declared and not t.startswith(".henke/")
                 )
+                # Arquivo gitignored é INVISÍVEL ao diff (status -uall não lista
+                # ignorados): declarar `dist/x.js` ou `.env` permite esconder a
+                # edição de todos os portões baseados em diff — inconclusivo.
+                ignored_declared: list[str] = []
+                if declared:
+                    _ci = subprocess.run(
+                        ["git", "-c", "core.fsmonitor=false",
+                         "-c", "diff.external=", "check-ignore", "--stdin"],
+                        cwd=str(repo_root), capture_output=True, text=True,
+                        input="\n".join(sorted(declared)) + "\n",
+                        encoding="utf-8", errors="replace",
+                    )
+                    if _ci.returncode == 0:
+                        # Rastreado+modificado aparece em `touched` mesmo casando
+                        # pattern de ignore — só flag o que é invisível ao diff.
+                        ignored_declared = [
+                            l.strip() for l in _ci.stdout.splitlines()
+                            if l.strip() and l.strip() not in touched
+                        ]
             except Exception:
-                undeclared = []
-            if undeclared:
+                # Git indisponível → a auditoria NÃO rodou: atestação exit 2
+                # (erro honesto) reprova a run — nunca verde por omissão.
+                undeclared = None
+                ignored_declared = []
+            if ignored_declared:
+                record_gate(
+                    run_path, "files_changed_audit", 2,
+                    "FILES-CHANGED-IGNORED: declarados gitignored invisíveis ao "
+                    "diff — nenhum portão consegue verificá-los: "
+                    + ", ".join(ignored_declared[:10]),
+                    manual=True,
+                )
+            elif undeclared is None:
+                record_gate(
+                    run_path, "files_changed_audit", 2,
+                    "AUDIT-UNAVAILABLE: git falhou ao enumerar o diff real — "
+                    "files_changed não auditado (inconclusivo ≠ verde)",
+                    manual=True,
+                )
+            elif undeclared:
                 record_gate(
                     run_path, "files_changed_audit", 1,
                     "FILES-CHANGED-INCOMPLETE: driver editou sem declarar: "

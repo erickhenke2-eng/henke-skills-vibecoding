@@ -14,7 +14,8 @@ autorizado sobre o baseline, histórico reescrito ou worktree/branch violada.
 import argparse
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -31,7 +32,8 @@ DEFAULT_BASELINE = ".henke/gate-baseline.json"
 
 def git(cwd, *args, check=True):
     result = subprocess.run(
-        ["git", "-C", str(cwd), "-c", "core.quotePath=false", *args],
+        ["git", "-C", str(cwd), "-c", "core.quotePath=false",
+         "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if check and result.returncode != 0:
@@ -147,6 +149,13 @@ def in_scope(rel, patterns):
     is_win = sys.platform.startswith("win")
     rel_norm = "/" + str(rel).replace("\\", "/").strip("/")
     cmp_rel = rel_norm.lower() if is_win else rel_norm
+    # Glob ancorado à ESQUERDA (mesmo tradutor de spec_drift._scope_glob_re):
+    # PurePosixPath.match casa por SUFIXO — '/evil/docs/x.md' autorizaria
+    # contra escopo 'docs/*.md' (banca v7 — F-08).
+    try:
+        from scripts.spec_drift import _scope_glob_re
+    except ModuleNotFoundError:
+        from spec_drift import _scope_glob_re
     for pattern in patterns:
         pat_norm = "/" + str(pattern).replace("\\", "/").strip("/")
         cmp_pat = pat_norm.lower() if is_win else pat_norm
@@ -155,8 +164,11 @@ def in_scope(rel, patterns):
             cmp_parent = parent.lower() if is_win else parent
             if cmp_rel == cmp_parent or cmp_rel.startswith(cmp_parent + "/"):
                 return True
-        if PurePosixPath(cmp_rel).match(cmp_pat):
-            return True
+        try:
+            if _scope_glob_re(cmp_pat.lstrip("/")).match(cmp_rel.lstrip("/")):
+                return True
+        except re.error:
+            pass
         if pat_norm.endswith("/*"):
             parent = pat_norm[:-2]
             cmp_parent = parent.lower() if is_win else parent

@@ -102,14 +102,17 @@ def _config_dir() -> Path:
 
 def _binding_token(binding: dict) -> str:
     """Token determinístico do vínculo de aprovação: sha256 do binding
-    canônico (head + scope_sha256 + driver). O token é a CHAVE do arquivo de
-    aprovação local — só existe se `henke approve` rodou naquela máquina
-    sobre aquele exato binding."""
+    canônico (head + scope_sha256 + driver + run_id). run_id impede que duas
+    runs com binding idêntico compartilhem o mesmo comprovante local. O token
+    é a CHAVE do arquivo de aprovação local — só existe se `henke approve`
+    rodou naquela máquina sobre aquele exato binding."""
     canon = json.dumps(
         {
             "head": binding.get("head"),
             "scope_sha256": binding.get("scope_sha256"),
             "driver": binding.get("driver"),
+            "run_id": binding.get("run_id"),
+            "repo": binding.get("repo"),
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -131,6 +134,8 @@ def write_approval_token(binding: dict, approver: str, run_path: Path) -> Path |
                 "head": binding.get("head"),
                 "scope_sha256": binding.get("scope_sha256"),
                 "driver": binding.get("driver"),
+                "run_id": binding.get("run_id"),
+                "repo": binding.get("repo"),
             },
             "approved_by": approver,
             "approved_at": _now_iso(),
@@ -160,39 +165,119 @@ def verify_approval_token(run_data: dict) -> tuple[bool, str]:
     except (OSError, ValueError):
         return False, "APPROVAL-TOKEN-CORRUPT: token local ilegível"
     want = {"head": binding.get("head"), "scope_sha256": binding.get("scope_sha256"),
-            "driver": binding.get("driver")}
+            "driver": binding.get("driver"), "run_id": binding.get("run_id"),
+            "repo": binding.get("repo")}
     if stored != want:
         return False, "APPROVAL-TOKEN-MISMATCH: token local pertence a outro binding"
     return True, ""
 
 
+def _safe_run_id(run_id: str) -> str:
+    """Alfanumérico + `-_` — mesma forma que `init_run` grava no arquivo."""
+    return "".join(c for c in str(run_id) if c.isalnum() or c in ("-", "_")).strip()
+
+
+# Teto de tamanho para evidência de portão (re-hash no verify lê em chunks
+# mas não há razão legítima para uma saída de coletor passar disso).
+_EVIDENCE_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _evidence_manifest_path(run_id: str) -> Path:
+    safe = _safe_run_id(run_id) or "run"
+    return _config_dir() / "evidence-manifest" / f"{safe}.json"
+
+
+def _append_evidence_manifest(run_id: str, gate: str, evidence_file: str,
+                              evidence_sha256: str, command: str) -> None:
+    """Acrescenta a tríade ao manifesto LOCAL (~/.config/henke/evidence-manifest/).
+
+    A tríade gravada na run prova "existiu um arquivo com este sha"; o manifesto
+    prova "foi `record_gate` DESTA máquina que registrou". Uma run plantada por
+    clone (evidência + JSON fabricados no worktree) não tem manifesto local —
+    `verify_run_file` reprova cada tríade sem manifesto (EVIDENCE-UNMANIFESTED).
+    """
+    p = _evidence_manifest_path(run_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("run_id") != run_id:
+            data = {"run_id": run_id, "entries": {}}
+    except (OSError, ValueError):
+        data = {"run_id": run_id, "entries": {}}
+    entries = data.setdefault("entries", {})
+    if not isinstance(entries, dict):
+        entries = {}
+        data["entries"] = entries
+    entries[gate] = {
+        "evidence_file": evidence_file,
+        "evidence_sha256": evidence_sha256,
+        "command": command,
+        "recorded_at": _now_iso(),
+    }
+    _atomic_write_json(p, data)
+
+
+def _load_evidence_manifest(run_id: str) -> dict | None:
+    """Lê o manifesto LOCAL de evidência (None se ausente/inválido)."""
+    p = _evidence_manifest_path(run_id)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("run_id") != run_id:
+        return None
+    entries = data.get("entries")
+    return data if isinstance(entries, dict) else None
+
+
+# Campos de decisão do outcome que o driver pode adulterar no arquivo da run
+# para lavar o próprio veredito (banca v7 — F-03): o sidecar guarda o valor
+# de nascimento e verify_run_file re-ancora antes de confiar.
+_ANCHORED_FIELDS = ("mode", "mandatory_gates", "requires_human_auth",
+                    "gates_required")
+
+
 def write_anchor_sidecar(run_id: str, spec_path: str | None,
-                         spec_sha256: str | None, head_start: str | None) -> Path | None:
+                         spec_sha256: str | None, head_start: str | None,
+                         repo_root: Path | str | None = None,
+                         fields: dict | None = None) -> Path | None:
     """Cópia LOCAL das âncoras de nascimento da run (fora do repo). O driver
     pode editar .henke/runs/<id>.json e mover head_start/spec_sha256 — o
-    sidecar fora do alcance dele é a fonte preferida de run_gates."""
-    safe = "".join(c for c in str(run_id) if c.isalnum() or c in ("-", "_")).strip()
+    sidecar fora do alcance dele é a fonte preferida de run_gates. `repo`
+    impede replay cross-repo: sidecar de run_id idêntico em OUTRO repositório
+    não é aceito como âncora desta (M2). `fields` ancora os campos de decisão
+    (mode/mandatory_gates/requires_human_auth/gates_required) contra a
+    adulteração mid-run do arquivo (F-03)."""
+    safe = _safe_run_id(run_id)
     if not safe:
         return None
     try:
         d = _config_dir() / "anchors"
         d.mkdir(parents=True, exist_ok=True)
         p = d / f"{safe}.json"
-        _atomic_write_json(p, {
+        payload = {
             "run_id": safe,
+            "repo": str(Path(repo_root).resolve()) if repo_root is not None else None,
             "spec_path": spec_path,
             "spec_sha256": spec_sha256,
             "head_start": head_start,
             "created_at": _now_iso(),
-        })
+        }
+        if isinstance(fields, dict):
+            payload["fields"] = {
+                k: fields.get(k) for k in _ANCHORED_FIELDS if k in fields
+            }
+        _atomic_write_json(p, payload)
         return p
     except OSError:
         return None
 
 
-def load_anchor_sidecar(run_id: str) -> dict | None:
-    """Lê o sidecar local de âncoras (None se ausente/inválido)."""
-    safe = "".join(c for c in str(run_id) if c.isalnum() or c in ("-", "_")).strip()
+def load_anchor_sidecar(run_id: str, repo_root: Path | str | None = None) -> dict | None:
+    """Lê o sidecar local de âncoras (None se ausente/inválido/de outro repo).
+    `repo_root` fornecido + sidecar com `repo` divergente → None (replay
+    cross-repo não vale como âncora)."""
+    safe = _safe_run_id(run_id)
     if not safe:
         return None
     p = _config_dir() / "anchors" / f"{safe}.json"
@@ -200,14 +285,24 @@ def load_anchor_sidecar(run_id: str) -> dict | None:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) and data.get("run_id") == safe else None
+    if not isinstance(data, dict) or data.get("run_id") != safe:
+        return None
+    if repo_root is not None and data.get("repo"):
+        try:
+            if str(Path(repo_root).resolve()) != str(data["repo"]):
+                return None
+        except OSError:
+            return None
+    return data
 
 
 def _git_head(repo_root: Path) -> str | None:
     """HEAD atual do repo (None se git indisponível/sem commits — nunca inventa)."""
     try:
         res = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            ["git", "-C", str(repo_root),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "rev-parse", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=10,
         )
@@ -404,6 +499,23 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     declared = data.get("outcome")
     derived, reasons = derive_run_outcome(data)
 
+    # F-03: campos de decisão (mode/mandatory_gates/requires_human_auth/
+    # gates_required) podem ser regravados pelo driver no arquivo da run —
+    # a derivação sobre eles lavaria o veredito. Sidecar local re-ancora.
+    _sc_run_id = _safe_run_id(str(data.get("run_id") or p.stem))
+    _sc = load_anchor_sidecar(_sc_run_id, repo_root=p.parent.parent.parent)
+    _sc_fields = (_sc or {}).get("fields")
+    if isinstance(_sc_fields, dict) and _sc_fields:
+        _tampered_fields = [
+            k for k, v in _sc_fields.items() if data.get(k) != v
+        ]
+        if _tampered_fields:
+            return False, [
+                "SIDECAR-FIELD-TAMPERED: campo(s) de decisão divergem do "
+                "sidecar de nascimento (adulteração mid-run): "
+                + ", ".join(sorted(_tampered_fields))
+            ]
+
     # CONFLICT é bidirecional: declared=verified com derived≠verified é a forja
     # clássica; mas declared≠derived com derived=verified também é estado
     # contraditório (ex.: JSON editado para 'failed' sobre mecânica verde) —
@@ -426,10 +538,24 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     # com o sha real do arquivo verificaria — a tríade provaria "o arquivo
     # existe", não "um portão produziu esta saída" (banca v6).
     tampered: list[str] = []
-    run_id = str(data.get("run_id") or p.stem)
+    raw_run_id = str(data.get("run_id") or p.stem)
+    run_id = _safe_run_id(raw_run_id)
+    if run_id != raw_run_id:
+        # run_id com separadores/traversal fura o confinamento de evidência:
+        # `evidence_root` abaixo concatenaria ".."/drive absoluto para fora
+        # de .henke/evidence/ (banca v7 — C3).
+        return False, [
+            f"RUN-ID-INVALID: run_id '{raw_run_id}' contém caracteres "
+            "que violam a forma segura ([A-Za-z0-9_-]) — confinamento de "
+            "evidência não pode ser estabelecido"
+        ]
     # Confinamento a evidence/<run_id>/: evidência de OUTRA run não prova esta
     # (reuso cross-run), e o mesmo arquivo não pode ser saída de dois portões.
     evidence_root = (p.parent.parent / "evidence" / run_id).resolve()
+    # Manifesto LOCAL de tríades: prova que `record_gate` DESTA máquina
+    # registrou a entrada — run plantada por clone não tem manifesto.
+    manifest = _load_evidence_manifest(run_id)
+    m_entries = (manifest or {}).get("entries") or {}
     seen_evidence: dict[str, str] = {}
     for g_name, g_info in (data.get("gates") or {}).items():
         if not isinstance(g_info, dict):
@@ -437,6 +563,17 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
         ev = g_info.get("evidence_file")
         sha = g_info.get("evidence_sha256")
         if not ev or not sha:
+            continue
+        m = m_entries.get(g_name)
+        if (
+            not isinstance(m, dict)
+            or m.get("evidence_sha256") != sha
+            or str(m.get("evidence_file") or "") != str(ev)
+        ):
+            tampered.append(
+                f"EVIDENCE-UNMANIFESTED: {g_name} — tríade não consta no "
+                "manifesto local (run plantada/forjada ou gravada fora de record_gate)"
+            )
             continue
         ev_path = Path(str(ev))
         if not ev_path.is_absolute():
@@ -461,11 +598,36 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
         if not resolved.is_file():
             tampered.append(f"EVIDENCE-MISSING: {g_name} → '{ev}'")
             continue
-        actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        try:
+            if resolved.stat().st_size > _EVIDENCE_MAX_BYTES:
+                tampered.append(
+                    f"EVIDENCE-OVERSIZE: {g_name} → '{ev}' excede "
+                    f"{_EVIDENCE_MAX_BYTES} bytes"
+                )
+                continue
+            h = hashlib.sha256()
+            with open(resolved, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+            actual = h.hexdigest()
+        except OSError:
+            tampered.append(f"EVIDENCE-MISSING: {g_name} → '{ev}' ilegível")
+            continue
         if actual != sha:
             tampered.append(f"EVIDENCE-TAMPERED: {g_name} → sha diverge do gravado")
     if tampered:
         return False, tampered
+
+    # Aprovação exige o token LOCAL também no verify — sem ele, uma run
+    # plantada com review_status/approved_head forjados verificaria sem
+    # nenhuma aprovação real nesta máquina (banca v7 — A4). Só quando a run
+    # DECLARA aprovação: approval_binding existe em toda run fresca como
+    # forward-binding de --resume e não pode exigir token por si.
+    if (data.get("review_status") == "approved"
+            or data.get("approved_head") or data.get("approved_at")):
+        ok_tok, tok_msg = verify_approval_token(data)
+        if not ok_tok:
+            return False, [tok_msg]
 
     return True, []
 
@@ -480,7 +642,7 @@ def init_run(
     mandatory_gates: list[str] | None = None,
 ) -> Path:
     """Inicializa .henke/runs/<run_id>.json com escrita atômica."""
-    safe_id = "".join(c for c in run_id if c.isalnum() or c in ("-", "_")).strip()
+    safe_id = _safe_run_id(run_id)
     if not safe_id:
         raise ValueError("run_id inválido")
     run_path = Path(repo_root).resolve() / ".henke" / "runs" / f"{safe_id}.json"
@@ -526,6 +688,11 @@ def init_run(
     data["outcome"] = derived
     data["reasons"] = reasons
     _atomic_write_json(run_path, data)
+    # Sidecar de âncoras para TODA run — não só `henke auto`: sem ele, run_gates
+    # cai no fallback de ler head_start/spec_sha256 do arquivo de run mutável
+    # (banca v7 — A3). `fields` ancora os campos de decisão do outcome (F-03).
+    write_anchor_sidecar(safe_id, spec_path, spec_sha256, head_start,
+                         repo_root=repo_root, fields=data)
     return run_path
 
 
@@ -628,7 +795,18 @@ def record_gate(
             entry["evidence_file"] = str(evidence_path)
             entry["evidence_sha256"] = evidence_sha
             entry["evidence_source"] = str(source_resolved)
-        elif manual:
+            # Manifesto LOCAL: a tríade só é verificável se constar aqui — uma
+            # run plantada não tem manifesto na máquina da vítima.
+            try:
+                _append_evidence_manifest(
+                    run_id, gate_name, str(evidence_path), evidence_sha, str(command))
+            except OSError as exc:
+                raise ValueError(
+                    f"falha ao gravar manifesto de evidência local: {exc}"
+                ) from exc
+        if manual:
+            # manual=True marca atestação MESMO com tríade presente — sem isso
+            # a superfície CLI emitiria evidência "física" verificável (F-01).
             entry["manual"] = True
         gates[gate_name] = entry
         derived, reasons = derive_run_outcome(data)
@@ -726,6 +904,8 @@ def main(argv: list[str] | None = None) -> int:
     p_app = sub.add_parser("approve", help="Aprova manualmente uma run pendente de autorização humana")
     p_app.add_argument("run_file", type=Path, help="Caminho para .henke/runs/<id>.json")
     p_app.add_argument("--approver", default="human", help="Identificador do aprovador humano")
+    p_app.add_argument("--yes", "-y", action="store_true",
+                       help="Aprova sem confirmação interativa (obrigatório quando stdin não é TTY)")
 
     p_ver = sub.add_parser("verify", help="Verifica integridade e outcome derivado de uma run")
     p_ver.add_argument("run_file", nargs="?", type=Path, default=None, help="Caminho para .henke/runs/<id>.json")
@@ -771,13 +951,17 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 return 2
+            # F-01: a superfície CLI NUNCA emite tríade física — evidência
+            # física é domínio da pipeline (record_gate via API dentro de
+            # run_gates/_run_auto_inner). Um forjador local produziria aqui
+            # exatamente o artefato que verify valida.
             data = record_gate(
                 args.run_file, args.gate, args.exit_code, args.summary,
                 command=args.command, evidence_file=args.evidence_file,
-                manual=not has_cmd,
+                manual=True,
             )
-            tag = " (atestação manual — não conta como portão físico)" if not has_cmd else ""
-            print(f"OK: Gate '{args.gate}' (exit {args.exit_code}) registrado{tag} -> outcome='{data['outcome']}'")
+            print(f"OK: Gate '{args.gate}' (exit {args.exit_code}) registrado "
+                  f"(atestação manual — não conta como portão físico) -> outcome='{data['outcome']}'")
             return 0
 
         if args.subcmd == "amend-scope":
@@ -790,6 +974,31 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.subcmd == "approve":
+            # Aprovação nunca é cega (F-05): mostra exatamente o que está
+            # sendo autorizado — um repo plantado com run "pendente" +
+            # aprovação social transformaria `cmd:evil` em RCE via --resume.
+            _prev = _load_run(args.run_file)
+            _binding = _prev.get("approval_binding") if isinstance(_prev.get("approval_binding"), dict) else {}
+            print("=== RESUMO DA APROVAÇÃO ===")
+            print(f"  run_id          : {_prev.get('run_id')}")
+            print(f"  mode            : {_prev.get('mode')}")
+            print(f"  driver          : {_prev.get('driver') or _binding.get('driver') or '(não registrado)'}")
+            print(f"  prompt          : {str(_prev.get('prompt') or '(não registrado)')[:200]!r}")
+            print(f"  scope_paths     : {_prev.get('scope_paths')}")
+            print(f"  mandatory_gates : {_prev.get('mandatory_gates')}")
+            print(f"  requires_human  : {_prev.get('requires_human_auth')}")
+            if not args.yes:
+                if not sys.stdin.isatty():
+                    print(
+                        "ERRO: aprovação não-interativa exige --yes explícito "
+                        "(releia o resumo acima e aprove conscientemente).",
+                        file=sys.stderr,
+                    )
+                    return 2
+                resp = input("Aprovar esta run? [yes/NO] ").strip().lower()
+                if resp not in ("yes", "y"):
+                    print("Aprovação abortada pelo operador.")
+                    return 2
             data = approve_run(args.run_file, args.approver)
             print(f"OK: Run aprovada por '{args.approver}' -> outcome='{data['outcome']}'")
             return 0

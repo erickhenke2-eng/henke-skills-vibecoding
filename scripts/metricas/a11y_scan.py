@@ -64,7 +64,7 @@ _ARIA_HIDDEN_TRUE_RE = re.compile(
     flags=re.I,
 )
 _TABINDEX_MINUS_ONE_RE = re.compile(
-    r'\btabindex\s*=\s*(?:["\']-1["\']|\{\s*-1\s*\})',
+    r'\btabindex\s*=\s*(?:["\']-1["\']|\{\s*-1\s*\}|\{\s*["\']-1["\']\s*\})',
     flags=re.I,
 )
 _DISPLAY_NONE_STYLE_RE = re.compile(

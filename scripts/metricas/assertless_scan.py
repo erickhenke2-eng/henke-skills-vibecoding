@@ -372,6 +372,31 @@ def literal_value(node, consts, depth=0):
             return _UNKNOWN
     if isinstance(node, ast.Constant):
         return node.value if _small(node.value) else _UNKNOWN
+    if isinstance(node, ast.NamedExpr):
+        # `assert (ok := True)` — NamedExpr é binding + uso no mesmo nó (B3).
+        return literal_value(node.value, consts, depth + 1)
+    if isinstance(node, ast.Attribute):
+        # Laundering por atributo: `self.ok = True; assert self.ok` — o
+        # atributo é binding rastreado com chave pontilhada (B4).
+        dotted = _dotted_name(node)
+        if dotted is None:
+            return _UNKNOWN
+        hist = consts.get(dotted)
+        if not hist:
+            return _UNKNOWN
+        ln_use = getattr(node, "lineno", -1)
+        chosen = None
+        for bln, bval in hist:
+            if bln <= ln_use:
+                chosen = bval
+            else:
+                break
+        node = chosen
+        if node is None:
+            return _UNKNOWN
+        if isinstance(node, ast.Constant):
+            return node.value if _small(node.value) else _UNKNOWN
+        return _UNKNOWN
     if isinstance(node, (ast.Tuple, ast.List, ast.Set, ast.Dict)):
         if not is_literal(node):
             return _UNKNOWN
@@ -381,14 +406,37 @@ def literal_value(node, consts, depth=0):
             return _UNKNOWN
         return value if _small(value) else _UNKNOWN
     if isinstance(node, ast.BoolOp):
-        wants = isinstance(node.op, ast.Or)
-        for v in node.values[:-1]:
+        if isinstance(node.op, ast.Or):
+            # `X or True` é sempre truthy mesmo com X desconhecido — o or só
+            # pode ser falsy se TODOS os operandos forem falsy (B2).
+            saw_unknown = False
+            for v in node.values:
+                value = literal_value(v, consts, depth + 1)
+                if value is _UNKNOWN:
+                    saw_unknown = True
+                    continue
+                if bool(value):
+                    return value
+            return _UNKNOWN if saw_unknown else False
+        saw_unknown = False
+        for v in node.values:
             value = literal_value(v, consts, depth + 1)
             if value is _UNKNOWN:
-                return _UNKNOWN
-            if bool(value) is wants:
+                saw_unknown = True
+                continue
+            if not bool(value):
                 return value
-        return literal_value(node.values[-1], consts, depth + 1)
+        return _UNKNOWN if saw_unknown else True
+    if isinstance(node, ast.Compare) and len(node.ops) == 1:
+        # `assert x == x` / `x is x` / `x != x` — mesmo operando estrutural
+        # (Name/atributo/literal, nunca Call não-determinístico) decide sem
+        # conhecer o valor (B1).
+        l, r = node.left, node.comparators[0]
+        if ast.dump(l) == ast.dump(r) and not _contains_call(l):
+            same = isinstance(node.ops[0], (ast.Eq, ast.Is))
+            diff = isinstance(node.ops[0], (ast.NotEq, ast.IsNot))
+            if same or diff:
+                return same
     operands, apply = [], None
     if isinstance(node, ast.UnaryOp):
         operands, apply = [node.operand], _UNARY.get(type(node.op))
@@ -411,10 +459,35 @@ def literal_value(node, consts, depth=0):
     return result if _small(result) else _UNKNOWN
 
 
+def _dotted_name(node) -> str | None:
+    """`self.ok.flag` → 'self.ok.flag'; nada que não seja Name.Attribute.*."""
+    parts = []
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def _contains_call(node) -> bool:
+    """True se a subárvore contém Call/Subscript — operandos não-determinísticos
+    não são tautologia estrutural (`f() == f()` pode divergir)."""
+    return any(isinstance(n, (ast.Call, ast.Subscript, ast.Await, ast.Yield))
+               for n in ast.walk(node))
+
+
 def _bound_names(target):
-    """Every plain name this assignment target binds."""
+    """Every binding key this assignment target binds — nome puro E chave
+    pontilhada de atributo (`self.ok` → 'self.ok'; B4 laundering)."""
     if isinstance(target, ast.Name):
         yield target.id
+    elif isinstance(target, ast.Attribute):
+        dotted = _dotted_name(target)
+        if dotted is not None:
+            yield dotted
     elif isinstance(target, (ast.Tuple, ast.List)):
         for e in target.elts:
             yield from _bound_names(e)
@@ -617,14 +690,40 @@ def call_cannot_fail(name, args, scope):
     return False
 
 
-def can_propagate(body, helpers, b, scope):
+def can_propagate(body, helpers, b, scope, exc_name=None):
     """True when a broad handler body can still turn the test red.
 
     An `assert` counts only when it could fail: a constant-true assert is the
     one-token evasion off `except Exception: pass`, and it eats the failure
     identically — as does the same tautology written `self.assertTrue(True)`.
+    `exc_name` é o nome de `except ... as e`: a exceção capturada é sempre
+    truthy, logo `assert e` é tautologia que não propaga (B5). Um
+    `try: raise; except: pass` interno também não propaga — a raise está
+    contida se todos os handlers internos são broad-e-engolem.
     """
-    for node in own_scope(body):
+    if exc_name:
+        scope = scope._replace(
+            consts={**scope.consts,
+                    exc_name: [(-1, ast.Constant(value=True))]})
+    nodes = list(own_scope(body))
+    # Spans de corpo de try cujos handlers TODOS engolem — raises/asserts
+    # dentro desses spans estão contidos e não propagam.
+    swallowed = []
+    for node in nodes:
+        if isinstance(node, ast.Try) and node.handlers and node.body:
+            if all(is_broad(h.type, b)
+                   and not can_propagate(h.body, helpers, b, scope, h.name)
+                   for h in node.handlers):
+                swallowed.append((node.body[0].lineno,
+                                  getattr(node.body[-1], "end_lineno", -1)))
+
+    def _inside_swallowed(n):
+        ln = getattr(n, "lineno", -1)
+        return any(a <= ln <= bb for a, bb in swallowed)
+
+    for node in nodes:
+        if _inside_swallowed(node):
+            continue
         if isinstance(node, ast.Raise):
             return True
         if isinstance(node, ast.Assert):
@@ -680,7 +779,7 @@ def classify(fn, helpers, b, module_consts, class_consts):
             else:
                 real += 1
         elif isinstance(node, ast.ExceptHandler):
-            if not swallow and is_broad(node.type, b) and not can_propagate(node.body, helpers, b, scope):
+            if not swallow and is_broad(node.type, b) and not can_propagate(node.body, helpers, b, scope, node.name):
                 swallow = "broad except whose body cannot propagate — the test cannot go red"
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             if not swallow and any(suppresses_broadly(i.context_expr, b) for i in node.items):

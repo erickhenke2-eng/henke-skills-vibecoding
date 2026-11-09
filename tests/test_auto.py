@@ -188,7 +188,11 @@ class AutoDispatchTests(unittest.TestCase):
         for st in ("route", "authorize", "envelope", "dispatch", "gates"):
             self.assertIn(st, stages)
 
-    def test_policy_json_created_with_exact_schema(self):
+    def test_policy_efetiva_schema_and_no_protected_bootstrap(self):
+        """Custódia (banca v7): a pipeline NUNCA materializa .henke/POLICY.json
+        nem PROJECT.json — ambos estão na lista protegida do metaconfig e cada
+        primeiro `henke auto` se auto-flagava. O schema efetivo é gravado na
+        run como `policy_efetiva`; os arquivos só existem se o usuário criar."""
         result = json.dumps({"files_changed": ["x.py"], "notes": "ok"})
         with mock.patch.object(sys, "stdin", io.StringIO(result)), \
              mock.patch.object(henke_auto, "_invoke_gates", _fake_gates_ok), \
@@ -200,13 +204,13 @@ class AutoDispatchTests(unittest.TestCase):
             ))
         # stdin é driver simulado (resultado digitado, sem custódia) → unverified → rc 2
         self.assertEqual(rc, 2)
-        pol = json.loads((self.repo / ".henke" / "POLICY.json").read_text(encoding="utf-8"))
-        self.assertEqual(
-            set(pol.keys()), {"policy", "always_ask", "auto_approve", "allowed_cmds"},
-        )
-        self.assertEqual(pol["always_ask"], ["publish", "destructive", "metaconfig"])
-        self.assertEqual(pol["auto_approve"], ["non-publish"])
+        self.assertFalse((self.repo / ".henke" / "POLICY.json").exists(),
+                         "pipeline não pode materializar arquivo protegido do metaconfig")
+        self.assertFalse((self.repo / ".henke" / "PROJECT.json").exists())
+        run = sorted((self.repo / ".henke" / "runs").glob("*.json"))[-1]
+        pol = json.loads(run.read_text(encoding="utf-8"))["policy_efetiva"]
         self.assertIn(pol["policy"], ("strict", "balanced", "yolo"))
+        self.assertEqual(pol["always_ask"], ["publish", "destructive", "metaconfig"])
 
     def test_missing_driver_writes_envelope_and_exits_2(self):
         buf_out, buf_err = io.StringIO(), io.StringIO()

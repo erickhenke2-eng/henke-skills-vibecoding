@@ -95,12 +95,19 @@ _is_config_surface = _is_config_file
 # Regras de Pass 2 (strings preservadas, comentários removidos)
 _SECRET_PATTERNS = (
     ("OpenAI/API Key", re.compile(r"\bsk-(?:proj-|live-)?[A-Za-z0-9]{20,}\b")),
-    ("GitHub Token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
+    ("GitHub Token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})\b")),
     ("AWS Access Key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("Google API Key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
     ("Slack Token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{20,}\b")),
-    ("Private Key PEM", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----")),
+    ("Private Key PEM", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----")),
     ("Public Env Secret", re.compile(r"\b(?:VITE|NEXT_PUBLIC|PUBLIC)_[A-Z0-9_]*(?:SECRET|PRIVATE|API_KEY|TOKEN)\s*=\s*['\"][^'\"]{8,}['\"]")),
+    # Cobertura ampliada (banca v7 — A9): providers com formato estável.
+    ("Stripe Key", re.compile(r"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b")),
+    ("Anthropic Key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ("GitLab PAT", re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b")),
+    ("npm Token", re.compile(r"\bnpm_[A-Za-z0-9]{36,}\b")),
+    ("PyPI Token", re.compile(r"\bpypi-[A-Za-z0-9_-]{16,}\b")),
+    ("DigitalOcean Token", re.compile(r"\bdop_v1_[a-f0-9]{64}\b")),
 )
 _DOCUMENTED_EXAMPLE_KEYS = {
     "AKIAIOSFODNN7EXAMPLE",
@@ -124,21 +131,49 @@ _SQL_SPRINTF_RE = re.compile(
 # Regras de Pass 1 (código mascarado)
 _PY_SHELL_RE = re.compile(r"\bsubprocess\.(?:run|Popen|call|check_output|check_call)\s*\([^)]*\bshell\s*=\s*True\b|\bos\.system\s*\(")
 _JS_EXEC_RE = re.compile(r"(?<![.\w$])(?:child_process\s*\.\s*)?exec(?:Sync)?\s*\(\s*(?!['\"][^\n$'\"`]*['\"]\s*[,)])")
+# Sinks de shell/código que o lookbehind do _JS_EXEC_RE não pega (banca v7 —
+# A4): binding comum de child_process (`cp.exec`, `childProcess.spawn`),
+# bracket-notation (`cp["exec"]` — o membro vira espaço na máscara), chamadas
+# diretas de spawn/execFile, vm.*, strings em timers, require/import
+# dinâmico e `obj.eval(`.
+_JS_SHELL_OBJ_RE = re.compile(
+    # exec/execSync = modo shell SEMPRE — flag mesmo com argv literal.
+    r"\b(?:child_process|childProcess|cp|proc|child)\s*\.\s*"
+    r"(?:exec|execSync)\s*\("
+    # spawn/execFile/fork NÃO usam shell — só flag com argv dinâmico
+    # (literal 'ffmpeg' é a forma segura; na máscara o literal vira espaço e
+    # o primeiro char vivo é ',' — identificador ou '+' = dinâmico).
+    r"|\b(?:child_process|childProcess|cp|proc|child)\s*\.\s*"
+    r"(?:execFile|execFileSync|spawn|spawnSync|fork)\s*\(\s*(?:\+|[A-Za-z_$])"
+    r"|\b(?:child_process|childProcess|cp|proc|child)\s*\[\s*\]\s*\("
+    r"|\b(?:execFile|execFileSync|spawn|spawnSync)\s*\(\s*(?:\+|[A-Za-z_$])"
+    r"|\bvm\.(?:runIn|Script)\w*\s*\("
+    r"|\b(?:setTimeout|setInterval)\s*\(\s*[,)]"
+    r"|\brequire\s*\(\s*(?!\))"
+    r"|\bimport\s*\(\s*(?!\))"
+    r"|(?<![.\w$])eval\s*\(|\.eval\s*\("
+)
 _RS_SHELL_RE = re.compile(r'Command::new\s*\(\s*\)\s*|\bCommand::new\s*\([^)]*\)\s*\.\s*arg\s*\(\s*"(?:-c|/c)"')
 _WEAK_RAND_RE = re.compile(r"\b(?:Math\.random|random\.random|random\.randint|rand::random)\s*\(")
 _AUTH_TOKEN_WORDS_RE = re.compile(r"(?i)(?:token|secret|password|senha|session_?id|nonce|api_?key|jwt|csrf|auth_?code)")
 _FILE_SINK_RE = re.compile(
     r"\b(?:readFileSync|readFile|writeFileSync|writeFile|sendFile|createReadStream|"
-    r"send_file|send_from_directory|open)\s*\(\s*(?![`'\"])([A-Za-z_$][\w$.]*)"
+    # `open("prefixo/" + user)` — literal à esquerda vira espaço na máscara e
+    # o primeiro char vivo é '+' (banca v7 — A7: lookahead anti-literal
+    # pulava exatamente o caso de concatenação com variável).
+    r"send_file|send_from_directory|open)\s*\(\s*(?:(\+)|([A-Za-z_$][\w$.]*))"
     r"|\.(?:read_text|read_bytes|write_text|write_bytes)\s*\(\s*\)"
     r"|Path\s*\(\s*([A-Za-z_$][\w$.]*)\s*\)"
 )
 _EXT_SOURCE_RE = re.compile(r"\b(?:req|request|params|query|userPath|inputPath|filePathFromUser)\b")
-_PATH_SAFE_RE = re.compile(r"\b(?:resolve|normalize|basename|relpath|is_relative_to|safe_join|safe_member)\b")
+# Decoy-token: `let resolve;` não pode apagar o check — só conta se CHAMADO
+# (banca v7 — A8).
+_PATH_SAFE_RE = re.compile(r"\b(?:resolve|normalize|basename|relpath|is_relative_to|safe_join|safe_member)\s*\(")
 _UNBOUNDED_CONC_RE = re.compile(r"\b(?:Promise\.all|asyncio\.gather)\s*\(")
 _PROMISE_ALL_RE = _UNBOUNDED_CONC_RE
 _HEAVY_EXEC_RE = re.compile(r"\b(?:spawn|exec|execFile|subprocess|ffmpeg|ffprobe|runGpu)\b")
-_SEMAPHORE_RE = re.compile(r"\b(?:pLimit|p-limit|Semaphore|BoundedSemaphore|Bottleneck|runGpuBounded|maxConcurrency)\b")
+# Decoy-token: `const pLimit = 1` (sem chamar) não é semáforo (A8).
+_SEMAPHORE_RE = re.compile(r"\b(?:pLimit|Semaphore|BoundedSemaphore|Bottleneck|runGpuBounded)\s*\(|\bp-limit\b|\bmaxConcurrency\s*[:=]")
 _UNSAFE_DESER_RE = re.compile(
     r"(?<![.\w$])eval\s*\(|\bnew\s+Function\s*\(|\bpickle\.loads?\s*\("
     r"|\byaml\.(?:load|load_all|unsafe_load|full_load)\s*\("
@@ -148,7 +183,9 @@ _XSS_HTML_RE = re.compile(
     r"|\binsertAdjacentHTML\s*\(|\bdocument\.write\s*\(|\bv-html\s*=|\{@html\b"
     r"|\.html\s*\(\s*(?![`'\"]\s*\))"
 )
-_SANITIZER_RE = re.compile(r"(?i)\b(?:DOMPurify|sanitize|escapeHtml)\b")
+# Decoy-token: `let sanitize;` não isenta — a regra exige a CHAMADA do
+# sanitizador (banca v7 — A8).
+_SANITIZER_RE = re.compile(r"(?i)\b(?:DOMPurify|sanitize|escapeHtml)[\w$.]*\s*\(")
 _ELECTRON_INSEC_RE = re.compile(r"\bnodeIntegration\s*:\s*true\b|\bcontextIsolation\s*:\s*false\b")
 
 # Regras Wave 2.5: Multi-Cloud (AWS/GCP/Cloudflare/Docker) & Pentest Red Team
@@ -185,23 +222,28 @@ _AUTH_FN_CONTEXT_RE = re.compile(r"(?i)(?:auth|token|verify_?token|session|guard
 _FRAME_INTROSPECTION_RE = re.compile(
     r"sys\._getframe|inspect\.stack\s*\(|inspect\.currentframe|Error\.prepareStackTrace|new\s+Error\s*\([^)]*\)\s*\.stack")
 _IPC_REGISTER_RE = re.compile(r"\bipcMain\b|\bipcRenderer\b|\.handle\s*\(|\.invoke\s*\(")
-_DYN_INDEX_RE = re.compile(r"\b(?:handlers?|routes|actions|cmds?|fns|registry|obj)\s*\[\s*(?![\s'\"\d])\w+\s*\]")
+_DYN_INDEX_RE = re.compile(r"\b(?:handlers?|routes|actions|cmds?|fns|registry|obj|map|channels|commands)\s*\[\s*(?![\s'\"\d])\w+\s*\]")
 
 _SSRF_SINK_RE = re.compile(
-    r"""\b(?:fetch|axios\.(?:get|post|request)|got|requests\.(?:get|post|request)|httpx\.(?:get|post)|urlopen)\s*\(\s*(?![`'"])([A-Za-z_$][\w$.]*)"""
+    r"""\b(?:fetch|axios\.(?:get|post|request)|got|requests\.(?:get|post|request)|httpx\.(?:get|post)|urlopen)\s*\(\s*(?:[+]|[A-Za-z_$][\w$.]*)"""
 )
 _SSRF_SOURCE_RE = re.compile(
     r"\b(?:req|request)\.(?:query|params|body|headers)\b|\b(?:targetUrl|webhookUrl|callbackUrl|redirectUrl|userUrl|externalUrl|endpointUrl)\b"
 )
 _SSRF_SAFE_RE = re.compile(
-    r"\b(?:new\s+URL|urlparse|urlsplit|allowlist|whitelist|allowedHosts|isPrivateIP|ipaddress\.|hostname)\b"
+    # Decoy-token: `let whitelist;`/`let session;` não isentam (A8) —
+    # validadores contam por CHAMADA ou uso concreto.
+    r"\b(?:new\s+URL|urlparse|urlsplit|allowlist|whitelist|isPrivateIP)\s*\("
+    r"|\ballowedHosts\b|\bipaddress\.|\.hostname\b"
 )
 
 _IDOR_SINK_RE = re.compile(
     r"\.(?:findById|findByPk|findOne|findUnique|findOneAndUpdate|findOneAndDelete|findByIdAndUpdate|findByIdAndDelete|deleteById)\s*\([^)]*\b(?:req|request)\.(?:params|query|body)\b"
 )
 _IDOR_SAFE_RE = re.compile(
-    r"\b(?:req\.user|request\.user|userId|ownerId|tenantId|orgId|session|authorize|authorise|ability\.can|policy)\b|where\s*:\s*\{[^}]*\b(?:user|owner|tenant|org)"
+    r"\b(?:req\.user|request\.user|userId|ownerId|tenantId|orgId|ability\.can|policy)\b"
+    r"|\bsession\s*[.(\[]|\b(?:authorize|authorise)\s*\("
+    r"|where\s*:\s*\{[^}]*\b(?:user|owner|tenant|org)"
 )
 
 
@@ -402,15 +444,35 @@ _AST_SHELL_FUNCS = {
     "os.system", "os.popen",
     "asyncio.create_subprocess_shell",
     "commands.getoutput", "commands.getstatusoutput",
+    # Sempre-shell por definição (banca v7 — A5): getoutput/getstatusoutput
+    # rodam via shell, pty.spawn executa direto.
+    "subprocess.getoutput", "subprocess.getstatusoutput",
+    "pty.spawn", "os.posix_spawn", "os.posix_spawnp",
 }
 _AST_SUBPROC_SHELL_KW = {
     "subprocess.run", "subprocess.Popen", "subprocess.call",
     "subprocess.check_output", "subprocess.check_call",
+    # argv explícito para interpretador conta igual (A5):
+    "asyncio.create_subprocess_exec", "asyncio.create_subprocess_shell",
+    "os.execl", "os.execlp", "os.execle", "os.execlpe",
+    "os.execv", "os.execvp", "os.execve", "os.execvpe",
+    "os.spawnl", "os.spawnlp", "os.spawnle", "os.spawnlpe",
+    "os.spawnv", "os.spawnvp", "os.spawnve", "os.spawnvpe",
+    "pty.fork",
 }
 _AST_DESER_FUNCS = {
     "pickle.load", "pickle.loads", "dill.load", "dill.loads",
     "marshal.load", "marshal.loads", "shelve.open",
+    # Wrappers de pickle (banca v7 — A5): todos deserializam sem sanitizer.
+    "joblib.load", "torch.load", "pandas.read_pickle",
 }
+# getattr(mod, "system") / __import__("os") — ofuscação de import/acesso que
+# o resolve() por nome não enxerga (A5).
+_AST_DANGER_ATTRS = {
+    "system", "popen", "getoutput", "getstatusoutput", "spawn",
+    "load", "loads", "eval", "exec", "run", "Popen", "call",
+}
+_AST_DANGER_MODS = {"os", "subprocess", "pickle", "dill", "commands", "pty", "sys"}
 _AST_YAML_LOAD = {"yaml.load", "yaml.load_all"}
 # unsafe_load/full_load nunca são seguras — nem com kwarg (A7-banca)
 _AST_YAML_ALWAYS_UNSAFE = {"yaml.unsafe_load", "yaml.full_load"}
@@ -447,6 +509,39 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
             return f"{base}.{func.attr}" if base else func.attr
         return ""
 
+    # Bindings de "loader" por nome — `SafeLoader = yaml.Loader` (ou
+    # `class SafeLoader(yaml.Loader)`) é isenção falsificada por NOME
+    # (banca v7 — A5): `Loader=SafeLoader` só isenta se o nome resolve de
+    # fato para um loader seguro.
+    loader_map: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            bound = resolve(node.value)
+            if bound:
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        loader_map[t.id] = bound
+        elif isinstance(node, ast.ClassDef) and node.bases:
+            loader_map[node.name] = resolve(node.bases[0])
+
+    _SAFE_LOADERS = ("SafeLoader", "CSafeLoader", "UniqueKeyLoader")
+
+    def _loader_is_safe(expr) -> bool:
+        if isinstance(expr, ast.Name):
+            bound = loader_map.get(expr.id)
+            if bound is not None:
+                return bound.rsplit(".", 1)[-1] in _SAFE_LOADERS
+            return expr.id in _SAFE_LOADERS
+        if isinstance(expr, ast.Attribute):
+            return expr.attr in _SAFE_LOADERS
+        return False
+
+    # Funções locais — `subprocess.run(cmd, **helper())` é verificável se o
+    # helper retorna dict-literal sem a chave "shell" (senão o spread de
+    # kwargs esconderia `shell=True` do check por nome — banca v7 — A5).
+    local_fns = {n.name: n for n in ast.walk(tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
     out: list[tuple[str, int, str, str]] = []
     raw_lines = raw.splitlines()
     for node in ast.walk(tree):
@@ -474,11 +569,47 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
                         out.append(("SHELL-INJECTION", line, scope,
                                    f"{name}() invokes {exe} {flag} (AST)"))
                         continue
+            elif (node.args and isinstance(node.args[0], ast.Constant)
+                  and isinstance(node.args[0].value, str)
+                  and node.args[0].value.replace("\\", "/").rsplit("/", 1)[-1].lower() in _AST_SHELL_BINS):
+                # `os.execvp("sh", ...)` / `create_subprocess_exec("sh",...)`
+                # — argv0 escalar apontando direto pro shell (banca v7 — A5).
+                out.append(("SHELL-INJECTION", line, scope,
+                            f"{name}() executes shell binary {node.args[0].value!r} directly (AST)"))
+                continue
             for kw in node.keywords:
                 if kw.arg == "shell":
                     if isinstance(kw.value, ast.Constant) and not kw.value.value:
                         break  # shell=False explícito — seguro
                     out.append(("SHELL-INJECTION", line, scope, f"{name}(shell=...) truthy/dynamic (AST)"))
+                    break
+                if kw.arg is None:
+                    # `**{"shell": True}` / `**opts` / `**helper()` — spread
+                    # de kwargs que o check por nome não enxerga. Resolvido a
+                    # False = comprovadamente sem "shell"; None = não
+                    # verificável → flag conservador.
+                    _shell_in_spread = None
+                    if isinstance(kw.value, ast.Dict):
+                        for k, v in zip(kw.value.keys, kw.value.values):
+                            if (isinstance(k, ast.Constant) and k.value == "shell"):
+                                _shell_in_spread = not (
+                                    isinstance(v, ast.Constant) and not v.value
+                                )
+                    elif (isinstance(kw.value, ast.Call)
+                          and isinstance(kw.value.func, ast.Name)
+                          and kw.value.func.id in local_fns):
+                        rets = [r.value for r in ast.walk(local_fns[kw.value.func.id])
+                                if isinstance(r, ast.Return)]
+                        dict_rets = [r for r in rets if isinstance(r, ast.Dict)]
+                        if dict_rets and len(dict_rets) == len(rets):
+                            _shell_in_spread = any(
+                                isinstance(k, ast.Constant) and k.value == "shell"
+                                and not (isinstance(v, ast.Constant) and not v.value)
+                                for d in dict_rets for k, v in zip(d.keys, d.values))
+                    if _shell_in_spread is False:
+                        continue
+                    out.append(("SHELL-INJECTION", line, scope,
+                                f"{name}(**kwargs) — shell possivelmente oculto em spread (AST)"))
                     break
             continue
         if name in _AST_DESER_FUNCS:
@@ -494,16 +625,41 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
             # substring, e mencionar SafeLoader num comentário não torna a
             # chamada segura — F2 banca v6).
             safe_loader = any(
-                (kw.arg in ("Loader", "loader"))
-                and (
-                    (isinstance(kw.value, ast.Name) and kw.value.id in ("SafeLoader", "CSafeLoader", "UniqueKeyLoader"))
-                    or (isinstance(kw.value, ast.Attribute) and kw.value.attr in ("SafeLoader", "CSafeLoader", "UniqueKeyLoader"))
-                )
+                kw.arg in ("Loader", "loader") and _loader_is_safe(kw.value)
                 for kw in node.keywords
             )
             if safe_loader:
                 continue
             out.append(("UNSAFE-DESERIALIZE", line, scope, "yaml.load() without SafeLoader (AST)"))
+            continue
+        if name == "numpy.load":
+            # numpy.load é seguro por default (allow_pickle=False) — só flag
+            # quando o chamador religa pickle explicitamente (A5).
+            _pickle_on = any(
+                kw.arg == "allow_pickle"
+                and not (isinstance(kw.value, ast.Constant) and not kw.value.value)
+                for kw in node.keywords
+            )
+            if _pickle_on:
+                out.append(("UNSAFE-DESERIALIZE", line, scope,
+                            "numpy.load(allow_pickle=True) — deserialização arbitrária (AST)"))
+            continue
+        if name == "__import__":
+            if (node.args and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                    and node.args[0].value.split(".")[0] in _AST_DANGER_MODS):
+                out.append(("UNSAFE-DESERIALIZE", line, scope,
+                            f"__import__({node.args[0].value!r}) — import ofuscado de módulo perigoso (AST)"))
+            continue
+        if name == "getattr":
+            if (len(node.args) >= 2
+                    and isinstance(node.args[1], ast.Constant)
+                    and isinstance(node.args[1].value, str)
+                    and node.args[1].value in _AST_DANGER_ATTRS):
+                mod_res = resolve(node.args[0])
+                if mod_res.split(".")[0] in _AST_DANGER_MODS or not mod_res:
+                    out.append(("UNSAFE-DESERIALIZE", line, scope,
+                                f"getattr(..., {node.args[1].value!r}) — acesso ofuscado a sink (AST)"))
             continue
         if name in _AST_EXEC_BUILTINS:
             out.append(("UNSAFE-DESERIALIZE", line, scope, f"dynamic code execution via {name}() (AST)"))
@@ -530,9 +686,27 @@ def scan_file(path: Path, extra_exts: set | None = None,
         raw = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         try:
-            raw = path.read_text(encoding="latin-1")
+            _b = path.read_bytes()
         except OSError:
             return 0, [], True
+        # UTF-16 vira mojibake 'e\x00v\x00a\x00l\x00' em latin-1 — padrão
+        # nenhum casa e o arquivo conta como escaneado-verde (banca v7 — A11).
+        # BOM ou densidade de NUL no head ⇒ decodifica como UTF-16 de verdade.
+        _head = _b[:2048]
+        _nul_ratio = _head.count(b"\x00") / max(len(_head), 1)
+        if _b.startswith((b"\xff\xfe", b"\xfe\xff")) or _nul_ratio > 0.15:
+            try:
+                raw = _b.decode("utf-16")
+            except (UnicodeDecodeError, ValueError):
+                return 1, [("SUSPICIOUS-ENCODING",
+                            f"{path}:1", "file",
+                            "arquivo com BOM/NUL-bytes não decodificável — "
+                            "conteúdo não auditável (fail-closed)")], False
+        else:
+            try:
+                raw = _b.decode("latin-1")
+            except (UnicodeDecodeError, ValueError):
+                return 0, [], True
     except OSError:
         return 0, [], True
 
@@ -619,6 +793,10 @@ def scan_file(path: Path, extra_exts: set | None = None,
         for m in _JS_EXEC_RE.finditer(masked):
             lineno = masked.count("\n", 0, m.start()) + 1
             add("SHELL-INJECTION", lineno, f"line:{lineno}", "dynamic child_process.exec/execSync call")
+        for m in _JS_SHELL_OBJ_RE.finditer(masked):
+            lineno = masked.count("\n", 0, m.start()) + 1
+            add("SHELL-INJECTION", lineno, f"line:{lineno}",
+                f"dynamic process/code execution sink ({m.group(0).strip()[:40]})")
 
     for m in _UNSAFE_DESER_RE.finditer(masked):
         tok = m.group(0)
@@ -747,7 +925,7 @@ def scan_file(path: Path, extra_exts: set | None = None,
             for m_fs in _FILE_SINK_RE.finditer(fn_body):
                 # F8: ident capturado ligado a literal na MESMA função não é
                 # traversal (`const p = "x.txt"; writeFile(p, req.body)`).
-                ident = m_fs.group(1) or m_fs.group(2)
+                ident = m_fs.group(2) or m_fs.group(3)
                 if ident and re.search(
                     r"\b(?:const|let|var)?\s*" + re.escape(ident) + r"\s*=\s*['\"`]",
                     fn_body,
@@ -791,13 +969,18 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
             return []
         git_root = Path(top_res.stdout.strip())
         res = subprocess.run(
-            ["git", "-c", "core.quotePath=false", "ls-files"],
+            ["git", "-c", "core.quotePath=false",
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "ls-files"],
             cwd=str(git_root), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
         )
         if res.returncode != 0:
             return []
     except Exception:
-        return []
+        # Git indisponível ≠ repo limpo — falha de enumeração vira finding de
+        # infraestrutura (fail-closed, banca v7 — A10).
+        return [("ENV-CHECK-UNAVAILABLE", str(target), "git",
+                 "git ls-files falhou — arquivos sensíveis commitados não auditados")]
     out = []
     target_resolved = target.resolve()
     for rel in res.stdout.splitlines():
@@ -807,8 +990,10 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
             continue
         name = file_path.name.lower()
         if (
-            name in (".env", ".env.local", ".env.production", "id_rsa", "id_ed25519", "credentials.json")
-            or name.endswith((".pem", ".key", ".p12", ".kubeconfig"))
+            name.startswith(".env") or name.endswith(".env")
+            or name in ("id_rsa", "id_ed25519", "id_dsa", "id_ecdsa", "credentials.json")
+            or name.startswith(("id_rsa", "id_ed25519", "id_dsa", "id_ecdsa"))
+            or name.endswith((".pem", ".key", ".p12", ".pfx", ".kubeconfig", ".env"))
             or fnmatch.fnmatch(name, "*service*account*.json")
         ):
             out.append(("ENV-COMMITTED", str(file_path), "git-index", f"sensitive file '{rel_clean}' is tracked by git"))

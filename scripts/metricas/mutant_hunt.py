@@ -137,7 +137,8 @@ def extract_diff_lines(target: Path, git_ref: str = "HEAD") -> set[int] | None:
     t = Path(target).resolve()
     try:
         res = subprocess.run(
-            ["git", "diff", "-U0", git_ref, "--", str(t)],
+            ["git", "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "diff", "--no-ext-diff", "-U0", git_ref, "--", str(t)],
             cwd=str(t.parent),
             capture_output=True,
             text=True,
@@ -373,7 +374,8 @@ def _git_z(repo: Path, *args: str) -> list[str] | None:
     Confundir os dois converte repo corrompido em 'nada a verificar' (A6-banca)."""
     try:
         res = subprocess.run(
-            ["git", "-C", str(repo), *args],
+            ["git", "-C", str(repo),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
             capture_output=True, timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -393,8 +395,10 @@ def _auto_diff_targets(repo: Path, git_ref: str) -> list[tuple[Path, bool]] | No
     repo = repo.resolve()
     seen: set[str] = set()
     out: list[tuple[Path, bool]] = []
-    diff_list = _git_z(repo, "diff", "-z", "--name-only", git_ref, "--", "*.py")
-    others_list = _git_z(repo, "ls-files", "-z", "--others", "--exclude-standard", "--", "*.py")
+    # `:(icase)` — FS case-insensitive abriga `EVIL.PY` que é Python e escapa
+    # ao pathspec `*.py` case-sensitive (banca v7 — D1).
+    diff_list = _git_z(repo, "diff", "-z", "--name-only", git_ref, "--", ":(icase)*.py")
+    others_list = _git_z(repo, "ls-files", "-z", "--others", "--exclude-standard", "--", ":(icase)*.py")
     if diff_list is None or others_list is None:
         return None
     def _in_repo(p: Path) -> bool:
@@ -561,6 +565,26 @@ def main(argv: list[str] | None = None) -> int:
         print("ERRO: --test-cmd vazio.", file=sys.stderr)
         return 2
 
+    # --diff-against vira argumento do `git diff` — sem validação, uma ref
+    # `--output=C:/x` injeta flag e grava patch em caminho arbitrário (F-07).
+    if args.diff_against:
+        if args.diff_against.startswith("-"):
+            print(f"ERRO: --diff-against inválida (parece flag): {args.diff_against!r}",
+                  file=sys.stderr)
+            return 2
+        _v = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet",
+             f"{args.diff_against}^{{commit}}"],
+            cwd=str(target_path.parent), capture_output=True, timeout=10,
+        )
+        if _v.returncode != 0:
+            # Modo single-target: a ref só ESTREITA o escopo do arquivo alvo
+            # já nomeado — fora de um repo (ou ref inexistente) degrada para
+            # arquivo inteiro com aviso. Injeção de flag segue bloqueada acima;
+            # o caminho de portão (--auto-diff) mantém INVALID-AGAINST rígido.
+            print(f"AVISO: --diff-against não resolve neste diretório: "
+                  f"{args.diff_against!r} — caçando o arquivo inteiro.", file=sys.stderr)
+            args.diff_against = None
     diff_lines = extract_diff_lines(target_path, args.diff_against) if args.diff_against else None
 
     try:

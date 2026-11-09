@@ -20,7 +20,9 @@ repo_root = Path(__file__).resolve().parents[1]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from scripts.run_state import derive_run_outcome, verify_run_file
+from scripts.run_state import (
+    _append_evidence_manifest, derive_run_outcome, verify_run_file,
+)
 
 
 def _evidence(tmp: Path, name: str, content: str = "ok\n") -> tuple[str, str]:
@@ -35,6 +37,9 @@ def _evidence(tmp: Path, name: str, content: str = "ok\n") -> tuple[str, str]:
 
 def _triad(tmp: Path, gate: str, exit_code: int = 0) -> dict:
     ev, sha = _evidence(tmp, f"{gate}.out")
+    # Tríade só verifica com manifesto local (custódia v6): simula o que
+    # record_gate escreve fora do repo.
+    _append_evidence_manifest("r", gate, ev, sha, f"gate {gate}")
     return {
         "exit_code": exit_code,
         "command": f"gate {gate}",
@@ -178,6 +183,9 @@ class ForgedRunTests(unittest.TestCase):
         repo_file = self.t / "README.md"
         repo_file.write_text("estável\n", encoding="utf-8")
         sha = hashlib.sha256(repo_file.read_bytes()).hexdigest()
+        # Manifesto forjado apontando para o mesmo arquivo fora do confinamento —
+        # passa a checagem de manifesto e testa o confinamento isoladamente.
+        _append_evidence_manifest("r", "hazard_scan", str(repo_file), sha, "x")
         p = _run(self.t, {"hazard_scan": {
             "exit_code": 0, "command": "x",
             "evidence_file": str(repo_file), "evidence_sha256": sha,
@@ -191,6 +199,7 @@ class ForgedRunTests(unittest.TestCase):
         outside = self.t.parent / "fora.txt"
         outside.write_text("x\n", encoding="utf-8")
         sha = hashlib.sha256(outside.read_bytes()).hexdigest()
+        _append_evidence_manifest("r", "hazard_scan", str(outside), sha, "x")
         p = _run(self.t, {"hazard_scan": {
             "exit_code": 0, "command": "x",
             "evidence_file": str(outside), "evidence_sha256": sha,

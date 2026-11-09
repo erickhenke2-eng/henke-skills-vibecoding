@@ -82,10 +82,21 @@ def inventory(repo):
     if (repo / "docs" / "designs" / "TEMPLATE.md").is_file():
         files.append(Path("docs/designs/TEMPLATE.md"))
     for skill_dir in sorted(repo.glob("henke-*")):
-        if not skill_dir.is_dir():
+        # Symlinks do repo-fonte não são seguidos — clone hostil com
+        # `henke-x/leak -> ~/.ssh/config` instalaria conteúdo arbitrário na
+        # área de skills (banca v7 — F-10).
+        if skill_dir.is_symlink() or not skill_dir.is_dir():
             continue
+        repo_resolved = repo.resolve()
         for path in sorted(skill_dir.rglob("*")):
-            if not path.is_file():
+            # rglob pode descer em diretório-symlink (py<3.13): o resolved
+            # tem que continuar dentro do repo — senão é link para fora.
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                if repo_resolved not in path.resolve().parents:
+                    continue
+            except OSError:
                 continue
             rel = path.relative_to(repo)
             if any(part in IGNORED_DIRS for part in rel.parts):

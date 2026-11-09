@@ -54,6 +54,9 @@ _PKG_WATCHED_KEYS = (
     "workspaces", "main", "exports", "imports", "files", "type",
     # instalação condicionada / exec nativo (M5 banca v6)
     "gypfile", "os", "cpu", "libc", "engines", "config",
+    # hook-runners de commit/install — executam comandos arbitrários (C4 v7)
+    "husky", "lint-staged", "simple-git-hooks", "gitHooks", "nano-staged",
+    "precommit-hook", "packageManager",
 )
 # Qualquer arquivo cujo diff inteiro é sensível (não há seção segura)
 _WHOLE_FILE_SENSITIVE = (
@@ -78,6 +81,9 @@ _WHOLE_FILE_BASENAMES = {
     "lefthook.yml", "lefthook.yaml", "mise.toml", ".mise.toml",
     "Jenkinsfile", "bitbucket-pipelines.yml", "azure-pipelines.yml",
     "Brewfile", "Earthfile", ".gitlab-ci.yml",
+    # mutação invisível/exec via git: ignore esconde arquivos dos portões de
+    # diff; attributes+diff=driver executa comando externo (F-02/F-10 adj.)
+    ".gitignore", ".gitattributes", ".mailmap",
 }
 # requirements*.txt / Pipfile* / Dockerfile* — matching por padrão, não exato
 _WHOLE_FILE_GLOBS = (
@@ -85,10 +91,10 @@ _WHOLE_FILE_GLOBS = (
     ".env", ".env.*",
 )
 # Composite actions do GitHub também executam código
-_ACTION_FILE_RE = re.compile(r"(^|/|\\)\.github/actions/[^/\\]+/action\.ya?ml$")
-_WORKFLOW_DIR_RE = re.compile(r"(^|/|\\)\.github/workflows/[^/\\]+\.ya?ml$")
+_ACTION_FILE_RE = re.compile(r"(^|/|\\)\.github/actions/[^/\\]+/action\.ya?ml$", re.IGNORECASE)
+_WORKFLOW_DIR_RE = re.compile(r"(^|/|\\)\.github/workflows/[^/\\]+\.ya?ml$", re.IGNORECASE)
 # Outros CI dirs fora de .github (M5 banca v6)
-_ALT_CI_RE = re.compile(r"(^|/|\\)\.circleci/[^/\\]+\.ya?ml$|(^|/|\\)\.husky/[^/\\]+$")
+_ALT_CI_RE = re.compile(r"(^|/|\\)\.circleci/[^/\\]+\.ya?ml$|(^|/|\\)\.husky/[^/\\]+$", re.IGNORECASE)
 # Arquivos de custódia do próprio Henke — adulterá-los é metaconfig também
 # (defesa em profundidade: o spec_drift os veria como touched, mas só se a
 # spec existir e a âncora não tiver sido movida).
@@ -114,16 +120,28 @@ def _is_protected(rel: str) -> str | None:
     import fnmatch
     rel_n = _strip_dot_prefix(rel)
     base = rel_n.rsplit("/", 1)[-1]
-    if base == "package.json":
+    # Case-fold: em FS case-insensitive (Windows/macOS), 'Package.json' ou
+    # '.GITHUB/workflows/x.yml' SÃO os arquivos protegidos de verdade —
+    # comparação exata os deixava invisíveis (banca v7 — C3). Direção
+    # conservadora: flag extra em FS sensível a caso é falso-vermelho, não
+    # falso-verde.
+    base_l = base.lower()
+    rel_l = rel_n.lower()
+    if base_l == "package.json":
         return "package_json"
-    if base in ("pyproject.toml", "Cargo.toml"):
+    if base_l in ("pyproject.toml", "cargo.toml"):
         return "toml"
-    if rel_n in _WHOLE_FILE_SENSITIVE or rel_n in _HENKE_CUSTODY or base in _WHOLE_FILE_BASENAMES:
+    if (
+        rel_l in {s.lower() for s in _WHOLE_FILE_SENSITIVE}
+        or rel_l in {s.lower() for s in _HENKE_CUSTODY}
+        or base_l in {s.lower() for s in _WHOLE_FILE_BASENAMES}
+    ):
         return "whole_file"
-    if any(fnmatch.fnmatchcase(base, pat) or fnmatch.fnmatchcase(rel_n, pat)
+    if any(fnmatch.fnmatchcase(base_l, pat.lower()) or fnmatch.fnmatchcase(rel_l, pat.lower())
            for pat in _WHOLE_FILE_GLOBS):
         return "whole_file"
-    if _WORKFLOW_DIR_RE.search(rel_n) or _ACTION_FILE_RE.search(rel_n) or _ALT_CI_RE.search(rel_n):
+    if (_WORKFLOW_DIR_RE.search(rel_n) or _ACTION_FILE_RE.search(rel_n)
+            or _ALT_CI_RE.search(rel_n)):
         return "whole_file"
     return None
 
@@ -133,9 +151,10 @@ _is_metaconfig = _is_protected
 
 def _git(repo: Path, *args) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", "-c", "core.quotePath=false", *args],
+        ["git", "-c", "core.quotePath=false",
+         "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
         cwd=str(repo), capture_output=True, text=True,
-        encoding="utf-8", errors="replace",
+        encoding="utf-8", errors="replace", timeout=30,
     )
 
 

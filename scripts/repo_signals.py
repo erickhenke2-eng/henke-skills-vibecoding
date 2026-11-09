@@ -24,6 +24,7 @@ Exit: 0 ok · 2 uso/IO/entrada malformada (fail closed; nunca fabrica sinal).
 import argparse
 import ast
 import json
+import math
 import os
 import subprocess
 import sys
@@ -108,7 +109,9 @@ def iter_functions(path: Path):
 
 
 def cmd_churn(args):
-    cmd = ["git", "-C", args.repo, "log", "--no-merges", "--numstat",
+    cmd = ["git", "-C", args.repo,
+           "-c", "core.fsmonitor=false", "-c", "diff.external=",
+           "log", "--no-merges", "--numstat",
            "--format=__C__%H"]
     if args.order == "oldest-first":
         cmd.append("--reverse")
@@ -152,11 +155,17 @@ def load_coverage(path):
             if line.startswith("SF:"):
                 cur = line[3:].strip()
             elif line.startswith("LF:") and cur:
-                lf = int(line[3:].strip() or 0)
+                try:
+                    lf = int(line[3:].strip() or 0)
+                except ValueError:
+                    lf = 0
             elif line.startswith("LH:") and cur:
-                lh = int(line[3:].strip() or 0)
-                if lf:
-                    out[Path(cur).as_posix()] = round(100 * lh / lf, 2)
+                try:
+                    lh = int(line[3:].strip() or 0)
+                except ValueError:
+                    lh = 0
+                if lf > 0:
+                    out[Path(cur).as_posix()] = max(0.0, min(100.0, round(100 * lh / lf, 2)))
                 cur = None
         return out
     try:
@@ -180,11 +189,17 @@ def load_coverage(path):
         if pct is None:
             # coverage-summary.json: lines.pct / statements.pct
             pct = (fdata.get("lines") or fdata.get("statements") or {}).get("pct")
+        if isinstance(pct, bool):
+            continue
         if isinstance(pct, (int, float)):
+            # NaN/Infinity (aceitos por json.loads) envenenariam todo cálculo
+            # downstream de cobertura — rejeita e clampa a faixa válida.
+            if not math.isfinite(pct):
+                continue
             key = Path(fpath).as_posix()
             if fpath == "total":
                 continue
-            out[key] = float(pct)
+            out[key] = max(0.0, min(100.0, float(pct)))
     return out
 
 

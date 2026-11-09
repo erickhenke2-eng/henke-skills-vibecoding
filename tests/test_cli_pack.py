@@ -46,7 +46,7 @@ class CliPackTests(unittest.TestCase):
 
     # ------------------------------------------------------------------
     def test_run_init_record_gate_verify_roundtrip(self):
-        """run init -> verify (blocked=1) -> record-gate ok -> verify (verified=0)."""
+        """run init -> verify (blocked=1) -> record-gate (atestação) -> verify segue 1."""
         code, out, err = run_cli(["run", "init", "--repo", str(self.repo), "--run-id", "t1"])
         self.assertEqual(code, 0, err)
         run_file = self.repo / ".henke" / "runs" / "t1.json"
@@ -65,8 +65,10 @@ class CliPackTests(unittest.TestCase):
         ])
         self.assertEqual(code, 0, err)
 
+        # F-01: a superfície CLI só emite atestação — tríade física é domínio
+        # da pipeline; verify não libera por record-gate manual.
         code, out, err = run_cli(["run", "verify", str(run_file)])
-        self.assertEqual(code, 0, out + err)
+        self.assertEqual(code, 1, out + err)
 
     # ------------------------------------------------------------------
     def test_report_produz_as_5_secoes(self):
@@ -114,8 +116,10 @@ class CliPackTests(unittest.TestCase):
         self.assertEqual(code, 1, "atestação manual NUNCA pode liberar verify")
 
     # ------------------------------------------------------------------
-    def test_record_gate_com_evidencia_conta_e_destrava_verify(self):
-        """Caminho físico: --command + --evidence-file → conta como portão executado."""
+    def test_record_gate_com_evidencia_e_atestacao_mesmo_com_triade(self):
+        """F-01: mesmo com --command/--evidence-file, o CLI grava atestação
+        manual (custódia copia a evidência, mas a entrada não conta como
+        portão físico — mint físico é domínio da pipeline)."""
         run_cli(["run", "init", "--repo", str(self.repo), "--run-id", "e1"])
         run_file = self.repo / ".henke" / "runs" / "e1.json"
         ev = self.repo / "ev.out"
@@ -130,10 +134,8 @@ class CliPackTests(unittest.TestCase):
         self.assertEqual(code, 0)
         data = json.loads(run_file.read_text(encoding="utf-8"))
         entry = data["gates"]["hazard_scan"]
-        self.assertNotIn("manual", entry)
-        self.assertEqual(entry["command"], "python hazard_scan.py")
-        # Custódia: a evidência é copiada p/ .henke/evidence/<run_id>/<gate>__<nome>
-        # — o caminho gravado é o confinado, não o arquivo solto do caller.
+        self.assertTrue(entry.get("manual"), "CLI nunca emite tríade física")
+        # Custódia segue confinando a evidência para bookkeeping íntegro.
         confined = Path(entry["evidence_file"])
         ev_root = (self.repo / ".henke" / "evidence" / "e1").resolve()
         self.assertIn(ev_root, confined.resolve().parents)
@@ -141,7 +143,7 @@ class CliPackTests(unittest.TestCase):
         self.assertIn("evidence_sha256", entry)
 
         code, _, _ = run_cli(["run", "verify", str(run_file)])
-        self.assertEqual(code, 0)
+        self.assertEqual(code, 1, "atestação não libera verify")
 
     # ------------------------------------------------------------------
     def test_exec_timeout_flag_e_project_json(self):

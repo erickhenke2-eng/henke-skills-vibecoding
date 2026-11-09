@@ -130,14 +130,47 @@ def _git_paths_z(git_root: Path, *args: str) -> list[str]:
     """Paths de um comando git com saída `-z` (NUL-safe): nomes com \\n/aspas/
     espaços-nas-pontas não forjam nem se quebram em pseudo-paths."""
     res = subprocess.run(
-        ["git", "-c", "core.quotePath=false", *args],
-        cwd=str(git_root), capture_output=True, check=True,
+        ["git", "-c", "core.quotePath=false",
+         # Repo hostil pode configurar core.fsmonitor=<cmd> (executado pelo
+         # status/diff) e diff.external/textconv (executado em diffs com
+         # patch) — neutralizado para TODA enumeração (banca v7 — F-02).
+         "-c", "core.fsmonitor=false", "-c", "diff.external=",
+         *args],
+        cwd=str(git_root), capture_output=True, check=True, timeout=60,
     )
     return [p for p in res.stdout.decode("utf-8", errors="replace").split("\0") if p]
 
 
 def get_touched_files(git_root: Path, against: str | None = None, active_spec: Path | None = None) -> set[str]:
     """Obtém a lista de arquivos modificados e untracked no repositório."""
+    # Ref-âncora validada AQUI também: o files_changed_audit chama esta função
+    # direto com a âncora do sidecar — `--cached`/`--output=...` injetado no
+    # argv do git mudaria a semântica do diff (banca v7 — C2). check_spec_drift
+    # valida antes de chegar aqui; esta é a trava do consumidor direto.
+    if against:
+        if against.startswith("-"):
+            raise ValueError(f"ref '--against' inválida (parece flag): {against!r}")
+        vres = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{against}^{{commit}}"],
+            cwd=str(git_root), capture_output=True, timeout=30,
+        )
+        if vres.returncode != 0:
+            raise ValueError(f"ref '--against' não resolve para commit: {against!r}")
+
+    # Arquivos com assume-unchanged/skip-worktree são INVISÍVEIS ao diff/status:
+    # `git update-index --assume-unchanged package.json` + editar = mutação
+    # que nenhum portão de diff enxerga (banca v7 — C1). `ls-files -v` marca
+    # tag minúscula (assume-unchanged) ou 'S' (skip-worktree) → fail-closed.
+    blind = [
+        e[2:] for e in _git_paths_z(git_root, "ls-files", "-v", "-z")
+        if e[:1] and (e[:1].islower() or e[:1] == "S")
+    ]
+    if blind:
+        raise RuntimeError(
+            "GIT-BLIND-FILES: assume-unchanged/skip-worktree deixa arquivos "
+            "invisíveis ao diff — " + ", ".join(sorted(blind)[:10])
+        )
+
     touched = set()
 
     # 1+2. Modificados e staged (diff worktree + --cached), NUL-safe

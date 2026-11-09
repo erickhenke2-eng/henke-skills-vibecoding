@@ -77,13 +77,26 @@ def mask_c_like(text: str, lang: str = "") -> str:
                 if out[k] != "\n":
                     out[k] = " "
             i = j + 2
-        elif (lang not in ("rs", "go")) and text.startswith("<!--", i):
-            j = text.find("-->", i + 4)
-            j = n - 3 if j == -1 else j
-            for k in range(i, j + 3):
-                if out[k] != "\n":
+        elif text.startswith("<!--", i):
+            if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+                # Annex B: `<!--` em JS é comentário de LINHA — tratá-lo como
+                # bloco até `-->` mascara o resto do arquivo (falso-verde A1).
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                for k in range(i, j):
                     out[k] = " "
-            i = j + 3
+                i = j
+            elif lang not in ("rs", "go"):
+                j = text.find("-->", i + 4)
+                j = n - 3 if j == -1 else j
+                for k in range(i, j + 3):
+                    if out[k] != "\n":
+                        out[k] = " "
+                i = j + 3
+            else:
+                if not c.isspace():
+                    prev = c
+                i += 1
         elif c in "'\"":
             # 'a/'static é lifetime — existe só em Rust. Fora de rs, ' é string.
             if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
@@ -224,13 +237,26 @@ def mask_comments_only(text: str, lang: str = "") -> str:
                 if out[k] != "\n":
                     out[k] = " "
             i = j + 2
-        elif (lang not in ("rs", "go")) and text.startswith("<!--", i):
-            j = text.find("-->", i + 4)
-            j = n - 3 if j == -1 else j
-            for k in range(i, j + 3):
-                if out[k] != "\n":
+        elif text.startswith("<!--", i):
+            if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                for k in range(i, j):
                     out[k] = " "
-            i = j + 3
+                i = j
+            elif lang not in ("rs", "go"):
+                j = text.find("-->", i + 4)
+                j = n - 3 if j == -1 else j
+                for k in range(i, j + 3):
+                    if out[k] != "\n":
+                        out[k] = " "
+                i = j + 3
+            else:
+                i += 1
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs") and _regex_ctx_ok(text, i):
+            # Regex literal: pula sem mascarar — `/*` dentro não pode abrir
+            # comentário (A2: antes, máscara comia até EOF).
+            i = _regex_end(text, i)
         elif c in "'\"`":
             if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
                 i += 1
@@ -308,8 +334,14 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
             spans.append(CommentSpan(sl, sc, el, ec, text[i:end_pos]))
             i = end_pos
         elif can_html_comment and text.startswith("<!--", i):
-            j = text.find("-->", i + 4)
-            end_pos = n if j == -1 else j + 3
+            if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+                # Annex B: comentário de LINHA em JS — o span não pode engolir
+                # o resto do arquivo (A1).
+                j = text.find("\n", i)
+                end_pos = n if j == -1 else j
+            else:
+                j = text.find("-->", i + 4)
+                end_pos = n if j == -1 else j + 3
             sl, sc = _offset_to_pos(i)
             el, ec = _offset_to_pos(end_pos)
             spans.append(CommentSpan(sl, sc, el, ec, text[i:end_pos]))
@@ -400,8 +432,12 @@ def _template_end(text, i):
 # `=>` e operadores já são cobertos pelo conjunto de chars.
 _REGEX_KEYWORDS = frozenset({
     "return", "typeof", "case", "in", "of", "throw", "void", "new",
-    "delete", "do", "else", "instanceof", "yield", "await",
+    "delete", "do", "else", "instanceof", "yield", "await", "default",
 })
+
+# `)` que fecha parêntese de CONTROLE DE FLUXO abre posição de statement —
+# `if (x) /re/` é regex. `)` de chamada comum (`f() /re/`) é divisão.
+_REGEX_PAREN_KW = frozenset({"if", "for", "while", "switch", "catch", "with"})
 
 
 def _regex_ctx_ok(text: str, i: int) -> bool:
@@ -414,6 +450,29 @@ def _regex_ctx_ok(text: str, i: int) -> bool:
     c = text[j]
     if c in "(,=:[!&|?{};+-*/%^~<>\n":
         return True
+    if c == ")":
+        # `if (x) /re/` — `)` de parêntese de keyword de controle abre statement:
+        # regex. `f(a) /re/` — `)` de chamada: divisão. Retrocede ao `(` de
+        # abertura e exige a keyword de controle.
+        depth = 0
+        k = j
+        while k >= 0:
+            if text[k] == ")":
+                depth += 1
+            elif text[k] == "(":
+                depth -= 1
+                if depth == 0:
+                    break
+            k -= 1
+        if k <= 0:
+            return False
+        m = k - 1
+        while m >= 0 and text[m] in " \t":
+            m -= 1
+        e = m
+        while m >= 0 and (text[m].isalnum() or text[m] in "_$"):
+            m -= 1
+        return text[m + 1:e + 1] in _REGEX_PAREN_KW
     if c.isalnum() or c in "_$":
         k = j
         while k >= 0 and (text[k].isalnum() or text[k] in "_$"):

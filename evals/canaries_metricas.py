@@ -1127,12 +1127,15 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         ok_r_bad, errs_r_bad = verify_run_file(m78_bad)
         # Run íntegra = tríade de evidência física de verdade (exit_code:0 cru é
         # atestação — depois do endurecimento banca v5, não verifica mais) E a
-        # evidência sob custódia de .henke/evidence/<run_id>/ (confinamento v6).
+        # evidência sob custódia de .henke/evidence/<run_id>/ (confinamento v6)
+        # E a tríade no manifesto local fora do repo (custódia v6).
+        from scripts.run_state import _append_evidence_manifest
         (t / ".henke" / "evidence" / "r2").mkdir(parents=True)
         (t / ".henke" / "runs").mkdir(parents=True)
         m78_ev = t / ".henke" / "evidence" / "r2" / "hazard_scan.out"
         m78_ev.write_text("scan limpo\n", encoding="utf-8")
         m78_sha = hashlib.sha256(m78_ev.read_bytes()).hexdigest()
+        _append_evidence_manifest("r2", "hazard_scan", str(m78_ev), m78_sha, "hazard_scan .")
         m78_ok = t / ".henke" / "runs" / "run_ok.json"
         m78_ok.write_text(json.dumps({
             "run_id": "r2",
@@ -1261,8 +1264,10 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         RS_SCRIPT = repo_root / "scripts" / "run_state.py"
         c84, o84 = run(RS_SCRIPT, "record-gate", str(m84_run),
                        "--gate", "stage_dispatch", "--exit-code", "0")
+        # Custódia v6: evidência plantada sem manifesto local → UNMANIFESTED
+        # (rejeição primária; fora-do-confinamento seria a segunda linha).
         expect("Canário M84: verify bloqueia evidência fora do confinamento e record-gate rejeita nome reservado",
-               not ok84 and any("EVIDENCE-OUTSIDE-SCOPE" in e for e in errs84) and c84 == 2,
+               not ok84 and any("EVIDENCE-UNMANIFESTED" in e or "EVIDENCE-OUTSIDE-SCOPE" in e for e in errs84) and c84 == 2,
                f"verify={errs84} cli={c84}:{o84[-120:]}")
 
     return passed, total, reports

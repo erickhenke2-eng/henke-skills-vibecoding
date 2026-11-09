@@ -524,7 +524,9 @@ def _git_staged_files(repo_root: Path) -> list[str] | None:
     """
     try:
         res = subprocess.run(
-            ["git", "-C", str(repo_root), "diff", "--cached", "--name-only", "-z"],
+            ["git", "-C", str(repo_root),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "diff", "--cached", "--name-only", "-z"],
             capture_output=True,
         )
     except OSError:
@@ -803,13 +805,17 @@ def _git_diff_snapshot(repo_root: Path) -> tuple[str | None, str]:
     """
     try:
         res = subprocess.run(
-            ["git", "-C", str(repo_root), "diff", "HEAD"],
+            ["git", "-C", str(repo_root),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "diff", "--no-ext-diff", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout, "git diff HEAD"
         res2 = subprocess.run(
-            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            ["git", "-C", str(repo_root),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "status", "--porcelain"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         if res2.returncode == 0:
@@ -1213,6 +1219,8 @@ def main(argv: list[str] | None = None) -> int:
     p_app = sub.add_parser("approve", help="Aprova uma run pendente de autorização humana")
     p_app.add_argument("run_file", type=Path, help="Arquivo .henke/runs/<id>.json")
     p_app.add_argument("--approver", default="human", help="Nome do aprovador")
+    p_app.add_argument("--yes", "-y", action="store_true",
+                       help="Aprova sem confirmação interativa (obrigatório quando stdin não é TTY)")
 
     p_scope = sub.add_parser("scope", help="Gerencia emendas de escopo em uma run")
     scope_sub = p_scope.add_subparsers(dest="scope_cmd", required=True)
@@ -1318,7 +1326,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.subcmd == "approve":
         from scripts.run_state import main as run_state_main
-        return run_state_main(["approve", str(args.run_file), "--approver", args.approver])
+        argv = ["approve", str(args.run_file), "--approver", args.approver]
+        if args.yes:
+            argv.append("--yes")
+        return run_state_main(argv)
 
     if args.subcmd == "scope" and args.scope_cmd == "amend":
         from scripts.run_state import main as run_state_main

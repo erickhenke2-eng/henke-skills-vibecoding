@@ -106,7 +106,8 @@ def _looks_like_path(token: str) -> bool:
 def _git_has_head(repo_root: Path) -> bool:
     try:
         return subprocess.run(
-            ["git", "rev-parse", "--verify", "HEAD"], cwd=str(repo_root),
+            ["git", "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "rev-parse", "--verify", "HEAD"], cwd=str(repo_root),
             capture_output=True, timeout=10,
         ).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -144,11 +145,13 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
     if name in _GATES_COM_REPO_ARG:
         return [str(repo_root)]
     if name == "mutant":
-        # Modo matriz: o próprio portão enumera os .py do diff vs HEAD.
-        # Sem HEAD não há diff a caçar → skipped (fail-closed).
+        # Modo matriz: o próprio portão enumera os .py do diff vs a âncora de
+        # nascimento. HEAD vivo deixaria um commit do driver esvaziar o portão
+        # (diff vazio → n/a → mandatory satisfeito sem verificar nada).
         if not _git_has_head(repo_root):
             return None
-        return ["--auto-diff", "--repo", str(repo_root), "--diff-against", "HEAD",
+        return ["--auto-diff", "--repo", str(repo_root),
+                "--diff-against", head_start or "HEAD",
                 "--min-kill-rate", "100", "--test-cmd", test_cmd or ""]
     if name == "assertless":
         tests_dir = repo_root / "tests"
@@ -175,7 +178,9 @@ def _default_gate_args(name: str | None, repo_root: Path, spec_path: Path | None
         return ["--repo", str(repo_root), "--spec", str(spec_path)] if spec_path and spec_path.is_file() else None
     if name == "coverage":
         led = repo_root / ".henke" / "coverage-ledger.json"
-        return ["verify", str(led)] if led.is_file() else None
+        # --root explícito: sem ele, `verify` adota o `metadata.root` gravado
+        # dentro do próprio ledger — autoridade auto-declarada (banca v7).
+        return ["verify", str(led), "--root", str(repo_root)] if led.is_file() else None
     if name == "ratchet":
         base = repo_root / ".henke" / "ratchet-baseline.tsv"
         return ["ratchet", "--repo", str(repo_root), "--baseline", str(base)] if base.is_file() else None
@@ -208,10 +213,11 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
     if not cand.is_absolute():
         suite_cand = SUITE_ROOT / cand
         pkg_cand = _PKG_ROOT / cand  # wheel: portões vivem no pacote scripts/, não em henke_data
-        repo_cand = repo_root / cand
+        # Sem fallback para <repo>/<path>: num repo hostil qualquer .py
+        # plantado seria executado "como portão" (banca v7 — F-14). Portão
+        # só roda do suite (henke_data) ou do pacote instalado.
         cand = (suite_cand if suite_cand.is_file()
-                else pkg_cand if pkg_cand.is_file()
-                else repo_cand if repo_cand.is_file() else suite_cand)
+                else pkg_cand if pkg_cand.is_file() else suite_cand)
     if not cand.is_file():
         return None
     resolved = cand.resolve()
@@ -313,6 +319,10 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     child_env = os.environ.copy()
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
+    # Windows: sem isso, CreateProcess procura o binário no CWD do processo
+    # pai primeiro — um `python.exe` plantado no worktree hostil sequestraria
+    # o subprocesso do portão (F-06 banca v7).
+    child_env["NoDefaultCurrentDirectoryInExePath"] = "1"
 
     spec_path: Path | None = None
     spec_hash: str | None = None
@@ -330,7 +340,7 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
             except ImportError:
                 load_anchor_sidecar = None  # type: ignore[assignment]
         if load_anchor_sidecar is not None:  # type: ignore[truthy-function]
-            sidecar = load_anchor_sidecar(run_path.stem)
+            sidecar = load_anchor_sidecar(run_path.stem, repo_root=root)
         try:
             run_meta = json.loads(run_path.read_text(encoding="utf-8"))
             anchor = sidecar if isinstance(sidecar, dict) else run_meta

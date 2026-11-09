@@ -80,11 +80,22 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 
 def _resolve_run_path(repo_root: Path, run_ref: str) -> Path:
-    """Resolve `<run_id>` ou caminho para `.henke/runs/<id>.json` existente."""
+    """Resolve `<run_id>` ou caminho para `.henke/runs/<id>.json` existente.
+
+    Paths arbitrários fora de .henke/runs/ são recusados (mesma política de
+    _resolve_run_ref do CLI): `henke report C:\\x.json` não lê JSON solto
+    como se fosse run (banca v7 — F-11)."""
+    runs_dir = (Path(repo_root) / ".henke" / "runs").resolve()
     cand = Path(run_ref)
     if cand.is_file():
-        return cand
-    runs_dir = Path(repo_root) / ".henke" / "runs"
+        resolved = cand.resolve()
+        try:
+            resolved.relative_to(runs_dir)
+        except ValueError:
+            raise FileNotFoundError(
+                f"run fora de .henke/runs/ recusada: {run_ref}"
+            )
+        return resolved
     name = run_ref if run_ref.endswith(".json") else f"{run_ref}.json"
     path = runs_dir / name
     if path.is_file():
