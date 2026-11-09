@@ -146,6 +146,36 @@ def write_approval_token(binding: dict, approver: str, run_path: Path) -> Path |
         return None
 
 
+def _exec_tip_path(repo_root: Path | str) -> Path:
+    """Âncora LOCAL da ponta do exec_log: a cadeia de hashes prova só
+    consistência interna — truncar/reescrever o rabinho produz cadeia válida.
+    A ponta gravada fora do repo é a referência que a reescrita não alcança
+    (F-13 banca v7)."""
+    repo_key = hashlib.sha256(str(Path(repo_root).resolve()).encode("utf-8")).hexdigest()[:32]
+    return _config_dir() / "exec-tips" / f"{repo_key}.json"
+
+
+def record_exec_tip(repo_root: Path | str, tip: str) -> None:
+    p = _exec_tip_path(repo_root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_json(p, {
+        "repo": str(Path(repo_root).resolve()),
+        "tip": tip,
+        "updated_at": _now_iso(),
+    })
+
+
+def load_exec_tip(repo_root: Path | str) -> str | None:
+    p = _exec_tip_path(repo_root)
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return str(data.get("tip")) if data.get("tip") else None
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
+
+
 def verify_approval_token(run_data: dict) -> tuple[bool, str]:
     """Confere se existe token LOCAL para o approval_binding desta run.
     Sem binding → nada a verificar (True). Com binding → exige o arquivo de

@@ -479,6 +479,16 @@ def _cmd_exec(
                 }
                 existing_ledger.append(ledger_item)
                 _atomic_write_json(ledger_path, existing_ledger)
+
+            # Âncora LOCAL da ponta da cadeia (F-13): a cadeia prova só
+            # consistência interna — truncar/reescrever o rabinho do jsonl
+            # produzia cadeia "válida". Com a ponta fora do repo, qualquer
+            # reescrita diverge do tip gravado nesta máquina.
+            try:
+                _rs.record_exec_tip(repo_root, entry_hash)
+            except OSError as exc:
+                print(f"ERRO: falha ao ancorar ponta do exec_log localmente: {exc}", file=sys.stderr)
+                return 2
     except TimeoutError as exc:
         print(f"ERRO: {exc}", file=sys.stderr)
         return 2

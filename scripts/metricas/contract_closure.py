@@ -270,18 +270,33 @@ def _has_valid_import(dst_nc: str, src_rel: str, src_stem: str, sym: str) -> boo
     esc_name = re.escape(Path(src_rel).name)
     target_pat = rf"(?:\b{esc_stem}\b|\b{esc_sym}\b|{esc_name})"
 
-    if re.search(rf"(?m)^\s*(?:from|import|export\s+.*?\bfrom|use|pub\s+use|mod)\b[^\n;]*{target_pat}", dst_nc):
-        return True
-    for m_imp in re.finditer(r"(?m)^\s*(?:from|import|export)\b[^;\n]*(?:\([^)]*\)|\{[^}]*\})?[^\n;]*", dst_nc):
-        if re.search(target_pat, m_imp.group(0)):
-            return True
-    if re.search(
+    # Linhas de import que nomeiam o módulo-alvo (stem/nome de arquivo —
+    # target_pat completo incluiria o símbolo e deixaria `import {sym} from
+    # "outro-modulo"` satisfazer a ponte pelo módulo errado).
+    imp_lines = [
+        m.group(0)
+        for m in re.finditer(
+            r"(?m)^\s*(?:from|import|export\s+.*?\bfrom|use|pub\s+use|mod)\b[^\n;]*",
+            dst_nc,
+        )
+        if re.search(rf"(?:\b{esc_stem}\b|{esc_name})", m.group(0))
+    ]
+    has_dyn = re.search(
         rf"\b(?:require|import|spec_from_file_location|load_module|run|run_gate|subprocess\.run)\s*\([^)]*{target_pat}",
         dst_nc,
         re.S,
-    ):
+    )
+    if not imp_lines and not has_dyn:
+        return False
+    # C6 (banca v7): import de side-effect (`use "x"`, `mod x;`) não fecha o
+    # contrato — o símbolo precisa aparecer nomeado na cláusula de import ou
+    # ser referenciado no corpo do arquivo.
+    non_imp = re.sub(
+        r"(?m)^\s*(?:from|import|export|use|pub\s+use|mod)\b[^\n;]*", "", dst_nc
+    )
+    if re.search(rf"\b{esc_sym}\b", non_imp):
         return True
-    return False
+    return any(re.search(rf"\b{esc_sym}\b", ln) for ln in imp_lines)
 
 
 def check_contract_closure(

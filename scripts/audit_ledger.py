@@ -136,6 +136,14 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
             errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: exit não-inteiro na linha {idx} de '{log_p.name}'.")
             continue
 
+        if idx == 1 and prev_r != "0" * 64:
+            # Gênese: a primeira entrada deve nascer do hash-zero — um log
+            # reescrito a partir do meio finge continuidade (F-13).
+            errors.append(
+                f"UNVERIFIED_EXECUTION_EVIDENCE: prev_hash de gênese inválido na linha 1 de '{log_p.name}'."
+            )
+            continue
+
         if idx > 1 and not prev_r:
             errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: prev_hash ausente na linha {idx} de '{log_p.name}'.")
             continue
@@ -174,6 +182,31 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
             "testes_descobertos": tests_r,
             "stdout_sha256": sha_r,
         })
+
+    # Âncora da ponta (F-13): a cadeia é consistente por construção até quando
+    # reescrita do zero — o tip gravado LOCALMENTE por `henke exec` é a prova
+    # de que a história termina onde a última execução real terminou.
+    repo_root = log_p.parent.parent if log_p.parent.name == ".henke" else None
+    if repo_root is not None and last_ehash:
+        try:
+            from scripts import run_state as _rs_tip
+        except ImportError:
+            try:
+                import run_state as _rs_tip
+            except ImportError:
+                _rs_tip = None
+        if _rs_tip is not None:
+            expected_tip = _rs_tip.load_exec_tip(repo_root)
+            if expected_tip is None:
+                errors.append(
+                    f"UNVERIFIED_EXECUTION_EVIDENCE: exec_log sem âncora local de ponta "
+                    f"(exec-tips ausente) — log possivelmente plantado."
+                )
+            elif expected_tip != last_ehash:
+                errors.append(
+                    f"UNVERIFIED_EXECUTION_EVIDENCE: ponta do exec_log diverge da "
+                    f"âncora local — cadeia reescrita/truncada."
+                )
 
     for i, entry in enumerate(entries, 1):
         if not isinstance(entry, dict):
