@@ -256,6 +256,21 @@ class TestSupervisorUnavailable(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 sup.wait(child)
 
+    @unittest.skipUnless(_IS_WINDOWS, "caminho Win32: Job não vaza quando Popen falha")
+    def test_popen_failure_closes_job_handle(self):
+        """Popen falhando (executável ausente) fecha o Job já criado — sem leak."""
+        fake_job = 424242
+        with ChildSupervisor() as sup:
+            with patch("scripts.process_supervisor._win_create_job",
+                       return_value=fake_job), \
+                 patch("subprocess.Popen",
+                       side_effect=FileNotFoundError("exe ausente")) as popen_mock, \
+                 patch("scripts.process_supervisor._k32.CloseHandle") as close_mock:
+                with self.assertRaises(FileNotFoundError):
+                    sup._start_windows([r"C:\inexistente.exe"], Path.cwd(), {}, 1024)
+        close_mock.assert_called_once_with(fake_job)
+        self.assertIs(popen_mock.call_args.kwargs["close_fds"], True)
+
     @unittest.skipUnless(_IS_WINDOWS, "caminho Win32: associação falha antes do resume")
     def test_assign_failure_never_runs_unsupervised(self):
         marker = Path(self._tmpfile())

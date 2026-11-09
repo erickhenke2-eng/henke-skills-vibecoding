@@ -107,21 +107,9 @@ def main() -> int:
         expect("W7-4c: no_changes -> selected vazio (nunca full)",
                sel.mode == "selected" and not sel.test_files)
 
-    # --- W7-5: manifesto incremental reusa arquivo intacto. ---
+    # --- W7-5: manifesto incremental reusa arquivo intacto em repo externo. ---
     with tempfile.TemporaryDirectory() as td:
-        repo = Path(td)
-        eng = ROOT / "scripts"
-        for rel in ("import_graph.py", "repo_signals.py", "winpath.py",
-                    "state_paths.py"):
-            p = repo / "scripts" / rel
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text((eng / rel).read_text(encoding="utf-8"), encoding="utf-8")
-        for rel in ("scan_manifest.py", "polyglot.py", "a11y_scan.py",
-                    "hazard_scan.py", "assertless_scan.py"):
-            p = repo / "scripts" / "metricas" / rel
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text((eng / "metricas" / rel).read_text(encoding="utf-8"),
-                         encoding="utf-8")
+        repo = Path(td)  # repo externo sem scripts/ — scanners vêm da suíte
         (repo / "p.html").write_text("<html><body>x</body></html>", encoding="utf-8")
         spec = {s.scanner_id: s for s in scanner_specs(repo)}["a11y"]
         old_sd = os.environ.pop("HENKE_STATE_DIR", None)
@@ -177,10 +165,15 @@ def main() -> int:
         expect("W7-9a: sentinel criado com schema/PID diagnóstico",
                s.session_id and (ws / ".henke" / "sessions"
                                  / f"{s.session_id}.sentinel.json").is_file())
+        before = s.heartbeat_expires_at
+        time.sleep(0.02)
         henke_session.heartbeat(s.session_id)
+        after = henke_session.load_session(s.session_id).heartbeat_expires_at
         henke_session.end_session(s.session_id)
+        closed = henke_session.load_session(s.session_id).state == "closed"
         os.environ.pop("HENKE_WORKSPACE", None)
-        expect("W7-9b: heartbeat e end executam sem erro", True)
+        expect("W7-9b: heartbeat renova heartbeat_expires_at e end fecha",
+               after > before and closed)
 
     # --- W7-10: ephemeral workspace com TTL e cleanup idempotente. ---
     with tempfile.TemporaryDirectory() as td:

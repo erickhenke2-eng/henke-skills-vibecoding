@@ -31,6 +31,12 @@ _GRAPH_VERSION = 1
 
 _SNAPSHOT_UNSTABLE = "SNAPSHOT_UNSTABLE"
 
+# Raiz canônica da própria suíte (como SUITE_ROOT/GATE_MAP em henke_cli.py).
+# Scanners, motor e configs SEMPRE resolvem daqui — jamais do repo auditado:
+# `<repo>/scripts/metricas/*.py` não é código confiável e em repos externos
+# nem sequer existe.
+_SUITE_ROOT = Path(__file__).resolve().parents[2]
+
 
 @dataclass(frozen=True)
 class ScannerSpec:
@@ -109,9 +115,8 @@ def _sha256_text(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _engine_sha256(repo_root: Path, spec: ScannerSpec) -> str:
-    """Motor + helpers + scanner, em ordem de caminho POSIX."""
-    repo = Path(repo_root).resolve()
+def _engine_sha256(spec: ScannerSpec) -> str:
+    """Motor + helpers + scanner da suíte, em ordem de caminho POSIX."""
     parts = [
         "scripts/metricas/scan_manifest.py",
         "scripts/import_graph.py",
@@ -120,13 +125,13 @@ def _engine_sha256(repo_root: Path, spec: ScannerSpec) -> str:
         "scripts/winpath.py",
     ]
     try:
-        rel_script = Path(spec.script_path).resolve().relative_to(repo).as_posix()
+        rel_script = Path(spec.script_path).resolve().relative_to(_SUITE_ROOT).as_posix()
     except ValueError:
-        rel_script = Path(spec.script_path).as_posix()
+        rel_script = Path(spec.script_path).resolve().as_posix()
     parts.append(rel_script)
     agg = hashlib.sha256()
     for rel in sorted(parts):
-        p = repo / rel
+        p = _SUITE_ROOT / rel
         try:
             agg.update(rel.encode("utf-8") + b"\x00" + _sha256_text(p).encode("ascii") + b"\x00")
         except OSError:
@@ -134,11 +139,11 @@ def _engine_sha256(repo_root: Path, spec: ScannerSpec) -> str:
     return agg.hexdigest()
 
 
-def _config_sha256(repo_root: Path, spec: ScannerSpec) -> str:
+def _config_sha256(spec: ScannerSpec) -> str:
+    """Configs declaradas pelo adapter — arquivos da suíte, não do repo alvo."""
     agg = hashlib.sha256()
-    repo = Path(repo_root).resolve()
     for rel in sorted(spec.config_paths):
-        p = repo / rel
+        p = _SUITE_ROOT / rel
         try:
             data = p.read_bytes()
         except OSError:
@@ -152,12 +157,17 @@ def _config_sha256(repo_root: Path, spec: ScannerSpec) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _metricas_dir(repo_root: Path) -> Path:
-    return Path(repo_root).resolve() / "scripts" / "metricas"
+def _metricas_dir() -> Path:
+    """Diretório canônico dos scanners da suíte — nunca derivado do repo alvo."""
+    return _SUITE_ROOT / "scripts" / "metricas"
 
 
-def _load_scanner_module(repo_root: Path, spec: ScannerSpec):
-    """Importa o módulo do scanner por caminho (stdlib only)."""
+def _load_scanner_module(spec: ScannerSpec):
+    """Importa o módulo do scanner por caminho (stdlib only).
+
+    `spec.script_path` aponta para a suíte quando vem de `scanner_specs`;
+    specs injetadas por teste também são aceitas (o caminho é explícito).
+    """
     import importlib.util
     path = Path(spec.script_path).resolve()
     mod_name = f"_henke_scan_{spec.scanner_id}"
@@ -174,9 +184,14 @@ def _load_scanner_module(repo_root: Path, spec: ScannerSpec):
     return mod
 
 
-def scanner_specs(repo_root: Path) -> tuple[ScannerSpec, ...]:
-    """Os três scanners com adapter nesta Wave."""
-    mdir = _metricas_dir(repo_root)
+def scanner_specs(repo_root: Path | None = None) -> tuple[ScannerSpec, ...]:
+    """Os três scanners com adapter nesta Wave — resolvidos na suíte Henke.
+
+    `repo_root` é aceito por compatibilidade de chamada, mas NUNCA fornece
+    código executável: em repos externos `<repo>/scripts/metricas/` não
+    existe e, se existisse, seria conteúdo auditado — não ferramenta.
+    """
+    mdir = _metricas_dir()
     return (
         ScannerSpec("hazard", "wave7.1", mdir / "hazard_scan.py",
                     ("evals/hazard_fixtures_manifest.json",)),
@@ -284,16 +299,16 @@ def _write_manifest_atomic(repo_root: Path, spec: ScannerSpec, manifest: dict) -
         raise
 
 
-def _fingerprint(repo_root: Path, spec: ScannerSpec, args_sha256: str) -> dict:
+def _fingerprint(spec: ScannerSpec, args_sha256: str) -> dict:
     py = f"{sys.version_info.major}.{sys.version_info.minor}"
     return {
         "id": spec.scanner_id,
         "version": spec.scanner_version,
         "script_sha256": _sha256_text(Path(spec.script_path)),
-        "engine_sha256": _engine_sha256(repo_root, spec),
+        "engine_sha256": _engine_sha256(spec),
         "python": py,
         "args_sha256": args_sha256,
-        "config_sha256": _config_sha256(repo_root, spec),
+        "config_sha256": _config_sha256(spec),
         "graph_version": _GRAPH_VERSION,
     }
 
@@ -312,11 +327,11 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
     """Executa scan incremental transacional para `spec`."""
     repo = Path(repo_root).resolve()
     reasons: list[str] = []
-    mod = _load_scanner_module(repo, spec)
+    mod = _load_scanner_module(spec)
     version = str(getattr(mod, "SCANNER_VERSION", spec.scanner_version))
     spec = ScannerSpec(spec.scanner_id, version, spec.script_path, spec.config_paths)
     args_sha256 = hashlib.sha256(f"{spec.scanner_id}|{spec.scanner_version}".encode()).hexdigest()
-    fp = _fingerprint(repo, spec, args_sha256)
+    fp = _fingerprint(spec, args_sha256)
 
     lock = _ManifestLock(_manifest_dir(repo) / f"{spec.scanner_id}.lock")
     locked = lock.acquire()
@@ -446,8 +461,13 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
         scanned_now = sorted(rel for rel in dirty_existing
                              if new_entries[rel]["status"] == "scanned"
                              and new_entries[rel].get("scanned_count"))
-        total_scanned = scanned_now or reused
-        if not new_entries or not total_scanned:
+        # "Nada auditado" nunca é PASS: a soma real de scanned_count decide,
+        # não a presença de arquivos reaproveitados (2ª rodada com reuse de
+        # entradas com scanned_count=0 continuava verde por engano).
+        total_scanned = sum(
+            int(e.get("scanned_count") or 0) for e in new_entries.values()
+        )
+        if not new_entries or total_scanned == 0:
             exit_code = _empty_exit(spec)
         else:
             exit_code = _nonempty_exit(spec, all_findings)

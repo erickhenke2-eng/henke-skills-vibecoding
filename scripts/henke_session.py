@@ -18,6 +18,7 @@ from typing import Literal
 
 from scripts.ephemeral import _MARKER_NAME, _parse_iso, _utcnow, _iso, _validate_marker, ephemeral_gc
 from scripts.state_paths import state_dir
+import scripts.winpath as winpath
 
 _SCHEMA_VERSION = 1
 _HEARTBEAT_WINDOW = timedelta(hours=1)
@@ -46,10 +47,20 @@ def _sessions_dir(workspace: Path | None = None) -> Path:
 
 
 def _sentinel_path(session_id: str, workspace: Path | None = None) -> Path:
-    if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
+    """session_id deve ser um único componente seguro contido em sessions/.
+
+    `assert_safe_relative` rejeita absoluto, `..`, drive/ADS, nomes
+    reservados Win32 e caracteres de controle; `canonical_path` confirma a
+    contenção lexical do sentinel dentro do diretório de sessões.
+    """
+    if not session_id:
         raise ValueError(f"session_id inválido: {session_id!r}")
-    path = (_sessions_dir(workspace) / f"{session_id}.sentinel.json").resolve()
-    if path.parent != _sessions_dir(workspace).resolve():
+    rel = winpath.assert_safe_relative(session_id)
+    if "/" in rel:
+        raise ValueError(f"session_id inválido: {session_id!r}")
+    sdir = winpath.canonical_path(_sessions_dir(workspace))
+    path = winpath.canonical_path(f"{rel}.sentinel.json", base=sdir)
+    if path.parent != sdir or not winpath.is_within(sdir, path):
         raise ValueError(f"session_id escapa do diretório de sessões: {session_id!r}")
     return path
 

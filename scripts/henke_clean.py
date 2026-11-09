@@ -25,6 +25,7 @@ from typing import Literal, Sequence
 
 from scripts.ephemeral import _MARKER_NAME, _parse_iso, _utcnow, _iso, _validate_marker
 from scripts.state_paths import state_dir
+import scripts.winpath as winpath
 
 _SCHEMA_VERSION = 1
 _CACHE_NAMES = ("__pycache__", ".pytest_cache", ".mypy_cache")
@@ -97,7 +98,7 @@ def _allowed_root(repo_root: Path, candidate: CleanCandidate) -> Path | None:
     if candidate.kind == "repo-cache":
         repo = Path(repo_root).resolve()
         src = candidate.source.resolve()
-        if src == repo or repo not in src.parents:
+        if src == repo or not winpath.is_within(repo, src):
             return None
         return repo
     if candidate.kind == "ephemeral-expired":
@@ -194,10 +195,20 @@ def staging_leftovers(repo_root: Path) -> tuple[Path, ...]:
 
 
 def _validate_batch_dir(qroot: Path, batch_id: str) -> Path:
-    if not batch_id or "/" in batch_id or "\\" in batch_id or ".." in batch_id:
+    """batch_id deve ser um único componente seguro contido em `qroot`.
+
+    `assert_safe_relative` rejeita absoluto, `..`, drive/ADS, nomes
+    reservados Win32 e caracteres de controle; `canonical_path` garante a
+    contenção lexical final dentro da raiz de quarentena.
+    """
+    if not batch_id:
         raise ValueError(f"batch_id inválido: {batch_id!r}")
-    batch_dir = (qroot / batch_id).resolve()
-    if batch_dir.parent != qroot.resolve():
+    rel = winpath.assert_safe_relative(batch_id)
+    if "/" in rel:
+        raise ValueError(f"batch_id inválido: {batch_id!r}")
+    qroot_c = winpath.canonical_path(qroot)
+    batch_dir = winpath.canonical_path(rel, base=qroot_c)
+    if batch_dir.parent != qroot_c or not winpath.is_within(qroot_c, batch_dir):
         raise ValueError(f"batch_id escapa da quarentena: {batch_id!r}")
     return batch_dir
 
@@ -238,14 +249,20 @@ def quarantine(repo_root: Path, candidates: Sequence[CleanCandidate],
                 os.replace(src, staged)
                 os.replace(staged, dest)
             except OSError:
-                # Entre unidades: copia para staging, verifica, renomeia, remove origem.
+                # Se a 2ª perna falhou com o item já só em staging, restaura
+                # staged -> src ANTES de qualquer remoção (nunca perde dados).
+                if staged.exists() and not src.exists():
+                    os.replace(staged, src)
                 if staged.exists():
                     shutil.rmtree(staged, ignore_errors=True)
-                if dest.exists():
-                    shutil.rmtree(dest, ignore_errors=True)
+                if not src.exists():
+                    raise  # origem perdida sem cópia local: falha explícita
+                # Entre unidades: copia para staging, verifica, renomeia, remove origem.
                 shutil.copytree(src, staged)
                 if _tree_sha256(staged) != tree_hash:
                     raise ValueError("hash divergente após cópia cross-volume")
+                if dest.exists():
+                    shutil.rmtree(dest)  # falha propaga: nunca esconde dest estranho
                 os.replace(staged, dest)
                 shutil.rmtree(src, ignore_errors=True)
             if _tree_sha256(dest) != tree_hash:
@@ -310,7 +327,7 @@ def restore_batch(repo_root: Path, batch_id: str) -> int:
             continue
         resolved = original.resolve().parent
         if item["allowed_root"] == "repo":
-            contained = repo in [resolved, *resolved.parents]
+            contained = winpath.is_within(repo, resolved)
         else:
             # efêmero: a workspace sempre vive diretamente sob o temp do sistema
             contained = resolved == Path(tempfile.gettempdir()).resolve()

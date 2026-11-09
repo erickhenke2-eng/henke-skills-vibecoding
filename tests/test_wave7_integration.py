@@ -9,9 +9,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import scripts.henke_cli  # noqa: F401  (ponte declarada)
-
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import scripts.henke_cli  # noqa: F401,E402  (ponte declarada)
+
 CLI = ROOT / "scripts" / "henke_cli.py"
 
 
@@ -52,7 +55,9 @@ class TestStagedStrict(unittest.TestCase):
                              "staged não deve gravar manifestos")
             self.assertFalse((henke / "cache").exists(),
                              "staged não deve gravar cache")
-            self.assertIn(res.returncode, (0, 1))
+            self.assertEqual(res.returncode, 0,
+                             f"check --staged em repo limpo deve passar: "
+                             f"{res.stdout[-600:]} {res.stderr[-300:]}")
 
 
 class TestTestImpactCLI(unittest.TestCase):
@@ -121,9 +126,9 @@ class TestSessionCLI(unittest.TestCase):
 class TestCheckParallelAndManifests(unittest.TestCase):
     def test_check_jobs_and_full(self):
         res = _cli("check", "--repo", ROOT, "--jobs", "4", "--no-cache")
-        self.assertIn(res.returncode, (0, 1, 2))
-        self.assertNotEqual(res.returncode, 2,
-                            f"uso inválido ou crash: {res.stderr[:400]}")
+        self.assertEqual(res.returncode, 0,
+                         f"check na própria suíte deve passar limpo: "
+                         f"{res.stdout[-800:]} {res.stderr[-400:]}")
 
     def test_manifest_files_created_on_check(self):
         with tempfile.TemporaryDirectory() as td:
@@ -134,7 +139,9 @@ class TestCheckParallelAndManifests(unittest.TestCase):
                 [sys.executable, str(CLI), "check", "--repo", ROOT],
                 capture_output=True, text=True, env=env, timeout=180,
             )
-            self.assertIn(res.returncode, (0, 1))
+            self.assertEqual(res.returncode, 0,
+                             f"check na suíte deve passar limpo: "
+                             f"{res.stdout[-600:]} {res.stderr[-300:]}")
             self.assertTrue(
                 (sd / "scan-manifests" / "a11y.json").is_file(),
                 f"manifesto a11y ausente em {sd}: {res.stderr[:300]}")

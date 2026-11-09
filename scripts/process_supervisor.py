@@ -300,15 +300,21 @@ class ChildSupervisor:
 
     def _start_windows(self, tokens, work_dir, child_env, max_output_bytes) -> ChildHandle:
         job = _win_create_job()
-        proc = subprocess.Popen(
-            tokens,
-            cwd=work_dir,
-            env=child_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            close_fds=True,
-            creationflags=_CREATE_SUSPENDED,
-        )
+        try:
+            proc = subprocess.Popen(
+                tokens,
+                cwd=work_dir,
+                env=child_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                close_fds=True,
+                creationflags=_CREATE_SUSPENDED,
+            )
+        except BaseException:
+            # Executável ausente/Popen falho: o Job criado acima não pode vazar.
+            if job:
+                _k32.CloseHandle(job)
+            raise
         try:
             if not job:
                 raise SupervisorUnavailableError("CreateJobObject falhou")

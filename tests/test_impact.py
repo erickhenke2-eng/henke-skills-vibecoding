@@ -81,6 +81,74 @@ class TestSelectTests(unittest.TestCase):
         self.assertEqual(sel.mode, "full")
         self.assertIn("x.py", sel.unresolved_files)
 
+    def test_dynamic_exec_test_forces_full(self):
+        """subprocess com sys.executable em teste → incerteza → suíte full."""
+        _write(self.repo, "tests/test_dyn.py",
+               "import subprocess, sys\n"
+               "def test_x():\n"
+               "    subprocess.run([sys.executable, '-c', 'pass'])\n")
+        sel = self._select(["tests/test_prod.py"])
+        self.assertEqual(sel.mode, "full")
+        self.assertTrue(any(r.startswith("dynamic_exec:") for r in sel.reasons),
+                        f"reasons={sel.reasons}")
+
+    def test_dynamic_loaders_force_full(self):
+        """spec_from_file_location, runpy, exec e Popen(sys.executable) → full."""
+        cases = [
+            "import importlib.util\n"
+            "importlib.util.spec_from_file_location('m', 'x.py')\n",
+            "import runpy\nrunpy.run_module('mod')\n",
+            "import runpy\nrunpy.run_path('x.py')\n",
+            "exec(compile('x=1', '<s>', 'exec'))\n",
+            "import subprocess, sys\n"
+            "subprocess.Popen([sys.executable, 'm.py'])\n",
+            "import sys\nfrom subprocess import run\n"
+            "run(sys.executable + ' -V', shell=True)\n",
+        ]
+        for body in cases:
+            _write(self.repo, "tests/test_dyn.py", body)
+            with self.subTest(snippet=body.strip().splitlines()[-1][:48]):
+                sel = self._select(["tests/test_prod.py"])
+                self.assertEqual(sel.mode, "full")
+
+    def test_static_subprocess_without_interpreter_stays_selected(self):
+        """subprocess sem sys.executable não dispara o fallback."""
+        _write(self.repo, "tests/test_dyn.py",
+               "import subprocess\n"
+               "def test_x():\n"
+               "    subprocess.run(['git', 'status'])\n")
+        sel = self._select(["tests/test_prod.py"])
+        self.assertEqual(sel.mode, "selected")
+        self.assertEqual(sel.test_files, ("tests/test_prod.py",))
+
+    def test_dynamic_exec_scan_survives_missing_tests_dir(self):
+        """Repo sem tests/ → scan dinâmico retorna lista vazia, nunca None."""
+        import shutil
+        from scripts.test_impact import _dynamic_exec_test_files
+        shutil.rmtree(self.repo / "tests")
+        self.assertEqual(_dynamic_exec_test_files(self.repo), [])
+
+    def test_unparseable_test_file_flags_dynamic(self):
+        """Arquivo de teste que o AST não parseia → incerteza → full."""
+        _write(self.repo, "tests/test_broken.py", "def broken(:\n")
+        sel = self._select(["tests/test_prod.py"])
+        self.assertEqual(sel.mode, "full")
+        self.assertTrue(any(r.startswith("dynamic_exec:") for r in sel.reasons),
+                        f"reasons={sel.reasons}")
+
+    def test_dynamic_exec_predicates_return_exact_booleans(self):
+        """Os predicados retornam bool exato — nunca None disfarçado."""
+        import ast as _ast
+        from scripts.test_impact import (
+            _has_sys_executable, _test_uses_dynamic_exec,
+        )
+        _write(self.repo, "tests/test_static.py", "X = 1\n")
+        self.assertIs(
+            _test_uses_dynamic_exec(self.repo / "tests" / "test_static.py"),
+            False)
+        node = _ast.parse("x = sys.argv\n")
+        self.assertIs(_has_sys_executable(node), False)
+
     def test_build_command_selected(self):
         sel = ImpactSelection("selected", ("a.py",), ("tests/test_prod.py",), (), ())
         cmd = build_unittest_command(sel, ROOT)

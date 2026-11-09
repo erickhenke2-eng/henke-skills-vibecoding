@@ -6,5 +6,13 @@
     "testes_passados": 382,
     "stdout_sha256": "0a3be7b0ec3f9c103c06361c03f5edb006739cab807590ea77ec1501df711629",
     "entry_hash": "57bed55a781445c2c5ccb23d64b1468287e83e68f2cde7e4dbb720919a8a1432"
+  },
+  {
+    "cmd": "python -m unittest discover -s tests -p test_*.py",
+    "exit": 0,
+    "testes_descobertos": 390,
+    "testes_passados": 390,
+    "stdout_sha256": "8aa6524fc3f7d54e8eb48d8eee290fa58a506588734926a28e132c2a9d533a89",
+    "entry_hash": "4861d70d2db14443484bb1ba553f5afa2714d6ab72e9af96bc98f5ed19092bd0"
   }
 ]

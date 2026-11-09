@@ -11,11 +11,14 @@ Nenhuma seleção sob incerteza; `--full` (CI/pré-merge) ignora a otimização.
 """
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Mapping
+
+import scripts.winpath as winpath
 
 _DIFF_FILTERS = "ACDMRTUXB"
 _TEST_DIR_PREFIX = "tests/"
@@ -96,6 +99,82 @@ def _is_test_file(rel: str) -> bool:
     return rel.startswith(_TEST_DIR_PREFIX) and (name.startswith("test_") or name.endswith("_test.py"))
 
 
+# --- Execução dinâmica: invisível ao grafo de imports → incerteza → full ----
+
+_DYNAMIC_NAME_CALLS = frozenset({"exec"})
+_DYNAMIC_ATTR_CALLS = frozenset({
+    "spec_from_file_location",  # importlib.util.spec_from_file_location
+    "run_module", "run_path",   # runpy.*
+})
+_SPAWN_WITH_INTERPRETER = frozenset({
+    "run", "Popen", "call", "check_call", "check_output",
+    "getoutput", "getstatusoutput",  # subprocess.*
+    "spawnl", "spawnlp", "spawnv", "spawnvp",
+    "spawnve", "spawnvpe", "system", "popen",  # os.* legados
+})
+
+
+def _has_sys_executable(node: ast.AST) -> bool:
+    for sub in ast.walk(node):
+        if (isinstance(sub, ast.Attribute) and sub.attr == "executable"
+                and isinstance(sub.value, ast.Name) and sub.value.id == "sys"):
+            return True
+    return False
+
+
+def _test_uses_dynamic_exec(path: Path) -> bool:
+    """True se o arquivo de teste executa código invisível ao grafo de imports.
+
+    Cobre `exec`, `spec_from_file_location`, `runpy.run_module`/`run_path` e
+    spawns de processo cujos argumentos citam `sys.executable` — por atributo
+    (`subprocess.run(...)`, `os.system(...)`) ou por nome importado
+    (`from subprocess import run; run(sys.executable ...)`,
+    `Popen(sys.executable, ...)`). Arquivo não parseável também conta como
+    incerteza (fail-closed).
+    """
+    try:
+        tree = ast.parse(path.read_bytes())
+    except (OSError, SyntaxError, ValueError, RecursionError):
+        return True
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in _DYNAMIC_NAME_CALLS:
+            return True
+        if isinstance(func, ast.Attribute) and func.attr in _DYNAMIC_ATTR_CALLS:
+            return True
+        call_args = (*node.args, *(kw.value for kw in node.keywords))
+        if any(_has_sys_executable(a) for a in call_args):
+            callee = func.attr if isinstance(func, ast.Attribute) else (
+                func.id if isinstance(func, ast.Name) else "")
+            if callee in _SPAWN_WITH_INTERPRETER:
+                return True
+    return False
+
+
+def _dynamic_exec_test_files(repo: Path) -> list[str]:
+    """Test files on disk que executam código fora do grafo → incerteza."""
+    tests_root = Path(repo) / "tests"
+    if not tests_root.is_dir():
+        return []
+    flagged: set[str] = set()
+    try:
+        for entry in winpath.iter_tree(tests_root,
+                                       prune_names=frozenset({"__pycache__"})):
+            rel = f"{_TEST_DIR_PREFIX}{entry.relative_path}"
+            if entry.kind == "error":
+                flagged.add(f"<walk_error:{rel}>")
+                continue
+            if entry.kind != "file" or not _is_test_file(rel):
+                continue
+            if _test_uses_dynamic_exec(entry.path):
+                flagged.add(rel)
+    except winpath.PathSafetyError:
+        flagged.add("<tests_root_unsafe>")
+    return sorted(flagged)
+
+
 def _is_shared_fixture(rel: str) -> bool:
     name = rel.rsplit("/", 1)[-1]
     return (
@@ -154,6 +233,12 @@ def select_tests(repo_root: Path, base: str,
     if unresolved:
         unresolved_files = sorted(unresolved)
         reasons.append("graph_unresolved")
+
+    # Testes que executam código fora do grafo (subprocess com
+    # sys.executable, spec_from_file_location, runpy, exec) tornam o
+    # fechamento de imports não-probante → incerteza → suíte completa.
+    for rel in _dynamic_exec_test_files(repo):
+        reasons.append(f"dynamic_exec:{rel}")
 
     all_tests = sorted(
         rel for rel in direct
