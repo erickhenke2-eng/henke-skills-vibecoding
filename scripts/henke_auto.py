@@ -206,12 +206,24 @@ _HOMOGLYPHS = str.maketrans({
 })
 
 
+# ALTO-3 (banca v13): variantes Unicode de pontuação quebravam sinais com
+# '-'/'/'/':'/'.' — "checkout ‐‐" (U+2010) e "dd ‐if=" evadiam as duas listas.
+_PUNCT_FOLDS = str.maketrans({
+    "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
+    "−": "-", "﹘": "-", "﹣": "-",
+    "∕": "/", "⁄": "/",
+    "꞉": ":", "˸": ":", "։": ":",
+    "․": ".", "‥": "..",
+    "＼": "\\",
+})
+
+
 def _norm(text: str) -> str:
     """Normalização idêntica à do henke_router: NFKD, minúsculas, sem acentos,
     sem formato/controle/marcas (ZWSP & cia — banca v7 F-04; Mn/Mc/Me —
     banca v9 A5), homoglifos dobrados (A2) e whitespace exótico colapsado
     (NBSP/tab/espaço duplo — A3). Manter as duas implementações iguais."""
-    folded = text.translate(_HOMOGLYPHS)
+    folded = text.translate(_HOMOGLYPHS).translate(_PUNCT_FOLDS)
     nfkd = unicodedata.normalize("NFKD", folded.lower())
     stripped = "".join(
         " " if c.isspace() or unicodedata.category(c) == "Zs" else c
@@ -245,11 +257,28 @@ def _has_signal(text: str, sig: str) -> bool:
     # 'checkout .'/'checkout --' perdem o discriminador na compactação e
     # casariam em "tela de checkout" — só compacta sinais que já são
     # puramente alfanuméricos+espaços.
-    if len(sig_compact) >= 5 and re.fullmatch(r"[a-z0-9 ]+", sig_clean):
-        toks = [re.sub(r"[^a-z0-9]", "", t) for t in text.split()]
-        joined = set(toks) | {a + b for a, b in zip(toks, toks[1:])}
-        if sig_compact in joined:
-            return True
+    # ALTO-2 (banca v13): split em >=3 fragmentos ("de le te"), tokens de
+    # pontuação que compactam pra "" ("dele / te") e sinais curtos ("w i p e",
+    # "r m") evadiam — janela acumulada até len(sig_compact), piso >=2.
+    # MÉDIO-5 (banca v13): identificadores/paths com '_' — "x_wipe.sh" é um
+    # token só; reparte por [_./\\] além de whitespace (segmentos, não substring).
+    if len(sig_compact) >= 2 and re.fullmatch(r"[a-z0-9 ]+", sig_clean):
+        toks: list[str] = []
+        for _t in re.split(r"\s+", text):
+            for _seg in re.split(r"[_./\\]+", _t):
+                _seg = re.sub(r"[^a-z0-9]", "", _seg)
+                if _seg:
+                    toks.append(_seg)
+        for i, t in enumerate(toks):
+            acc = t
+            if acc == sig_compact:
+                return True
+            for nxt in toks[i + 1:]:
+                if len(acc) >= len(sig_compact):
+                    break
+                acc += nxt
+                if acc == sig_compact:
+                    return True
     return False
 
 
@@ -1194,11 +1223,23 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     # vira lista-vazia (fail-safe: perde restrição, não ganha permissão).
     def _plist(v):
         return v if isinstance(v, list) else []
+
+    # MÉDIO-4 (banca v13): allowed_cmds com tipo errado DESLIGAVA a allowlist
+    # silenciosamente — str vira lista de um; outro tipo vira deny-all.
+    _ac = policy_doc.get("allowed_cmds")
+    if isinstance(_ac, str) and _ac.strip():
+        _allowed_cmds = [_ac.strip()]
+    elif isinstance(_ac, list):
+        _allowed_cmds = _ac
+    elif _ac is None:
+        _allowed_cmds = []
+    else:
+        _allowed_cmds = ["__deny_all__"]
     policy_efetiva = {
         "policy": policy_name,
         "always_ask": _plist(policy_doc.get("always_ask")),
         "auto_approve": _plist(policy_doc.get("auto_approve")),
-        "allowed_cmds": _plist(policy_doc.get("allowed_cmds")),
+        "allowed_cmds": _allowed_cmds,
         "source": policy_source,
         "flag": policy_flag,
     }
@@ -1253,6 +1294,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         snap = resumed.get("route_snapshot")
         binding = resumed.get("approval_binding")
         stale: list[str] = []
+        fp_now: str | None = None
         if not isinstance(binding, dict):
             stale.append("run sem approval_binding (criada antes do vínculo de aprovação)")
         else:
@@ -1274,12 +1316,21 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         # recomputado passaria em TODAS as checagens acima e executaria o
         # driver arbitrário gravado nela. O token só existe se `henke approve`
         # rodou de verdade nesta máquina sobre este binding.
-        tok_ok, tok_err = verify_approval_token(resumed)
+        tok_ok, tok_err = verify_approval_token(resumed, repo_root=repo_root)
         if not tok_ok:
             stale.append(tok_err)
         if stale:
             _record_stage(cand, "resume_bind", "RETOMADA RECUSADA: " + "; ".join(stale))
-            _patch_run(cand, lambda d: d.update({"review_status": "pending"}))
+            def _unstale(d: dict) -> None:
+                d["review_status"] = "pending"
+                # MÉDIO-3 (banca v13): drift de test_cmd/policy entre init e
+                # approve virava wedge — approve re-ancorava só head, e o
+                # escopo divergido recusava para sempre. O fingerprint do
+                # ambiente ATUAL é o que o novo approve vai vincular.
+                _b = d.get("approval_binding")
+                if fp_now and isinstance(_b, dict):
+                    _b["scope_sha256"] = fp_now
+            _patch_run(cand, _unstale)
             print("RETOMADA RECUSADA — HEAD/escopo divergiu desde a aprovação:", file=sys.stderr)
             for r in stale:
                 print(f"  - {r}", file=sys.stderr)
@@ -1292,7 +1343,29 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
 
     # ---- estágio 2: garantias .henke/ + run ----
     henke_dir = repo_root / ".henke"
+    # ALTO-1 (banca v13): `.henke` symlink/junction (clone hostil) fazia
+    # runs/evidence serem escritos FORA do repo e POLICY/PROJECT lidos do
+    # alvo — confinado à worktree real.
+    try:
+        if henke_dir.is_symlink() or (
+                henke_dir.exists()
+                and repo_root.resolve() not in henke_dir.resolve().parents):
+            print("ERRO: '.henke' é symlink/junction ou resolve fora do repo "
+                  "— custódia não é executável; remova o link.", file=sys.stderr)
+            return 2
+    except OSError:
+        print("ERRO: '.henke' não resolvível — recusado.", file=sys.stderr)
+        return 2
     (henke_dir / "runs").mkdir(parents=True, exist_ok=True)
+    try:
+        runs_r = (henke_dir / "runs").resolve()
+        if (henke_dir / "runs").is_symlink() or repo_root.resolve() not in runs_r.parents:
+            print("ERRO: '.henke/runs' é symlink/junction ou resolve fora do "
+                  "repo — recusado.", file=sys.stderr)
+            return 2
+    except OSError:
+        print("ERRO: '.henke/runs' não resolvível — recusado.", file=sys.stderr)
+        return 2
     # Custódia: a pipeline NUNCA materializa .henke/PROJECT.json|POLICY.json —
     # ambos constam na lista protegida do metaconfig, então cada primeiro
     # `henke auto` num repo novo se auto-flagava como mutação não autorizada.
@@ -1311,10 +1384,19 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     if resumed is not None:
         run_id = cand.stem
         run_path = cand
+        _mg = list(route.get("gates_required") or [])
         _patch_run(run_path, lambda d: d.update({
-            "mandatory_gates": list(route.get("gates_required") or []),
+            "mandatory_gates": _mg,
             "driver": driver,
         }))
+        # MÉDIO-1 (banca v13): a run sensível nasce SEM mandatory_gates —
+        # patchada no resume ela ficava fora da âncora e o driver a deletava
+        # do JSON (portões da matriz deixavam de ser exigidos).
+        try:
+            from scripts.run_state import amend_anchor_fields as _aaf
+        except ImportError:
+            from run_state import amend_anchor_fields as _aaf  # type: ignore
+        _aaf(run_id, repo_root, {"mandatory_gates": _mg})
         _record_stage(run_path, "authorize", "RETOMADA pós-approve humana — escopo vinculado à run aprovada")
         needs_human, sensitive_hit = False, False
     else:
@@ -1638,34 +1720,50 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                 undeclared = None
                 ignored_declared = []
                 new_ignored = []
+            # B11 (banca v13): cadeia elif registrava só o primeiro achado —
+            # ignored+undeclared+phantom simultâneos ficavam invisíveis.
+            audit_findings: list[tuple[int, str]] = []
             if new_ignored:
-                record_gate(
-                    run_path, "files_changed_audit", 2,
+                audit_findings.append((2,
                     "IGNORED-WRITE-UNDECLARED: arquivo novo em path ignorado "
                     "(invisível a todos os portões de diff): "
-                    + ", ".join(new_ignored[:10]),
-                    manual=True,
-                )
-            elif ignored_declared:
-                record_gate(
-                    run_path, "files_changed_audit", 2,
-                    "FILES-CHANGED-IGNORED: declarados gitignored invisíveis ao "
-                    "diff — nenhum portão consegue verificá-los: "
-                    + ", ".join(ignored_declared[:10]),
-                    manual=True,
-                )
-            elif undeclared is None:
-                record_gate(
-                    run_path, "files_changed_audit", 2,
+                    + ", ".join(new_ignored[:10])))
+            if ignored_declared:
+                audit_findings.append((2,
+                    "FILES-CHANGED-IGNORED: declarados gitignored invisíveis "
+                    "ao diff — nenhum portão consegue verificá-los: "
+                    + ", ".join(ignored_declared[:10])))
+            if undeclared is None:
+                audit_findings.append((2,
                     "AUDIT-UNAVAILABLE: git falhou ao enumerar o diff real — "
-                    "files_changed não auditado (inconclusivo ≠ verde)",
-                    manual=True,
-                )
+                    "files_changed não auditado (inconclusivo ≠ verde)"))
             elif undeclared:
-                record_gate(
-                    run_path, "files_changed_audit", 1,
+                audit_findings.append((1,
                     "FILES-CHANGED-INCOMPLETE: driver editou sem declarar: "
-                    + ", ".join(undeclared[:20]),
+                    + ", ".join(undeclared[:20])))
+            # MÉDIO-2 (banca v13): direção simétrica — declarado mas NÃO
+            # tocado = JSON do driver forjado (spoof via cat) ou declaração
+            # falsa; inconclusivo, não verde.
+            try:
+                _touched_set = {str(t).replace("\\", "/").strip() for t in (touched or [])}
+                phantom = [
+                    d for d in (declared or [])
+                    if str(d).replace("\\", "/").strip() not in _touched_set
+                    and not str(d).replace("\\", "/").strip().startswith(
+                        (".henke/runs/", ".henke/evidence/"))
+                ]
+            except Exception:
+                phantom = []
+            if phantom:
+                audit_findings.append((2,
+                    "FILES-CHANGED-PHANTOM: declarados sem contraparte no "
+                    "diff real — declaração do driver não confere: "
+                    + ", ".join(sorted(phantom)[:15])))
+            if audit_findings:
+                record_gate(
+                    run_path, "files_changed_audit",
+                    max(c for c, _ in audit_findings),
+                    " | ".join(m for _, m in audit_findings),
                     manual=True,
                 )
             else:
@@ -1843,9 +1941,12 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                 "allowlist de POLICY.json"
             )
         else:
-            test_timeout = float(timeout_opt or (project or {}).get("timeout_sec") or 180.0)
-            if not math.isfinite(test_timeout) or test_timeout <= 0:
-                # F-6 (banca v12): timeout hostil do PROJECT.json → default.
+            try:
+                test_timeout = float(timeout_opt or (project or {}).get("timeout_sec") or 180.0)
+                if not math.isfinite(test_timeout) or test_timeout <= 0:
+                    # F-6 (banca v12): timeout hostil do PROJECT.json → default.
+                    raise ValueError
+            except (TypeError, ValueError):
                 test_timeout = 180.0
             t_exit, t_out = _invoke_test_cmd(repo_root, str(test_cmd), test_timeout)
         discovered = passed = 0

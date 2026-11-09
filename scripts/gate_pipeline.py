@@ -85,7 +85,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     # 1) Coletor: produz o artefato fresco que o portão consome.
-    collector = _run([sys.executable, str(REPO_SIGNALS), *COLLECTORS[gate], "--root", str(repo)])
+    try:
+        collector = _run([sys.executable, str(REPO_SIGNALS), *COLLECTORS[gate], "--root", str(repo)])
+    except subprocess.TimeoutExpired:
+        # B8 (banca v13): TimeoutExpired virava traceback exit 1.
+        print(f"gate_pipeline: coletor '{COLLECTORS[gate]}' expirou", file=sys.stderr)
+        return 2
     if collector.returncode != 0 or not (collector.stdout or "").strip():
         print(
             f"gate_pipeline: coletor '{COLLECTORS[gate]}' falhou "

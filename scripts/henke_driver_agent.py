@@ -63,20 +63,33 @@ _INSTR = (
 
 
 def _last_result_json(text: str) -> dict | None:
-    found = None
+    # MÉDIO-2 (banca v13): last-match no stdout INTEIRO — um `cat` de arquivo
+    # do repo com {"files_changed": [...]} depois do JSON real spoofava a
+    # declaração e contornava o cap NO-OP-UNVERIFIED. Contrato = última linha;
+    # fallback: PRIMEIRO match (o real vem antes do conteúdo despejado).
+    non_empty = [ln for ln in text.splitlines() if ln.strip()]
+    if non_empty:
+        try:
+            obj = json.loads(non_empty[-1])
+            if isinstance(obj, dict) and isinstance(obj.get("files_changed"), list):
+                return obj
+        except ValueError:
+            pass
     for match in re.finditer(r'\{[^{}]*"files_changed"[^{}]*\}', text):
         try:
             obj = json.loads(match.group(0))
         except ValueError:
             continue
         if isinstance(obj.get("files_changed"), list):
-            found = obj
-    return found
+            return obj  # primeiro match — o JSON real precede o dump do cat
+    return None
 
 
 def main() -> int:
     cli = sys.argv[1] if len(sys.argv) > 1 else ""
-    model = sys.argv[2] if len(sys.argv) > 2 else _DEFAULT_MODELS.get(cli, "")
+    # B6 (banca v13): `--driver agent:cli:` (dois-pontos no fim) → model=""
+    # → filtro removia o "" mas deixava "-m" solto engolindo --auto.
+    model = (sys.argv[2] or _DEFAULT_MODELS.get(cli, "")) if len(sys.argv) > 2 else _DEFAULT_MODELS.get(cli, "")
     if cli not in PRESETS:
         print(json.dumps({
             "files_changed": [],

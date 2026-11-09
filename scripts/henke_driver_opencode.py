@@ -52,20 +52,30 @@ _INSTR = (
 
 
 def _last_result_json(text: str) -> dict | None:
-    """Último objeto JSON contendo 'files_changed' no stdout do agente."""
-    found = None
+    """Último objeto JSON contendo 'files_changed' no stdout do agente.
+    MÉDIO-2 (banca v13): só a última linha não-vazia; fallback primeiro
+    match — um `cat` de arquivo do repo depois do JSON real spoofava."""
+    non_empty = [ln for ln in text.splitlines() if ln.strip()]
+    if non_empty:
+        try:
+            obj = json.loads(non_empty[-1])
+            if isinstance(obj, dict) and isinstance(obj.get("files_changed"), list):
+                return obj
+        except ValueError:
+            pass
     for match in re.finditer(r'\{[^{}]*"files_changed"[^{}]*\}', text):
         try:
             obj = json.loads(match.group(0))
         except ValueError:
             continue
         if isinstance(obj.get("files_changed"), list):
-            found = obj
-    return found
+            return obj
+    return None
 
 
 def main() -> int:
-    model = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
+    # B6 (banca v13): string vazia de modelo engolia a flag seguinte.
+    model = (sys.argv[1] or DEFAULT_MODEL) if len(sys.argv) > 1 else DEFAULT_MODEL
     if not _MODEL_RE.fullmatch(model):
         print(json.dumps({"files_changed": [], "notes": f"modelo inválido: {model!r}"}))
         return 1

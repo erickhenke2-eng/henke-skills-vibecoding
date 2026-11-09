@@ -71,11 +71,22 @@ _HOMOGLYPHS = str.maketrans({
 })
 
 
+# ALTO-3 (banca v13): variantes Unicode de pontuação — ver henke_auto._norm.
+_PUNCT_FOLDS = str.maketrans({
+    "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
+    "−": "-", "﹘": "-", "﹣": "-",
+    "∕": "/", "⁄": "/",
+    "꞉": ":", "˸": ":", "։": ":",
+    "․": ".", "‥": "..",
+    "＼": "\\",
+})
+
+
 def _norm(text: str) -> str:
     # Whitespace exótico (NBSP U+00A0, U+2000–U+200A, U+202F, U+3000, tab,
     # espaço duplo) quebra sinais multi-palavra ("git\u00A0push --force" evade
     # "git push" — banca v9 A3): todo Zs vira espaço e \s+ colapsa para um.
-    folded = text.translate(_HOMOGLYPHS)
+    folded = text.translate(_HOMOGLYPHS).translate(_PUNCT_FOLDS)
     nfkd = unicodedata.normalize("NFKD", folded.lower())
     # Além de marcas combinantes: caracteres de FORMATO/controle invisíveis
     # (Cf/Cc/Cs/Co/Cn — ZWSP U+200B, ZWJ, WJ, BOM, soft-hyphen) quebram o \b
@@ -112,11 +123,26 @@ def _has_signal(text: str, sig: str) -> bool:
     # 'checkout .'/'checkout --' perdem o discriminador na compactação e
     # casariam em "tela de checkout" — só compacta sinais que já são
     # puramente alfanuméricos+espaços.
-    if len(sig_compact) >= 5 and re.fullmatch(r"[a-z0-9 ]+", sig_clean):
-        toks = [re.sub(r"[^a-z0-9]", "", t) for t in text.split()]
-        joined = set(toks) | {a + b for a, b in zip(toks, toks[1:])}
-        if sig_compact in joined:
-            return True
+    # ALTO-2/MÉDIO-5 (banca v13): idêntico ao henke_auto — >=3 fragmentos,
+    # tokens vazios de pontuação, sinais curtos ("w i p e"), separadores
+    # [_./\\] em identificadores/paths ("x_wipe.sh").
+    if len(sig_compact) >= 2 and re.fullmatch(r"[a-z0-9 ]+", sig_clean):
+        toks: list[str] = []
+        for _t in re.split(r"\s+", text):
+            for _seg in re.split(r"[_./\\]+", _t):
+                _seg = re.sub(r"[^a-z0-9]", "", _seg)
+                if _seg:
+                    toks.append(_seg)
+        for i, t in enumerate(toks):
+            acc = t
+            if acc == sig_compact:
+                return True
+            for nxt in toks[i + 1:]:
+                if len(acc) >= len(sig_compact):
+                    break
+                acc += nxt
+                if acc == sig_compact:
+                    return True
     return False
 
 
@@ -603,7 +629,11 @@ def _touched_files(repo_root: Path | None) -> list[str]:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "status", "--porcelain", "-z"],
             cwd=str(repo_root), capture_output=True, timeout=5,
-            env={**os.environ, "NoDefaultCurrentDirectoryInExePath": "1"},
+            # B1 (banca v13): única chamada git sem strip — GIT_DIR/
+            # GIT_INDEX_FILE injetados liam status de repo estranho.
+            env={k: v for k, v in os.environ.items()
+                 if not k.startswith("GIT_")} |
+            {"NoDefaultCurrentDirectoryInExePath": "1"},
         )
         if res.returncode != 0:
             return []

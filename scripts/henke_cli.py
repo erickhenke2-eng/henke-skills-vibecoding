@@ -40,6 +40,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -353,13 +354,17 @@ def _resolve_exec_timeout(repo_root: Path, cli_timeout: float | None) -> float:
       2. campo `timeout_sec` de `.henke/PROJECT.json` (quando numérico e > 0);
       3. fallback fixo de 180s.
     """
-    if cli_timeout is not None and cli_timeout > 0:
+    # B1 (banca v13): --timeout nan/inf passava nas checagens e o subprocesso
+    # nunca expirava — finito+positivo em ambas as fontes.
+    if (cli_timeout is not None and math.isfinite(cli_timeout)
+            and cli_timeout > 0):
         return float(cli_timeout)
     project_json = repo_root / ".henke" / "PROJECT.json"
     try:
         pdata = json.loads(project_json.read_text(encoding="utf-8"))
         val = pdata.get("timeout_sec") if isinstance(pdata, dict) else None
-        if isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0:
+        if (isinstance(val, (int, float)) and not isinstance(val, bool)
+                and math.isfinite(val) and val > 0):
             return float(val)
     except Exception:
         pass  # PROJECT.json ausente/inválido -> fallback silencioso para 180s
@@ -384,13 +389,44 @@ def _cmd_exec(
 
     cmd_str = " ".join(cmd_tokens).strip()
     exec_tokens = list(cmd_tokens)
+    # M5/H3 (banca v13): PYTHONPATH/PYTEST_*/NODE_OPTIONS/GIT_* hereditários
+    # subvertiam o tooling que produz evidência; PATH com '.', entrada do repo
+    # ou CWD implícito (which() em py<3.12) resolvia binário plantado.
+    child_env = {k: v for k, v in os.environ.items()
+                 if not (k.startswith("GIT_") or k.startswith("PYTEST_")
+                         or k.startswith("COVERAGE_")
+                         or k in ("PYTHONPATH", "PYTHONSTARTUP",
+                                  "NODE_OPTIONS", "VIRTUAL_ENV"))}
+    _rr: Path | None = None
+    try:
+        _rr = repo_root.resolve()
+        _safe_path = os.pathsep.join(
+            d for d in os.environ.get("PATH", "").split(os.pathsep)
+            if d.strip() and not (
+                lambda _rd: _rd == _rr or _rr in _rd.parents
+            )(Path(d).resolve()))
+        if _safe_path:
+            child_env["PATH"] = _safe_path
+    except OSError:
+        pass
     if exec_tokens and sys.platform.startswith("win"):
-        resolved = shutil.which(exec_tokens[0])
+        resolved = shutil.which(exec_tokens[0], path=child_env.get("PATH"))
         if resolved:
+            # H3 (banca v13): o resolvido dentro do repo é o impostor
+            # plantado — recusar, nunca executar.
+            try:
+                _res = Path(resolved).resolve()
+                if _rr is not None and (_res == _rr or _rr in _res.parents):
+                    print(
+                        f"ERRO: '{exec_tokens[0]}' resolve para binário dentro "
+                        f"do repo ({_res}) — recusado (path poisoning).",
+                        file=sys.stderr)
+                    return 2
+            except OSError:
+                pass
             exec_tokens[0] = resolved
         elif exec_tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls"):
             exec_tokens = ["cmd.exe", "/c"] + exec_tokens
-    child_env = os.environ.copy()
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
     # F-07 (banca v8): CWD poisoning — binário plantado no worktree não pode
@@ -404,9 +440,6 @@ def _cmd_exec(
             exec_tokens,
             cwd=str(repo_root),
             capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
             env=child_env,
             timeout=timeout_sec,
         )
@@ -417,14 +450,18 @@ def _cmd_exec(
         print(f"ERRO ao executar '{cmd_str}': {exc}", file=sys.stderr)
         return 2
 
-    out_text = res.stdout or ""
-    err_text = res.stderr or ""
+    # B9 (banca v13): sha cobria texto com errors="replace" — byte-streams
+    # distintos colidiam em U+FFFD. Hash sobre os BYTES capturados.
+    raw_out = res.stdout or b""
+    raw_err = res.stderr or b""
+    out_text = raw_out.decode("utf-8", errors="replace")
+    err_text = raw_err.decode("utf-8", errors="replace")
     if out_text:
         sys.stdout.write(out_text)
     if err_text:
         sys.stderr.write(err_text)
 
-    stdout_sha256 = hashlib.sha256((out_text + err_text).encode("utf-8")).hexdigest()
+    stdout_sha256 = hashlib.sha256(raw_out + raw_err).hexdigest()
     discovered, passed = parse_test_runner_output(out_text, err_text)
 
     # Lê prev_hash + append da entrada + LEDGER.json sob o MESMO lock
@@ -616,6 +653,9 @@ def _git_staged_files(repo_root: Path) -> list[str] | None:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "diff", "--cached", "--name-only", "-z"],
             capture_output=True, timeout=30,
+            # M5 (banca v13): GIT_* herditário lia índice de repo estranho.
+            env={k: v for k, v in os.environ.items()
+                 if not k.startswith("GIT_")},
         )
     except OSError:
         return None
@@ -893,11 +933,14 @@ def _git_diff_snapshot(repo_root: Path) -> tuple[str | None, str]:
     falha ou não há HEAD, declara a origem exata do que foi capturado.
     """
     try:
+        _genv = {k: v for k, v in os.environ.items()
+                 if not k.startswith("GIT_")}
         res = subprocess.run(
             ["git", "-C", str(repo_root),
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "diff", "--no-ext-diff", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=_genv,
         )
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout, "git diff HEAD"
@@ -906,6 +949,7 @@ def _git_diff_snapshot(repo_root: Path) -> tuple[str | None, str]:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "status", "--porcelain"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=_genv,
         )
         if res2.returncode == 0:
             if res2.stdout.strip():
@@ -976,13 +1020,21 @@ def _cmd_goldfish(
         sp = Path(spec_path)
         if not sp.is_absolute():
             sp = repo_root / spec_path
-        if sp.is_file():
+        # B8 (banca v13): --spec ../../etc/passwd embutia arquivo arbitrário
+        # no envelope destinado ao revisor externo.
+        try:
+            sp = sp.resolve()
+            sp.relative_to(repo_root.resolve())
+        except (OSError, ValueError):
+            spec_status = "fora do confinamento do repo — recusado"
+            sp = None
+        if sp is not None and sp.is_file():
             try:
                 spec_text = sp.read_text(encoding="utf-8", errors="replace")
                 spec_status = "lido"
             except OSError as exc:
                 spec_status = f"ilegível: {exc}"
-        else:
+        elif sp is not None:
             spec_status = f"não encontrado: {spec_path}"
 
     run_id = run_path.stem if run_path else f"goldfish-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"

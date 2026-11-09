@@ -45,8 +45,24 @@ def _atomic_write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
-    tmp_path.write_text(payload, encoding="utf-8")
+    # M12 (banca v13): write+replace sem fsync perdiam run/token/tip num
+    # crash — flusha o arquivo E o diretório antes/depois do replace.
+    fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    try:
+        os.write(fd, payload.encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
     os.replace(tmp_path, path)
+    try:
+        dfd = os.open(str(path.parent),
+                      os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass  # alguns FS (FAT, alguns mounts) não permitem fsync de dir
 
 
 @contextlib.contextmanager
@@ -57,7 +73,9 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
     `timeout`. Cobre a transação read-modify-write inteira — sem ele, dois
     processos leem o mesmo JSON e um write é perdido.
     """
-    lock_path = Path(str(Path(target)) + ".lock")
+    # M2 (banca v13): spellings distintos do mesmo arquivo geravam locks
+    # distintos → lost update concorrente.
+    lock_path = Path(str(Path(target).resolve()) + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout
     fd: int | None = None
@@ -65,6 +83,23 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
+            # M10 (banca v13): lock órfão de crash/kill wedgiava pra sempre —
+            # dono morto libera o lock.
+            _stale = False
+            try:
+                _pid = int(
+                    lock_path.read_text(encoding="utf-8", errors="replace")
+                    .strip().split("=", 1)[-1])
+                if _pid != os.getpid():
+                    os.kill(_pid, 0)
+            except (OSError, ValueError, IndexError):
+                _stale = True
+            if _stale:
+                try:
+                    lock_path.unlink()
+                    continue
+                except OSError:
+                    pass
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"timeout aguardando lock de escrita: {lock_path}")
             time.sleep(poll)
@@ -97,8 +132,19 @@ def _config_dir() -> Path:
     que nunca existiu na máquina da vítima."""
     if os.name == "nt":
         base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-        return Path(base) / "henke"
-    return Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "henke"
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    cfg = Path(base) / "henke"
+    # M3 (banca v13): APPDATA=<repo>\.fake plantava âncoras/tokens DENTRO do
+    # repo auditado — base env-resolvida sob o CWD cai pro home real.
+    try:
+        cwd_r = Path.cwd().resolve()
+        cfg_r = cfg.resolve()
+        if cfg_r == cwd_r or cwd_r in cfg_r.parents:
+            cfg = (Path.home() / "AppData" / "Roaming" / "henke") if os.name == "nt" else (Path.home() / ".config" / "henke")
+    except OSError:
+        pass
+    return cfg
 
 
 def _binding_token(binding: dict) -> str:
@@ -177,13 +223,23 @@ def load_exec_tip(repo_root: Path | str) -> str | None:
         return None
 
 
-def verify_approval_token(run_data: dict) -> tuple[bool, str]:
+def verify_approval_token(run_data: dict, repo_root: Path | str | None = None) -> tuple[bool, str]:
     """Confere se existe token LOCAL para o approval_binding desta run.
     Sem binding → nada a verificar (True). Com binding → exige o arquivo de
     aprovação local; sua ausência prova que `henke approve` nunca rodou aqui."""
     binding = run_data.get("approval_binding")
     if not isinstance(binding, dict):
         return True, ""
+    # M1 (banca v13): binding["repo"] nunca era comparado ao repo REAL —
+    # aprovação mintada no clone A valia na worktree B.
+    if repo_root is not None and binding.get("repo"):
+        try:
+            if str(Path(repo_root).resolve()) != str(binding["repo"]):
+                return False, (
+                    "APPROVAL-BINDING-REPO-MISMATCH: binding pertence a outro "
+                    "repositório — aprovação não é transferível")
+        except OSError:
+            return False, "APPROVAL-BINDING-REPO-MISMATCH: repo não resolvível"
     # APPROVAL-BINDING-REPLAY (banca v11 A2): o token deriva do CONTEÚDO do
     # binding — copiar o dict inteiro de uma run aprovada carrega o run_id
     # junto e replaya a aprovação. O binding deve pertencer a ESTA run.
@@ -215,8 +271,13 @@ def verify_approval_token(run_data: dict) -> tuple[bool, str]:
 
 
 def _safe_run_id(run_id: str) -> str:
-    """Alfanumérico + `-_` — mesma forma que `init_run` grava no arquivo."""
-    return "".join(c for c in str(run_id) if c.isalnum() or c in ("-", "_")).strip()
+    """ASCII alfanumérico + `-_` — mesma forma que `init_run` grava.
+    B2 (banca v13): `isalnum()` admitia Unicode (ſ/K/é/full-width) →
+    homóglifos e colisões NTFS case-insensitive."""
+    return "".join(c for c in str(run_id)
+                   if c in "0123456789"
+                   or "a" <= c <= "z" or "A" <= c <= "Z"
+                   or c in ("-", "_")).strip()
 
 
 # Teto de tamanho para evidência de portão (re-hash no verify lê em chunks
@@ -329,7 +390,9 @@ def write_anchor_sidecar(run_id: str, spec_path: str | None,
     try:
         d = _config_dir() / "anchors"
         d.mkdir(parents=True, exist_ok=True)
-        p = d / f"{safe}.json"
+        # M1 (banca v13): sidecar chaveado só por run_id — init_run(X) num
+        # clone B clobberava a âncora do repo A e replayava aprovação.
+        p = d / _anchor_filename(safe, repo_root)
         payload = {
             "run_id": safe,
             "repo": str(Path(repo_root).resolve()) if repo_root is not None else None,
@@ -348,6 +411,43 @@ def write_anchor_sidecar(run_id: str, spec_path: str | None,
         return None
 
 
+def amend_anchor_fields(run_id: str, repo_root: Path | str | None,
+                        patch: dict) -> bool:
+    """Mescla chaves em `fields` do sidecar EXISTENTE (nunca cria um novo —
+    sidecar ausente = init_run não rodou aqui; criar seria forja).
+    MÉDIO-1 (banca v13): `mandatory_gates` é patchada na run no resume mas
+    ficava fora da âncora — o driver a deletava do JSON e os portões da
+    matriz deixavam de ser exigidos exatamente nas runs sensíveis."""
+    safe = _safe_run_id(run_id)
+    if not safe or not isinstance(patch, dict):
+        return False
+    p = _config_dir() / "anchors" / _anchor_filename(safe, repo_root)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(data, dict) or not isinstance(data.get("fields"), dict):
+        return False
+    data["fields"].update(patch)
+    try:
+        _atomic_write_json(p, data)
+        return True
+    except OSError:
+        return False
+
+
+def _anchor_filename(safe: str, repo_root: Path | str | None) -> str:
+    """Nome do sidecar: tag do repo + run_id (isolamento cross-repo)."""
+    if repo_root is not None:
+        try:
+            tag = hashlib.sha256(
+                str(Path(repo_root).resolve()).encode("utf-8")).hexdigest()[:12]
+            return f"{tag}-{safe}.json"
+        except OSError:
+            pass
+    return f"{safe}.json"
+
+
 def load_anchor_sidecar(run_id: str, repo_root: Path | str | None = None) -> dict | None:
     """Lê o sidecar local de âncoras (None se ausente/inválido/de outro repo).
     `repo_root` fornecido + sidecar com `repo` divergente → None (replay
@@ -355,7 +455,14 @@ def load_anchor_sidecar(run_id: str, repo_root: Path | str | None = None) -> dic
     safe = _safe_run_id(run_id)
     if not safe:
         return None
-    p = _config_dir() / "anchors" / f"{safe}.json"
+    anchors_d = _config_dir() / "anchors"
+    p = anchors_d / _anchor_filename(safe, repo_root)
+    if repo_root is None and not p.is_file():
+        # Legado/fallback sem repo: aceita <tag>-<run>.json ou <run>.json.
+        for cand in sorted(anchors_d.glob(f"*-{safe}.json")) + [anchors_d / f"{safe}.json"]:
+            if cand.is_file():
+                p = cand
+                break
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -847,7 +954,8 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
                 "APPROVAL-BINDING-MISSING: run declara aprovação sem "
                 "approval_binding — `henke approve` nunca rodou nesta máquina"
             ]
-        ok_tok, tok_msg = verify_approval_token(data)
+        ok_tok, tok_msg = verify_approval_token(
+            data, repo_root=_repo_root_for_run(run_path))
         if not ok_tok:
             return False, [tok_msg]
 
@@ -1096,7 +1204,8 @@ def amend_scope(run_path: Path, file_rel: str, reason: str) -> dict:
 
 
 def approve_run(run_path: Path, approver: str = "human",
-                expected: dict | None = None) -> dict:
+                expected: dict | None = None,
+                expected_head: str | None = None) -> dict:
     """Registra aprovação humana explícita para destravar runs com requires_human_auth.
 
     Grava `approved_head` (git rev-parse HEAD do repo da run, ou None) como
@@ -1144,15 +1253,36 @@ def approve_run(run_path: Path, approver: str = "human",
                 f"({', '.join(_drift)}) — aprovação recusada")
         # A2 (banca v11): binding com run_id de outra run replayaria o token.
         _b = data.get("approval_binding")
-        if isinstance(_b, dict) and _b.get("run_id") != _safe_run_id(run_path.stem):
+        # B3 (banca v13): binding ausente/não-dict → approve "OK" sem token
+        # mintado — cerimônia vacuosa que o verify reprovaria para sempre.
+        if not isinstance(_b, dict):
+            raise ValueError(
+                "APPROVAL-BINDING-MISSING: run sem approval_binding — "
+                "nada a vincular; aprovação recusada")
+        if _b.get("run_id") != _safe_run_id(run_path.stem):
             raise ValueError(
                 "APPROVAL-BINDING-RUN-MISMATCH: binding não pertence a esta "
                 "run — aprovação recusada")
+        # M1 (banca v13): binding["repo"] deve ser ESTE repo.
+        if _b.get("repo") and str(Path(_rr).resolve()) != str(_b["repo"]):
+            raise ValueError(
+                "APPROVAL-BINDING-REPO-MISMATCH: binding pertence a outro "
+                "repositório — aprovação recusada")
+        # B5 (banca v13): chaves extras do binding não eram exibidas no
+        # resumo nem cobertas por token/fingerprint — whitelist fecha o schema.
+        _BINDING_KEYS = {"head", "scope_sha256", "driver", "run_id", "repo", "bound_at"}
+        data["approval_binding"] = {k: v for k, v in _b.items() if k in _BINDING_KEYS}
         data["review_status"] = "approved"
         data["approved_by"] = approver.strip() or "human"
         data["approved_at"] = _now_iso()
         repo_root = _repo_root_for_run(run_path)
         approved_head = _git_head(repo_root) if repo_root is not None else None
+        # M4 (banca v13): resumo exibia um HEAD e o token ancora outro —
+        # commit plantado na janela humano→enter entrava aprovado.
+        if expected_head is not None and approved_head != expected_head:
+            raise ValueError(
+                "APPROVE-HEAD-TOCTOU: HEAD mudou entre o resumo exibido e a "
+                "aprovação — recusado; releia o resumo e tente de novo")
         data["approved_head"] = approved_head
         # Re-ancora o vínculo executável ao HEAD que o humano está aprovando
         # AGORA — sem isso, um commit legítimo entre aprovação e --resume
@@ -1316,7 +1446,10 @@ def main(argv: list[str] | None = None) -> int:
                 if resp not in ("yes", "y"):
                     print("Aprovação abortada pelo operador.")
                     return 2
-            data = approve_run(args.run_file, args.approver, expected=_prev)
+            data = approve_run(
+                args.run_file, args.approver, expected=_prev,
+                # M4 (banca v13): o HEAD exibido é o HEAD vinculado.
+                expected_head=_live_head if isinstance(_live_head, str) and "(" not in _live_head else None)
             print(f"OK: Run aprovada por '{args.approver}' -> outcome='{data['outcome']}'")
             return 0
 

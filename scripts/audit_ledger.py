@@ -25,7 +25,16 @@ HAZARDOUS_PATTERNS = [
     (r"\b(?:npm|pnpm|yarn)\s+publish\b", "Comando de publicação (publish) proibido em ledger"),
     (r"\b(?:pip|twine)\s+upload\b", "Comando de upload de pacote proibido em ledger"),
     (r"\bchmod\s+(?:-R\s+)?777\b", "Permissão insegura 777 detectada"),
-    (r"(?:curl|wget)\b.*\|\s*(?:ba)?sh\b", "Execução remota cega via pipe (curl | sh) proibida"),
+    # M9 (banca v13): sinks de pipe além de sh/bash (zsh/fish/dash/python/
+    # node/iex) passavam; formas curtas PS e verbos destrutivos extra.
+    (r"(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b.*"
+     r"\|\s*(?:(?:ba|z|fi|da)?sh|pwsh|powershell|iex|python[\d.]*|node|perl|ruby)\b",
+     "Execução remota cega via pipe proibida"),
+    (r"\bRemove-Item\b[^|;&]*-(?:r|re|rec|recurse|f|fo|force)\b",
+     "Remove-Item recursivo/forçado proibido"),
+    (r"\b(?:ri|erase)\b[^|;&]*(?:-Recurse|/s\b)", "Apagamento recursivo proibido"),
+    (r"\b(?:Format-Volume|Clear-Disk|vssadmin\s+delete|reg\s+delete|dd\s+\S*of=/dev/)\b",
+     "Comando destrutivo de sistema proibido"),
     (r"\bformat\b\s+[a-zA-Z]:", "Comando de formatação de disco detectado"),
     (r"\brm\b(?=[^|;&]*\s(?:-\w*r|--recursive)\b)(?=[^|;&]*\s(?:-\w*f|--force)\b)",
      "Remoção recursiva forçada (flags separadas) proibida"),
@@ -43,10 +52,23 @@ HAZARDOUS_PATTERNS = [
 # o pipeline executa pretest -> test -> posttest, e `npm run X` expande preX/X/postX.
 # A5 (banca v12): args/flags após o script NÃO podem pular a expansão —
 # `npm test -- --runInBand`/`npm run test -s` rodam pretest/posttest de verdade.
-_NPM_CMD_RE = re.compile(r"^\s*(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)(?:\s|$)")
-_NPM_RUN_RE = re.compile(r"(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([A-Za-z0-9:_-]+)")
+# H4 (banca v13): flags ANTES do script (`npm -s test`, `npm --prefix x test`)
+# viravam o nome capturado e a expansão sumia; `npm run build.prod` falhava o
+# regex inteiro; `npm.cmd` não era reconhecido como runner.
+_NPM_CMD_RE = re.compile(
+    r"^\s*(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?"
+    r"\s+(?:-\S+\s+)*(?:run\s+)?([^\s]+)(?:\s|$)", re.IGNORECASE)
+_NPM_RUN_RE = re.compile(
+    r"(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?\s+"
+    r"(?:-\S+\s+)*(?:run\s+)?([^\s]+)", re.IGNORECASE)
+# M8 (banca v13): shapes de teste fora do regex declaravam testes sem nenhum
+# registro exigido — cobre `npm run test`, runners via npx/deno/dotnet/ctest.
 _TEST_CMD_RE = re.compile(
-    r"\b(?:pytest|jest|vitest|mocha|unittest|cargo\s+test|go\s+test|npm\s+test|npm\s+t\b|bun\s+test|pnpm\s+test|yarn\s+test)\b",
+    r"\b(?:pytest|py\.test|tox|nox|jest|vitest|mocha|unittest|playwright|"
+    r"cargo\s+test|go\s+test|ctest|dotnet\s+test|deno\s+test|"
+    r"(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?\s+"
+    r"(?:(?:-\S+\s+)*(?:run\s+)?)\S*test\S*|"
+    r"npx\s+(?:jest|vitest|mocha|playwright|cypress))\b",
     re.IGNORECASE,
 )
 
@@ -102,19 +124,31 @@ def verify_log_chain(log_p: Path) -> tuple[list[str], str | None]:
     `henke exec` ANTES de fazer append — encadear sobre um log plantado
     lavaria a âncora da ponta com uma execução legítima (banca v9 — A1).
     """
-    errors: list[str] = []
     log_p = Path(log_p)
     if not log_p.is_file():
         return [f"UNVERIFIED_EXECUTION_EVIDENCE: arquivo de log '{log_p}' inexistente."], None
-
-    try:
-        raw_lines = [ln.strip() for ln in log_p.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    except Exception as exc:
-        return [f"UNVERIFIED_EXECUTION_EVIDENCE: falha ao ler '{log_p}': {exc}"], None
-
+    raw_lines = _read_log_lines(log_p)
+    if raw_lines is None:
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: falha ao ler '{log_p}'."], None
     if not raw_lines:
         return [f"UNVERIFIED_EXECUTION_EVIDENCE: '{log_p}' está vazio."], None
+    errors, last, _recs = _verify_log_chain_core(raw_lines, log_p)
+    return errors, last
 
+
+def _read_log_lines(log_p: Path) -> list[str] | None:
+    try:
+        return [ln.strip() for ln in log_p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    except Exception:
+        return None
+
+
+def _verify_log_chain_core(raw_lines: list[str], log_p: Path) -> tuple[list[str], str | None, list[dict]]:
+    """Núcleo compartilhado: cadeia+âncora+registros válidos sobre UMA leitura.
+    M6 (banca v13): verify_exec_log relia o arquivo depois de verify_log_chain
+    — swap na janela entre as duas leituras casava o ledger com um arquivo
+    nunca validado. Uma leitura, uma verdade."""
+    errors: list[str] = []
     verified_records: list[dict] = []
     last_ehash: str | None = None
     for idx, line in enumerate(raw_lines, 1):
@@ -214,7 +248,14 @@ def verify_log_chain(log_p: Path) -> tuple[list[str], str | None]:
                 _rs_spec.loader.exec_module(_rs_tip)
         except Exception:
             _rs_tip = None
-        if _rs_tip is not None:
+        if _rs_tip is None:
+            # H1 (banca v13): falha de import silenciava a ÚNICA âncora
+            # anti-rewrite — log inteiramente forjado auditava verde.
+            errors.append(
+                "UNVERIFIED_EXECUTION_EVIDENCE: módulo run_state "
+                "indisponível — âncora de ponta não verificada"
+            )
+        else:
             expected_tip = _rs_tip.load_exec_tip(repo_root)
             if expected_tip is None:
                 errors.append(
@@ -227,33 +268,21 @@ def verify_log_chain(log_p: Path) -> tuple[list[str], str | None]:
                     f"âncora local — cadeia reescrita/truncada."
                 )
 
-    return errors, last_ehash
+    return errors, last_ehash, verified_records
 
 
 def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
     """Verifica a cadeia de hashes de `.henke/exec_log.jsonl` e cruza cada comando
     de teste do ledger contra os registros reais executados."""
-    errors, _last = verify_log_chain(exec_log_path)
     log_p = Path(exec_log_path)
-    if errors and not log_p.is_file():
-        return errors
-    try:
-        raw_lines = [ln.strip() for ln in log_p.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    except Exception:
-        raw_lines = []
-    verified_records: list[dict] = []
-    for line in raw_lines:
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        if isinstance(rec, dict):
-            verified_records.append({
-                "cmd": str(rec.get("cmd", "")).strip(),
-                "exit": rec.get("exit", rec.get("exit_code", 0)),
-                "testes_descobertos": rec.get("testes_descobertos", 0),
-                "stdout_sha256": str(rec.get("stdout_sha256", "")).strip(),
-            })
+    if not log_p.is_file():
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: arquivo de log '{log_p}' inexistente."]
+    raw_lines = _read_log_lines(log_p)
+    if raw_lines is None:
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: falha ao ler '{log_p}'."]
+    if not raw_lines:
+        return [f"UNVERIFIED_EXECUTION_EVIDENCE: '{log_p}' está vazio."]
+    errors, _last, verified_records = _verify_log_chain_core(raw_lines, log_p)
 
     for i, entry in enumerate(entries, 1):
         if not isinstance(entry, dict):
@@ -261,6 +290,15 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
         full_cmd = _full_command_str(entry)
         raw_cmd = str(entry.get("cmd", "")).strip()
         if not (is_test_cmd(full_cmd) or "testes_descobertos" in entry or "stdout_sha256" in entry):
+            continue
+        if not is_test_cmd(full_cmd):
+            # H2 (banca v13): `echo "5 passed"` minta registro de log honesto
+            # que casava com entrada de ledger editada à mão — declaração de
+            # teste exige que o comando seja um runner reconhecido.
+            errors.append(
+                f"UNVERIFIED_EXECUTION_EVIDENCE: entrada #{i} declara testes "
+                f"mas '{full_cmd}' não é runner de teste reconhecido."
+            )
             continue
         e_exit = entry.get("exit", entry.get("exit_code"))
         e_tests = entry.get("testes_descobertos")
@@ -422,12 +460,16 @@ def main():
 
     ledger_path = args.ledger.resolve()
     if not ledger_path.is_file():
-        sys.exit(f"ERRO: Arquivo de ledger não encontrado em: '{ledger_path}'")
+        # B10 (banca v13): malformado/uso sai exit 2, não 1.
+        print(f"ERRO: Arquivo de ledger não encontrado em: '{ledger_path}'",
+              file=sys.stderr)
+        sys.exit(2)
 
     try:
         content = json.loads(ledger_path.read_text(encoding="utf-8"))
     except Exception as e:
-        sys.exit(f"ERRO: Falha ao parsear JSON do ledger: {e}")
+        print(f"ERRO: Falha ao parsear JSON do ledger: {e}", file=sys.stderr)
+        sys.exit(2)
 
     pkg_path = args.package_json or _discover_package_json(ledger_path)
     pkg_data = None
@@ -435,8 +477,11 @@ def main():
         try:
             pkg_data = json.loads(Path(pkg_path).read_text(encoding="utf-8"))
         except Exception as e:
-            if args.package_json:
-                sys.exit(f"ERRO: Falha ao parsear package.json '{args.package_json}': {e}")
+            # M7 (banca v13): package.json descoberto e ilegível → lifecycle
+            # invisível silencioso (pretest hostil não expandido). Fail closed.
+            print(f"ERRO: Falha ao parsear package.json '{pkg_path}': {e}",
+                  file=sys.stderr)
+            sys.exit(2)
 
     has_sha_entries = isinstance(content, list) and any(
         isinstance(x, dict) and "stdout_sha256" in x for x in content

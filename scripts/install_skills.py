@@ -190,6 +190,9 @@ def read_manifest(path):
 def safe_member(target, rel):
     """Resolve a manifest entry inside target; reject traversal and symlinks."""
     normalized_rel = str(rel).replace("\\", "/")
+    # B9 (banca v13): entrada "" → parts vazio → parts[-1] IndexError.
+    if not normalized_rel.strip():
+        raise ValueError(f"Entrada de manifesto vazia: {rel!r}")
     rel_path = PurePosixPath(normalized_rel)
     if rel_path.is_absolute() or ".." in rel_path.parts or rel == MANIFEST:
         raise ValueError(f"Entrada de manifesto insegura: {rel}")
