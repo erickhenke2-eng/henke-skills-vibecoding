@@ -210,6 +210,7 @@ def verify_ledger(
     counts = {s: 0 for s in VALID_UNIT_STATUS}
     unenforced_assumptions = 0
 
+    seen_paths: set = set()
     for u in units:
         if not isinstance(u, dict):
             # F35 (banca v11): entrada não-dict explodia com traceback exit 1
@@ -220,6 +221,15 @@ def verify_ledger(
         rel = u.get("path", "")
         status = u.get("status", "")
         mapped_paths.add(rel)
+        # H3 (banca v14): unidades duplicadas do mesmo path inflavam o
+        # denominador — 10 arquivos + 10 dups "covered" = 90% verde falso.
+        if isinstance(rel, str) and rel:
+            if rel in seen_paths:
+                errors.append(f"DUPLICATE-PATH [{uid}]: '{rel}' repetida no ledger")
+            seen_paths.add(rel)
+        # M12 (banca v14): path não-string explodia/virava lixo no mapping.
+        elif rel:
+            errors.append(f"INVALID-UNIT [{uid}]: 'path' não-string {rel!r:.40}")
 
         if status not in VALID_UNIT_STATUS:
             errors.append(f"INVALID-STATUS [{uid}]: status '{status}' desconhecido")
@@ -231,10 +241,13 @@ def verify_ledger(
                 errors.append(f"STALE-DELETED [{uid}]: arquivo '{rel}' não existe mais no disco")
         else:
             cur_sha, _ = _file_sha256_and_lines(disk_files[rel])
-            # A10 (banca v12): sha era só checado p/ status auditados —
-            # pending/deferred/out_of_scope viravam faixa de edição livre.
-            if u.get("sha256") and cur_sha != u.get("sha256"):
-                errors.append(f"STALE-HASH [{uid}]: arquivo '{rel}' mudou após a auditoria (sha256 divergente)")
+            # A10 v12 + H4 v14: sha checado p/ todo status E OBRIGATÓRIO —
+            # omitir o campo desligava o detector de mutação.
+            if u.get("sha256"):
+                if cur_sha != u.get("sha256"):
+                    errors.append(f"STALE-HASH [{uid}]: arquivo '{rel}' mudou após a auditoria (sha256 divergente)")
+            else:
+                errors.append(f"MISSING-SHA [{uid}]: unidade de arquivo existente exige 'sha256'")
 
         if status == "pending":
             errors.append(f"PENDING-UNIT [{uid}]: unidade '{rel}' permaneceu 'pending'")

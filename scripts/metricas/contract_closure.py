@@ -69,6 +69,10 @@ def parse_declared_bridges_with_validation(spec_path: Path) -> tuple[bool, list[
     """Extrai `(origem, simbolo, destino, ações)` da seção '## 5. Ponte[s]'.
     Retorna (has_section, bridges, malformed_lines)."""
     text = spec_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    # H5 (banca v14): `## 5.` dentro de comentário HTML/fence vira seção
+    # falsa — strip antes do parse (espelho do _md_clean de spec_drift).
+    text = re.sub(r"<!--[\s\S]*?-->", " ", text)
+    text = re.sub(r"(?m)^```[^\n]*\n[\s\S]*?^```\s*$", " ", text)
     match = re.search(r"(?mi)^## 5\..*?(?:Ponte|Bridge).*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
     if not match:
         # Seção '## 5.' presente com heading não reconhecido (ex.: 'Contract

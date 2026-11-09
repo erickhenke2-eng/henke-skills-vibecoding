@@ -297,7 +297,14 @@ def _child_env() -> dict:
     # A2 (banca v11): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* do
     # ambiente redirecionam o git interno (âncora HEAD, status --ignored,
     # check-ignore) para outro repo/index — strip em todo filho.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    # A4 (banca v14): PYTHONPATH/loader hooks subvertem o tooling que
+    # produz evidência — strip amplo igual ao do `henke exec`.
+    env = {k: v for k, v in os.environ.items()
+           if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                   or k.startswith("LD_") or k.startswith("DYLD_")
+                   or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                            "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                            "DOTNET_STARTUP_HOOKS"))}
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     # F-07 (banca v8): CreateProcess/`shutil.which` procuram no CWD no

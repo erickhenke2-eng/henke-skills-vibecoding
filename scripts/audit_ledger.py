@@ -35,6 +35,11 @@ HAZARDOUS_PATTERNS = [
     (r"\b(?:ri|erase)\b[^|;&]*(?:-Recurse|/s\b)", "Apagamento recursivo proibido"),
     (r"\b(?:Format-Volume|Clear-Disk|vssadmin\s+delete|reg\s+delete|dd\s+\S*of=/dev/)\b",
      "Comando destrutivo de sistema proibido"),
+    # A11 (banca v14): powershell -enc/-e e LOLBins de execução remota.
+    (r"\b(?:powershell|pwsh)\b[^|;&]*-(?:e|en|ec|ep|enc|encodedcommand)\b",
+     "powershell com comando codificado (-enc) proibido"),
+    (r"\b(?:mshta|wscript|cscript)\b|\bregsvr32\b[^|;&]*/i:http|\brundll32\b[^|;&]*javascript:",
+     "LOLBin de execução remota proibido"),
     (r"\bformat\b\s+[a-zA-Z]:", "Comando de formatação de disco detectado"),
     (r"\brm\b(?=[^|;&]*\s(?:-\w*r|--recursive)\b)(?=[^|;&]*\s(?:-\w*f|--force)\b)",
      "Remoção recursiva forçada (flags separadas) proibida"),
@@ -61,6 +66,31 @@ _NPM_CMD_RE = re.compile(
 _NPM_RUN_RE = re.compile(
     r"(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?\s+"
     r"(?:-\S+\s+)*(?:run\s+)?([^\s]+)", re.IGNORECASE)
+# A5 (banca v14): flag COM argumento separado (`--prefix . test`,
+# `-w pkg test`) — regex comia o flag e capturava o ARGUMENTO como script,
+# escondendo o lifecycle da denylist.
+_NPM_FLAGS_TAKING_ARG = {
+    "--prefix", "-w", "--workspace", "--cache", "--userconfig",
+    "--location", "--loglevel", "--registry", "-C", "--cwd",
+}
+
+
+def _npm_script_name(cmd: str) -> str | None:
+    """Extrai o nome do script npm via tokenizer — pula runner, flags e os
+    argumentos das flags que tomam valor separado."""
+    toks = cmd.strip().split()
+    if not toks or not re.fullmatch(
+            r"(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?",
+            toks[0], re.IGNORECASE):
+        return None
+    toks = toks[1:]
+    while toks and toks[0].startswith("-"):
+        flag = toks.pop(0)
+        if flag in _NPM_FLAGS_TAKING_ARG and toks:
+            toks.pop(0)  # argumento separado da flag
+    if toks and toks[0] == "run":
+        toks.pop(0)
+    return toks[0] if toks else None
 # M8 (banca v13): shapes de teste fora do regex declaravam testes sem nenhum
 # registro exigido — cobre `npm run test`, runners via npx/deno/dotnet/ctest.
 _TEST_CMD_RE = re.compile(
@@ -75,7 +105,17 @@ _TEST_CMD_RE = re.compile(
 
 def is_test_cmd(full_cmd: str) -> bool:
     """Detecta comando de teste com word-boundary (não confunde 'echo contest' com teste)."""
-    return bool(_TEST_CMD_RE.search(full_cmd))
+    if _TEST_CMD_RE.search(full_cmd):
+        return True
+    # A5 (banca v14): `npm -w pkg test`/`npm t` — script resolvido via
+    # tokenizer (regex não cobria flag+arg nem o alias `t`).
+    script = _npm_script_name(full_cmd)
+    if script is not None:
+        return script == "t" or script.startswith("test")
+    # ava/tape/`python tests/x.py`/`python test_foo.py` (henke_cli aceita).
+    return bool(re.search(
+        r"\b(?:ava|tape)\b|\bpython[\d.]*\s+(?:tests?[\\/]|test_\w+\.py)",
+        full_cmd, re.IGNORECASE))
 
 
 def resolve_npm_lifecycle(cmd: str, pkg: dict) -> list[tuple[str, str]]:
@@ -84,8 +124,8 @@ def resolve_npm_lifecycle(cmd: str, pkg: dict) -> list[tuple[str, str]]:
     `npm run X` -> preX/X/postX. Expansão transitiva de `npm run Y` nos corpos,
     com guarda de ciclo e profundidade máxima 8."""
     scripts = (pkg or {}).get("scripts")
-    m = _NPM_CMD_RE.match(cmd.strip())
-    if not m or not isinstance(scripts, dict):
+    script_name = _npm_script_name(cmd)
+    if script_name is None or not isinstance(scripts, dict):
         return []
     chain: list[tuple[str, str]] = []
     visited: set[str] = set()
@@ -103,7 +143,7 @@ def resolve_npm_lifecycle(cmd: str, pkg: dict) -> list[tuple[str, str]]:
                 if sub != hook:
                     expand(sub, depth + 1)
 
-    expand(m.group(1), 0)
+    expand(script_name, 0)
     return chain
 
 
@@ -114,6 +154,11 @@ def _full_command_str(entry: dict) -> str:
         return f"{cmd} {args_list}".strip()
     if isinstance(args_list, list) and args_list:
         return f"{cmd} {' '.join(str(a) for a in args_list)}".strip()
+    if args_list:
+        # A6 (banca v14): args dict/int/escondido caía silencioso — o
+        # comando perigoso ficava invisível à denylist. Serializa qualquer
+        # tipo pra nunca ocultar conteúdo.
+        return f"{cmd} {json.dumps(args_list, ensure_ascii=False, default=str)}".strip()
     return str(cmd).strip()
 
 
@@ -472,6 +517,12 @@ def main():
         sys.exit(2)
 
     pkg_path = args.package_json or _discover_package_json(ledger_path)
+    if args.package_json and not Path(args.package_json).is_file():
+        # A12 (banca v14): --package-json explícito inexistente caía
+        # silencioso (lifecycle invisível) — caminho explícito é fail-closed.
+        print(f"ERRO: package.json não encontrado: '{args.package_json}'",
+              file=sys.stderr)
+        sys.exit(2)
     pkg_data = None
     if pkg_path and Path(pkg_path).is_file():
         try:

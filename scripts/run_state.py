@@ -65,6 +65,27 @@ def _atomic_write_json(path: Path, data: dict) -> None:
         pass  # alguns FS (FAT, alguns mounts) não permitem fsync de dir
 
 
+def _pid_alive(pid: int) -> bool:
+    """Dono do lock ainda existe? A1 (banca v14): `os.kill(pid,0)` no Windows
+    mapeia sig 0 → GenerateConsoleCtrlEvent — injetava Ctrl+C num processo
+    inocente com PID reciclado e sempre retornava vivo."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+            if h:
+                ctypes.windll.kernel32.CloseHandle(h)
+                return True
+            return False
+        except (AttributeError, OSError, TypeError, ValueError):
+            return True  # indeterminado → não quebra lock de vivo
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 @contextlib.contextmanager
 def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
     """Lock interprocessos por arquivo-alvo (`<target>.lock`).
@@ -83,33 +104,52 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
-            # M10 (banca v13): lock órfão de crash/kill wedgiava pra sempre —
-            # dono morto libera o lock.
+            # M10 v13 + A1 v14: lock órfão de crash wedgiava pra sempre; MAS
+            # arquivo recém-criado (ainda sem pid, janela open→write) NÃO é
+            # stale — só quebra com pid morto OU conteúdo inválido e velho.
             _stale = False
             try:
-                _pid = int(
-                    lock_path.read_text(encoding="utf-8", errors="replace")
-                    .strip().split("=", 1)[-1])
-                if _pid != os.getpid():
-                    os.kill(_pid, 0)
-            except (OSError, ValueError, IndexError):
+                _stat = lock_path.stat()
+                _raw = lock_path.read_text(encoding="utf-8", errors="replace")
+                _pid = None
+                if "=" in _raw:
+                    try:
+                        _pid = int(_raw.strip().split("=", 1)[-1])
+                    except ValueError:
+                        _pid = None
+                elif _raw.strip().isdigit():
+                    _pid = int(_raw.strip())
+                if _pid is not None:
+                    _stale = _pid != os.getpid() and not _pid_alive(_pid)
+                else:
+                    # vazio/imparseável jovem = lock recém-criado — espera
+                    _stale = (time.time() - _stat.st_mtime) > 30
+            except OSError:
                 _stale = True
             if _stale:
                 try:
-                    lock_path.unlink()
-                    continue
+                    _st2 = lock_path.stat()
+                    # não deleta lock recriado por outro entre stat e unlink
+                    if ((_st2.st_ino, _st2.st_ctime_ns, _st2.st_size)
+                            == (_stat.st_ino, _stat.st_ctime_ns, _stat.st_size)):
+                        lock_path.unlink()
                 except OSError:
                     pass
+                continue
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"timeout aguardando lock de escrita: {lock_path}")
             time.sleep(poll)
     try:
         os.write(fd, f"pid={os.getpid()}\n".encode("utf-8"))
+        _our_ino = os.fstat(fd).st_ino
         yield
     finally:
         os.close(fd)
         try:
-            lock_path.unlink()
+            # A1 (banca v14): unlink incondicional deletava o lock VIVO do
+            # sucessor — só remove se o inode ainda é o nosso.
+            if lock_path.stat().st_ino == _our_ino:
+                lock_path.unlink()
         except OSError:
             pass
 
@@ -135,12 +175,22 @@ def _config_dir() -> Path:
     else:
         base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     cfg = Path(base) / "henke"
-    # M3 (banca v13): APPDATA=<repo>\.fake plantava âncoras/tokens DENTRO do
-    # repo auditado — base env-resolvida sob o CWD cai pro home real.
+    # M3 v13 + A7 v14: APPDATA=<repo>\.fake plantava âncoras/tokens DENTRO do
+    # repo auditado. O check de CWD não bastava — rodando de subdir do repo,
+    # o repo detectado (.git/.henke na ascendência do CWD) é a referência.
     try:
         cwd_r = Path.cwd().resolve()
         cfg_r = cfg.resolve()
-        if cfg_r == cwd_r or cwd_r in cfg_r.parents:
+        _repo = None
+        for _up in (cwd_r, *cwd_r.parents):
+            if (_up / ".git").exists() or (_up / ".henke").is_dir():
+                _repo = _up
+                break
+        _poisoned = (
+            cfg_r == cwd_r or cwd_r in cfg_r.parents
+            or (_repo is not None and (cfg_r == _repo or _repo in cfg_r.parents))
+        )
+        if _poisoned:
             cfg = (Path.home() / "AppData" / "Roaming" / "henke") if os.name == "nt" else (Path.home() / ".config" / "henke")
     except OSError:
         pass
@@ -230,16 +280,19 @@ def verify_approval_token(run_data: dict, repo_root: Path | str | None = None) -
     binding = run_data.get("approval_binding")
     if not isinstance(binding, dict):
         return True, ""
-    # M1 (banca v13): binding["repo"] nunca era comparado ao repo REAL —
-    # aprovação mintada no clone A valia na worktree B.
-    if repo_root is not None and binding.get("repo"):
+    # M1 v13 + A9 v14: binding["repo"] deve ser ESTE repo — e é OBRIGATÓRIO:
+    # binding sem repo mintava token global válido em qualquer worktree.
+    if repo_root is not None:
+        _b_repo = binding.get("repo")
         try:
-            if str(Path(repo_root).resolve()) != str(binding["repo"]):
-                return False, (
-                    "APPROVAL-BINDING-REPO-MISMATCH: binding pertence a outro "
-                    "repositório — aprovação não é transferível")
+            _mismatch = (not isinstance(_b_repo, str) or not _b_repo.strip()
+                         or str(Path(repo_root).resolve()) != _b_repo)
         except OSError:
-            return False, "APPROVAL-BINDING-REPO-MISMATCH: repo não resolvível"
+            _mismatch = True
+        if _mismatch:
+            return False, (
+                "APPROVAL-BINDING-REPO-MISMATCH: binding pertence a outro "
+                "repositório — aprovação não é transferível")
     # APPROVAL-BINDING-REPLAY (banca v11 A2): o token deriva do CONTEÚDO do
     # binding — copiar o dict inteiro de uma run aprovada carrega o run_id
     # junto e replaya a aprovação. O binding deve pertencer a ESTA run.
@@ -1239,10 +1292,13 @@ def approve_run(run_path: Path, approver: str = "human",
         _sc = load_anchor_sidecar(
             _safe_run_id(run_path.stem), repo_root=_rr)
         _sc_fields = (_sc or {}).get("fields") or {}
-        if not _sc_fields and any(k in data for k in _ANCHORED_FIELDS):
+        # A9 (banca v14): run mínima sem campos ancorados contornava o
+        # requisito de sidecar (`any()` False) — aprovação exige âncora
+        # local, sempre (init_run sempre grava fields).
+        if not _sc_fields:
             raise ValueError(
-                "APPROVE-SIDECAR-MISSING: run declara campos de decisão sem "
-                "sidecar local — aprovação recusada (init_run não rodou aqui?)")
+                "APPROVE-SIDECAR-MISSING: run sem sidecar local de âncora — "
+                "aprovação recusada (init_run não rodou aqui?)")
         _drift = [f for f in _ANCHORED_FIELDS
                   if f in _sc_fields and (
                       type(_sc_fields[f]) is not type(data.get(f))
@@ -1263,8 +1319,9 @@ def approve_run(run_path: Path, approver: str = "human",
             raise ValueError(
                 "APPROVAL-BINDING-RUN-MISMATCH: binding não pertence a esta "
                 "run — aprovação recusada")
-        # M1 (banca v13): binding["repo"] deve ser ESTE repo.
-        if _b.get("repo") and str(Path(_rr).resolve()) != str(_b["repo"]):
+        # M1 v13 + A9 v14: binding["repo"] obrigatório e deve ser ESTE repo.
+        if (not isinstance(_b.get("repo"), str) or not _b["repo"].strip()
+                or str(Path(_rr).resolve()) != _b["repo"]):
             raise ValueError(
                 "APPROVAL-BINDING-REPO-MISMATCH: binding pertence a outro "
                 "repositório — aprovação recusada")

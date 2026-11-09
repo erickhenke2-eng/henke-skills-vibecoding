@@ -392,11 +392,17 @@ def _cmd_exec(
     # M5/H3 (banca v13): PYTHONPATH/PYTEST_*/NODE_OPTIONS/GIT_* hereditários
     # subvertiam o tooling que produz evidência; PATH com '.', entrada do repo
     # ou CWD implícito (which() em py<3.12) resolvia binário plantado.
-    child_env = {k: v for k, v in os.environ.items()
+    # A3 (banca v14): Windows entrega a chave como 'Path' — escrever 'PATH'
+    # criava duplicata e o CreateProcess lia a ORIGINAL envenenada.
+    _raw_env = (os.environ.items() if os.name != "nt"
+                else ((k.upper(), v) for k, v in os.environ.items()))
+    child_env = {k: v for k, v in _raw_env
                  if not (k.startswith("GIT_") or k.startswith("PYTEST_")
-                         or k.startswith("COVERAGE_")
-                         or k in ("PYTHONPATH", "PYTHONSTARTUP",
-                                  "NODE_OPTIONS", "VIRTUAL_ENV"))}
+                         or k.startswith("COVERAGE_") or k.startswith("PYTHON")
+                         or k.startswith("LD_") or k.startswith("DYLD_")
+                         or k in ("NODE_OPTIONS", "VIRTUAL_ENV", "BASH_ENV",
+                                  "ENV", "ZDOTDIR", "PERL5OPT", "PERL5LIB",
+                                  "RUBYOPT", "RUBYLIB", "DOTNET_STARTUP_HOOKS"))}
     _rr: Path | None = None
     try:
         _rr = repo_root.resolve()
@@ -404,12 +410,15 @@ def _cmd_exec(
             d for d in os.environ.get("PATH", "").split(os.pathsep)
             if d.strip() and not (
                 lambda _rd: _rd == _rr or _rr in _rd.parents
-            )(Path(d).resolve()))
-        if _safe_path:
-            child_env["PATH"] = _safe_path
-    except OSError:
+            )((repo_root / d).resolve() if not Path(d).is_absolute() else Path(d).resolve()))
+        # A3 (banca v14): PATH vazio de efeito = herda envenenado — sempre
+        # escreve (vazio é melhor que envenenado).
+        child_env["PATH"] = _safe_path
+    except (OSError, ValueError):
         pass
-    if exec_tokens and sys.platform.startswith("win"):
+    if exec_tokens:
+        # A2 (banca v14): recusa repo-resident era Windows-only — execvp no
+        # POSIX resolvia o plantado por PATH. `which` roda em toda plataforma.
         resolved = shutil.which(exec_tokens[0], path=child_env.get("PATH"))
         if resolved:
             # H3 (banca v13): o resolvido dentro do repo é o impostor
@@ -425,7 +434,8 @@ def _cmd_exec(
             except OSError:
                 pass
             exec_tokens[0] = resolved
-        elif exec_tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls"):
+        elif (os.name == "nt"
+              and exec_tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls")):
             exec_tokens = ["cmd.exe", "/c"] + exec_tokens
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
@@ -561,10 +571,18 @@ def _cmd_exec(
                         print(f"ERRO: Ledger corrompido em '{ledger_path}': {exc}", file=sys.stderr)
                         return 2
 
-            exec_log_path.parent.mkdir(parents=True, exist_ok=True)
-            _pre_size = exec_log_path.stat().st_size if exec_log_path.is_file() else 0
-            with open(exec_log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+            try:
+                exec_log_path.parent.mkdir(parents=True, exist_ok=True)
+                _pre_size = exec_log_path.stat().st_size if exec_log_path.is_file() else 0
+                with open(exec_log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                    # A10 (banca v14): append sem fsync — crash entre a linha e
+                    # o tip wedgiava a cadeia pra sempre.
+                    f.flush()
+                    os.fsync(f.fileno())
+            except OSError as exc:
+                print(f"ERRO: falha ao escrever exec_log: {exc}", file=sys.stderr)
+                return 2
             try:
                 # Atualiza .henke/LEDGER.json apenas quando o COMANDO é de testes —
                 # qualquer saída contendo "N tests" (ex.: um README impresso por cat)
@@ -938,9 +956,11 @@ def _git_diff_snapshot(repo_root: Path) -> tuple[str | None, str]:
         res = subprocess.run(
             ["git", "-C", str(repo_root),
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
-             "diff", "--no-ext-diff", "HEAD"],
+             # A8 (banca v14): .gitattributes textconv executava comando do
+             # repo ao materializar o envelope — RCE via clone+goldfish.
+             "diff", "--no-ext-diff", "--no-textconv", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env=_genv,
+            env=_genv, timeout=60,
         )
         if res.returncode == 0 and res.stdout.strip():
             return res.stdout, "git diff HEAD"
@@ -949,7 +969,7 @@ def _git_diff_snapshot(repo_root: Path) -> tuple[str | None, str]:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "status", "--porcelain"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env=_genv,
+            env=_genv, timeout=60,
         )
         if res2.returncode == 0:
             if res2.stdout.strip():

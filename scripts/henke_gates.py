@@ -121,7 +121,11 @@ def _git_has_head(repo_root: Path) -> bool:
             # F-8 (banca v12): GIT_* herdado redirecionava a consulta para
             # repo estranho — strip consistente com spec_drift/henke_auto.
             env={k: v for k, v in os.environ.items()
-                 if not k.startswith("GIT_")
+                 if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                 or k.startswith("LD_") or k.startswith("DYLD_")
+                 or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                          "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                          "DOTNET_STARTUP_HOOKS"))
                  } | {"NoDefaultCurrentDirectoryInExePath": "1"},
         ).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -354,7 +358,11 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     # F-8 (banca v12): portões-filho herdam env — GIT_* do chamador
     # redirecionava o git interno (repo_signals/ratchet/fence) para outro repo.
     child_env = {k: v for k, v in os.environ.items()
-                 if not k.startswith("GIT_")}
+                 if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                 or k.startswith("LD_") or k.startswith("DYLD_")
+                 or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                          "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                          "DOTNET_STARTUP_HOOKS"))}
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
     # Windows: sem isso, CreateProcess procura o binário no CWD do processo
@@ -528,7 +536,11 @@ def _kill_tree(proc: subprocess.Popen) -> None:
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True, timeout=10,
                 env={**{k: v for k, v in os.environ.items()
-                        if not k.startswith("GIT_")},
+                        if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                 or k.startswith("LD_") or k.startswith("DYLD_")
+                 or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                          "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                          "DOTNET_STARTUP_HOOKS"))},
                      "NoDefaultCurrentDirectoryInExePath": "1"},
             )
         else:

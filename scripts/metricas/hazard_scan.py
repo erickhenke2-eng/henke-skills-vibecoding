@@ -138,7 +138,14 @@ _SQL_SPRINTF_RE = re.compile(
 )
 
 # Regras de Pass 1 (código mascarado)
-_PY_SHELL_RE = re.compile(r"\bsubprocess\.(?:run|Popen|call|check_output|check_call)\s*\([^)]*\bshell\s*=\s*True\b|\bos\.system\s*\(")
+_PY_SHELL_RE = re.compile(
+    r"\bsubprocess\.(?:run|Popen|call|check_output|check_call)\s*\([^)]*\bshell\s*=\s*True\b|\bos\.system\s*\("
+    # H1 (banca v14): sinks que só existiam no AST ficavam invisíveis quando
+    # ast.parse falhava — fallback regex cobre os mesmos nomes.
+    r"|\bos\.popen\s*\(|\bos\.(?:exec|spawn)[lvp]{0,3}\w*\s*\("
+    r"|\b(?:asyncio\.)?create_subprocess_(?:shell|exec)\s*\("
+    r"|\bsubprocess\.get(?:status)?output\s*\(|\bpty\.(?:spawn|fork)\s*\("
+    r"|(?<![.\w$])exec\s*\(")
 _JS_EXEC_RE = re.compile(r"(?<![.\w$])(?:child_process\s*\.\s*)?exec(?:Sync)?\s*\(\s*(?!['\"][^\n$'\"`]*['\"]\s*[,)])")
 # Sinks de shell/código que o lookbehind do _JS_EXEC_RE não pega (banca v7 —
 # A4): binding comum de child_process (`cp.exec`, `childProcess.spawn`),
@@ -160,8 +167,20 @@ _JS_SHELL_OBJ_RE = re.compile(
     r"|\b(?:setTimeout|setInterval)\s*\(\s*[,)]"
     r"|\brequire\s*\(\s*(?!\s*\))"
     r"|\bimport\s*\(\s*(?!\s*\))"
+    # H2 (banca v14): spawn/execFile com argv0 shell literal —
+    # spawn("sh",["-c",u]) é shell real e não era flagado.
+    r"|\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*\)"
+    r"|\b(?:exec|execSync|execa|sh)\s*`"  # tagged template cp.exec`u`
     r"|(?<![.\w$])eval\s*\(|\.eval\s*\("
 )
+# H2 (banca v14): alias ESM de child_process — `import * as sh` /
+# `import sh from 'child_process'` evadiam a allowlist de receptores.
+_JS_CP_ALIAS_RE = re.compile(
+    r"\bimport\s+(?:\*\s+as\s+(\w+)|(\w+)\s*(?:,\s*\{[^}]*\})?\s*from)"
+    r"\s*['\"](?:node:)?child_process['\"]")
+_JS_SHELL_ARGV0_RE = re.compile(
+    r"\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*['\"]"
+    r"(?:sh|bash|zsh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?)['\"]")
 _RS_SHELL_RE = re.compile(r'Command::new\s*\(\s*\)\s*|\bCommand::new\s*\([^)]*\)\s*\.\s*arg\s*\(\s*"(?:-c|/c)"')
 # Go não tinha nenhuma regra de execução (banca v9 A3): os/exec + syscall.Exec
 # + plugin.Open são os sinks equivalentes a exec.Command("sh","-c",user).
@@ -271,7 +290,12 @@ _IDOR_SAFE_RE = re.compile(
 
 def _strip_py_comments(raw: str) -> str:
     """Remove comentários `# ...` em Python usando `tokenize` stdlib, preservando linhas e strings."""
-    lines = raw.splitlines(keepends=True)
+    # M3 (banca v14): splitlines() quebra em \x0b\x0c\x85\u2028 — o
+    # tokenize conta só \n e os índices dessincronizavam (comentário
+    # podia apagar a LINHA ERRADA, inclusive a do segredo).
+    lines = [ln + "\n" for ln in raw.split("\n")]
+    if lines:
+        lines[-1] = lines[-1].rstrip("\n")
     if not lines:
         return raw
     comment_spans: list[tuple[int, int, int]] = []
@@ -510,7 +534,11 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
     try:
         tree = ast.parse(raw)
     except (SyntaxError, ValueError, MemoryError, RecursionError):
-        return []
+        # H1 (banca v14): SyntaxError desligava TODOS os sinks AST e o
+        # arquivo contava como escaneado-verde — fail-loud.
+        return [("AST-UNPARSEABLE", 1, path_str,
+                 "arquivo .py não parseia — análise estática cega; "
+                 "corrija a sintaxe para o hazard gate avaliar")]
     aliases: dict[str, str] = {}
     star_mods: list[str] = []
     for node in ast.walk(tree):
@@ -926,6 +954,25 @@ def scan_file(path: Path, extra_exts: set | None = None,
             lineno = masked.count("\n", 0, m.start()) + 1
             add("SHELL-INJECTION", lineno, f"line:{lineno}",
                 f"dynamic process/code execution sink ({m.group(0).strip()[:40]})")
+        # H2 (banca v14): spawn/execFile com argv0 shell literal e alias ESM
+        # `import * as sh from 'child_process'` — rodam no texto cru, onde o
+        # literal/alias ainda é visível (na máscara vira espaço).
+        for m in _JS_SHELL_ARGV0_RE.finditer(no_comments):
+            lineno = no_comments.count("\n", 0, m.start()) + 1
+            add("SHELL-INJECTION", lineno, f"line:{lineno}",
+                "spawn/execFile com argv0 de shell literal")
+        for _am in _JS_CP_ALIAS_RE.finditer(no_comments):
+            _al = _am.group(1) or _am.group(2)
+            if _al:
+                _al_re = re.compile(
+                    r"\b" + re.escape(_al)
+                    + r"\s*\.\s*(?:exec|execSync)\s*\(|"
+                    + r"\b" + re.escape(_al)
+                    + r"\s*\.\s*(?:spawn|spawnSync|fork|execFile)\s*\(\s*(?:\+|[A-Za-z_$'\"`])")
+                for m in _al_re.finditer(masked):
+                    lineno = masked.count("\n", 0, m.start()) + 1
+                    add("SHELL-INJECTION", lineno, f"line:{lineno}",
+                        f"child_process alias '{_al}' shell sink")
 
     for m in _UNSAFE_DESER_RE.finditer(masked):
         tok = m.group(0)

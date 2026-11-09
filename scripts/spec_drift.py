@@ -40,11 +40,27 @@ def compute_spec_hash(spec_path: Path) -> str:
     return _hash_spec_text(_decode_spec(spec_path.read_bytes()))
 
 
+def _md_clean(text: str) -> str:
+    """H5 (banca v14): comentários HTML e fenced code blocks podiam conter
+    `## 4.` falso ou itens `- \`path\`` — o parser lia o que o humano não
+    aprovou. Strip antes de qualquer parse de seção."""
+    text = re.sub(r"<!--[\s\S]*?-->", " ", text)
+    text = re.sub(r"(?m)^```[^\n]*\n[\s\S]*?^```\s*$", " ", text)
+    return text
+
+
+# H5 (banca v14): `.*?Escopo` casava 'Itens fora de Escopo' (inversão
+# semântica — exclusões viravam escopo). Rejeita negação antes do termo.
+_SCOPE_HEAD_RE = re.compile(
+    r"(?m)^## 4\.(?![^\n]*\b(?:fora|non-|not\s|out\s+of|exclu))[^\n]*?Escopo[^\n]*?\n"
+    r"(.*?)(?=\n#{1,6} |\Z)", flags=re.S)
+
+
 def _parse_scope_text(text: str) -> list[str]:
     """Extrai os caminhos declarados na seção '## 4. Escopo Declarado' do texto já lido."""
     # A seção termina em QUALQUER heading seguinte (#, ##, ###...) — uma
     # subseção '### 4.1 Não-autorizado' não pode injetar itens no escopo (B1).
-    match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n#{1,6} |\Z)", text, flags=re.S)
+    match = _SCOPE_HEAD_RE.search(_md_clean(text))
     if not match:
         return []
 
@@ -72,7 +88,7 @@ def parse_declared_scope(spec_path: Path) -> list[str]:
 
 def _parse_symbols_text(text: str) -> list[tuple[str, str]]:
     """Extrai pares (caminho, simbolo) para itens com '::' a partir do texto já lido."""
-    match = re.search(r"(?m)^## 4\..*?Escopo.*?\n(.*?)(?=\n#{1,6} |\Z)", text, flags=re.S)
+    match = _SCOPE_HEAD_RE.search(_md_clean(text))
     if not match:
         return []
     symbols: list[tuple[str, str]] = []
