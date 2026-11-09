@@ -337,6 +337,10 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
         exit_code = entry.get("exit", entry.get("exit_code"))
         if exit_code is None:
             errors.append(f"Entrada #{i} sem código de retorno ('exit') registrado.")
+        elif isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            # LEDGER-EXIT-BOOL (banca v11 A6): false/0.0/"0" passavam na
+            # comparação solta `!= 0` — LEDGER escrito à mão auditava verde.
+            errors.append(f"Entrada #{i} com 'exit' não-inteiro: {exit_code!r} — veredito inválido.")
         elif exit_code != 0:
             errors.append(f"Entrada #{i} falhou com código de saída não-zero: {exit_code} (comando: '{full_cmd}').")
 

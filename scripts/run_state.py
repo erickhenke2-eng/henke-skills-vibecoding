@@ -184,6 +184,15 @@ def verify_approval_token(run_data: dict) -> tuple[bool, str]:
     binding = run_data.get("approval_binding")
     if not isinstance(binding, dict):
         return True, ""
+    # APPROVAL-BINDING-REPLAY (banca v11 A2): o token deriva do CONTEÚDO do
+    # binding — copiar o dict inteiro de uma run aprovada carrega o run_id
+    # junto e replaya a aprovação. O binding deve pertencer a ESTA run.
+    _carrier = _safe_run_id(str(run_data.get("run_id") or ""))
+    if binding.get("run_id") != _carrier or not _carrier:
+        return False, (
+            "APPROVAL-BINDING-RUN-MISMATCH: binding pertence a outra run — "
+            "aprovação não é transferível"
+        )
     token = _binding_token(binding)
     p = _config_dir() / "approvals" / f"{token}.json"
     if not p.is_file():
@@ -192,7 +201,9 @@ def verify_approval_token(run_data: dict) -> tuple[bool, str]:
             "a run pode ter sido plantada/forjada; rode `henke approve` nesta máquina"
         )
     try:
-        stored = json.loads(p.read_text(encoding="utf-8")).get("binding") or {}
+        _raw = json.loads(p.read_text(encoding="utf-8"))
+        stored = _raw.get("binding") if isinstance(_raw, dict) else None
+        stored = stored if isinstance(stored, dict) else {}
     except (OSError, ValueError):
         return False, "APPROVAL-TOKEN-CORRUPT: token local ilegível"
     want = {"head": binding.get("head"), "scope_sha256": binding.get("scope_sha256"),
@@ -220,12 +231,18 @@ def _evidence_manifest_path(run_id: str, run_path: Path | None = None) -> Path:
     # homônima — o arquivo agora também carrega o hash do repo que contém
     # a run (.henke/runs/x.json → repo = 3 níveis acima).
     if run_path is not None:
+        # A7 (banca v11): path raso/symlink sem parents[2] NÃO pode cair na
+        # chave nua (namespace global de manifesto) — deriva a tag do path
+        # inteiro, mantendo o isolamento mesmo no caso degenerado.
+        rp = Path(run_path)
         try:
-            repo = Path(run_path).resolve().parents[2]
-            tag = hashlib.sha256(str(repo).encode("utf-8")).hexdigest()[:12]
-            safe = f"{tag}-{safe}"
+            rp = rp.resolve()
+            repo = rp.parents[2]
         except (IndexError, OSError):
-            pass
+            repo = None
+        tag_src = str(repo) if repo is not None else str(rp)
+        tag = hashlib.sha256(tag_src.encode("utf-8")).hexdigest()[:12]
+        safe = f"{tag}-{safe}"
     return _config_dir() / "evidence-manifest" / f"{safe}.json"
 
 
@@ -624,6 +641,16 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
                 "sidecar de nascimento (adulteração mid-run): "
                 + ", ".join(sorted(_tampered_fields))
             ]
+    # VERIFY-ANCHOR-PARTIAL (banca v11 A5): head_start/spec_sha256 vivem
+    # top-level no sidecar, fora de `fields` — verify e o resumo do approve
+    # confiavam no JSON mutável. Divergência = adulteração.
+    if isinstance(_sc, dict):
+        for _af in ("spec_sha256", "head_start"):
+            if _af in _sc and data.get(_af) != _sc[_af]:
+                return False, [
+                    f"SIDECAR-FIELD-TAMPERED: '{_af}' da run diverge do "
+                    "sidecar de nascimento (âncora adulterada)"
+                ]
 
     # CONFLICT é bidirecional: declared=verified com derived≠verified é a forja
     # clássica; mas declared≠derived com derived=verified também é estado
@@ -965,7 +992,11 @@ def record_gate(
                 if not (confined == ev_root or ev_root in confined.parents):
                     raise ValueError(f"evidence-file fora do confinamento: {evidence_path}")
                 try:
-                    confined.write_bytes(resolved.read_bytes())
+                    # A10 (banca v11): uma leitura só — hashear e copiar em
+                    # leituras separadas abria janela onde sha gravado ≠
+                    # bytes confinados (wedge EVIDENCE-TAMPERED permanente).
+                    ev_bytes = resolved.read_bytes()
+                    confined.write_bytes(ev_bytes)
                 except OSError as exc:
                     raise ValueError(f"falha ao confinar evidência: {exc}") from exc
                 evidence_path = confined
@@ -1068,16 +1099,35 @@ def approve_run(run_path: Path, approver: str = "human") -> dict:
         # O fingerprint é determinístico (recomputável por quem edita o JSON) —
         # a prova real é a âncora LOCAL: campos de decisão divergentes do
         # sidecar = run adulterada, aprovação recusada antes do dispatch.
+        # A3 (banca v11): sidecar ausente tornava o drift-check vacuoso —
+        # run plantada à mão (nunca passou por init_run → sem sidecar) era
+        # aprovável com o humano vendo só o resumo. Falha fechada quando a
+        # run declara campos ancorados sem âncora local, e confinamento:
+        # run fora de .henke/runs/ não tem repo resolvível.
+        _rr = _repo_root_for_run(run_path)
+        if _rr is None:
+            raise ValueError(
+                "APPROVE-UNANCHORED: run fora de .henke/runs/ não tem repo "
+                "resolvível — recusado aprovar run sem custódia")
         _sc = load_anchor_sidecar(
-            str(data.get("run_id") or run_path.stem),
-            repo_root=_repo_root_for_run(run_path))
+            _safe_run_id(run_path.stem), repo_root=_rr)
         _sc_fields = (_sc or {}).get("fields") or {}
+        if not _sc_fields and any(k in data for k in _ANCHORED_FIELDS):
+            raise ValueError(
+                "APPROVE-SIDECAR-MISSING: run declara campos de decisão sem "
+                "sidecar local — aprovação recusada (init_run não rodou aqui?)")
         _drift = [f for f in _ANCHORED_FIELDS
                   if f in _sc_fields and _sc_fields[f] != data.get(f)]
         if _drift:
             raise ValueError(
                 "ANCHOR-DRIFT: campos da run divergem do sidecar local "
                 f"({', '.join(_drift)}) — aprovação recusada")
+        # A2 (banca v11): binding com run_id de outra run replayaria o token.
+        _b = data.get("approval_binding")
+        if isinstance(_b, dict) and _b.get("run_id") != _safe_run_id(run_path.stem):
+            raise ValueError(
+                "APPROVAL-BINDING-RUN-MISMATCH: binding não pertence a esta "
+                "run — aprovação recusada")
         data["review_status"] = "approved"
         data["approved_by"] = approver.strip() or "human"
         data["approved_at"] = _now_iso()

@@ -90,7 +90,10 @@ _GATES_COM_REPO_ARG = ("hazard", "a11y")
 # Portões que consomem artefatos gerados (ratchet←metrics TSV, fence←edges.json):
 # o cmd resolvido aponta para gate_pipeline.py (coletor→portão), mas o id
 # canônico continua sendo o do portão real — mandatory_gates casa com a matriz.
-_PIPELINE_GATES = {"ratchet", "fence"}
+# A7 (banca v11): o ramo GATE_MAP compara `script.stem` ('fence_check') e o
+# ramo path compara `name` ('fence') — o set precisa casar os dois ou o
+# portão caía no despacho errado (exit 2 pra sempre pelo nome).
+_PIPELINE_GATES = {"ratchet", "fence", "fence_check"}
 _PIPELINE_SCRIPT = SCRIPTS_DIR / "gate_pipeline.py"
 
 
@@ -388,15 +391,29 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
 
     verdicts: list[dict] = []
     skipped: list[dict] = []
+    _seen_ids: set[str] = set()
     for raw in gates:
         token = str(raw).strip()
         resolved = _resolve_gate(token, root, spec_path, test_cmd, spec_hash, head_start,
                                  allow_external=allow_external_gates)
         external = False
+        # B4 (banca v11): dois tokens com o mesmo gate_id compartilham a chave
+        # em run.gates, o .out e o manifesto — last-write-wins silencioso.
+        # Duplicata vira não-veredito (exit 2) em vez de sobrescrever.
+        _gid = resolved[0] if resolved is not None else _gate_id_of(token)
+        # Só colide sob custódia (run_path): fora de run, re-executar o mesmo
+        # token é inócuo (modo dry/check record=False).
+        _dup = run_path is not None and _gid in _seen_ids
+        _seen_ids.add(_gid)
+        if _dup:
+            resolved = None
         if resolved is None:
-            gate_id = _gate_id_of(token)
+            gate_id = _gid if _dup else _gate_id_of(token)
             cmd_str = ""
-            exit_code, out, err, ms = 2, "", f"ERRO: portão desconhecido '{token}'", 0
+            exit_code, out, err, ms = 2, "", (
+                f"ERRO: portão duplicado '{gate_id}' — mesma chave de "
+                "veredito/evidência (last-write-wins recusado)"
+                if _dup else f"ERRO: portão desconhecido '{token}'"), 0
         elif resolved[1] is None:
             gate_id = resolved[0]
             skipped.append({"gate": gate_id, "skipped": True,
@@ -502,6 +519,9 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             subprocess.run(
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True, timeout=10,
+                env={**{k: v for k, v in os.environ.items()
+                        if not k.startswith("GIT_")},
+                     "NoDefaultCurrentDirectoryInExePath": "1"},
             )
         else:
             os.killpg(os.getpgid(proc.pid), 9)

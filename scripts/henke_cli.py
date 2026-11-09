@@ -54,6 +54,13 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
         except Exception:
             pass
 
+# EXEC-WHICH-CWD (banca v11 A4): shutil.which() no processo PAI resolve o
+# nome com CWD no Windows (py<3.12 sempre; py>=3.12 só se a var estiver no
+# ambiente). Sem isso, `henke exec -- pytest` num repo com pytest.cmd
+# plantado executa o impostor e minta evidência verde "honesta" na cadeia.
+if sys.platform.startswith("win"):
+    os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
+
 SCRIPTS_DIR = Path(__file__).resolve().parent
 _PKG_ROOT = SCRIPTS_DIR.parent
 METRICAS_DIR = SCRIPTS_DIR / "metricas"
@@ -488,6 +495,24 @@ def _cmd_exec(
                 "prev_hash": prev_hash,
                 "entry_hash": entry_hash,
             }
+            # A1 (banca v11): valida/carrega o ledger ANTES do append —
+            # `return 2` aqui não precisa de rollback porque a linha nova
+            # ainda não existe. Antes, ledger corrompido wedgiava o exec_log
+            # para sempre (linha extra sem tip-update).
+            _ledger_pre: list[dict] | None = None
+            if is_test_command(cmd_tokens, cmd_str):
+                _ledger_pre = []
+                if ledger_path.is_file():
+                    try:
+                        loaded = json.loads(ledger_path.read_text(encoding="utf-8"))
+                        if not isinstance(loaded, list):
+                            print(f"ERRO: Formato inválido em '{ledger_path}' (esperava lista JSON).", file=sys.stderr)
+                            return 2
+                        _ledger_pre = loaded
+                    except Exception as exc:
+                        print(f"ERRO: Ledger corrompido em '{ledger_path}': {exc}", file=sys.stderr)
+                        return 2
+
             exec_log_path.parent.mkdir(parents=True, exist_ok=True)
             _pre_size = exec_log_path.stat().st_size if exec_log_path.is_file() else 0
             with open(exec_log_path, "a", encoding="utf-8") as f:
@@ -496,19 +521,7 @@ def _cmd_exec(
                 # Atualiza .henke/LEDGER.json apenas quando o COMANDO é de testes —
                 # qualquer saída contendo "N tests" (ex.: um README impresso por cat)
                 # não pode entrar no ledger sem ser um runner real (ALTO-6 banca).
-                if is_test_command(cmd_tokens, cmd_str):
-                    existing_ledger: list[dict] = []
-                    if ledger_path.is_file():
-                        try:
-                            loaded = json.loads(ledger_path.read_text(encoding="utf-8"))
-                            if not isinstance(loaded, list):
-                                print(f"ERRO: Formato inválido em '{ledger_path}' (esperava lista JSON).", file=sys.stderr)
-                                return 2
-                            existing_ledger = loaded
-                        except Exception as exc:
-                            print(f"ERRO: Ledger corrompido em '{ledger_path}': {exc}", file=sys.stderr)
-                            return 2
-
+                if _ledger_pre is not None:
                     ledger_item = {
                         "cmd": cmd_str,
                         "exit": res.returncode,
@@ -517,8 +530,7 @@ def _cmd_exec(
                         "stdout_sha256": stdout_sha256,
                         "entry_hash": entry_hash,
                     }
-                    existing_ledger.append(ledger_item)
-                    _atomic_write_json(ledger_path, existing_ledger)
+                    _atomic_write_json(ledger_path, _ledger_pre + [ledger_item])
 
                 # Âncora LOCAL da ponta da cadeia (F-13): a cadeia prova só
                 # consistência interna — truncar/reescrever o rabinho do jsonl
@@ -529,12 +541,18 @@ def _cmd_exec(
                     _rs.record_exec_tip(repo_root, entry_hash)
             except (OSError, ValueError) as exc:
                 # A5 (banca v10): falha pós-append deixava rabo não-ancorado e
-                # wedgiava o log para sempre — rollback trunca a linha nova.
+                # wedgiava o log para sempre — rollback trunca a linha nova
+                # e restaura o ledger (senão a entrada fica órfã).
                 try:
                     with open(exec_log_path, "r+b") as f:
                         f.truncate(_pre_size)
                 except OSError:
                     pass
+                if _ledger_pre is not None:
+                    try:
+                        _atomic_write_json(ledger_path, _ledger_pre)
+                    except OSError:
+                        pass
                 print(f"ERRO: exec_log revertido após falha de custódia: {exc}",
                       file=sys.stderr)
                 return 2

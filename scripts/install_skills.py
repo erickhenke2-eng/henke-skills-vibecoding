@@ -210,10 +210,13 @@ def safe_member(target, rel):
 
 
 def install(repo, user_root, dry_run=False, lock_timeout=LOCK_TIMEOUT_SEC):
-    subprocess.run(
-        [sys.executable, str(_resolve_source(repo, Path("scripts/validate_skills.py")))],
-        check=True,
-    )
+    # A5 (banca v11): o validador da FONTE executava antes de qualquer
+    # contenção — pacote hostil rodava código com privilégio do usuário no
+    # install. Prefere a cópia da PRÓPRIA suíte (scripts/ do pacote).
+    _validator = Path(__file__).resolve().parent / "validate_skills.py"
+    if not _validator.is_file():
+        _validator = _resolve_source(repo, Path("scripts/validate_skills.py"))
+    subprocess.run([sys.executable, str(_validator)], check=True)
     files = inventory(repo)
     targets = [user_root / p for p in (".agents/skills", ".gemini/config/skills", ".gemini/skills", ".claude/skills")]
     if dry_run:
@@ -284,8 +287,22 @@ def _publish(repo, targets, files):
                     raise ValueError(f"Destino não é arquivo: {destination}")
                 staged = stage / "new" / relative
                 staged.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(_resolve_source(repo, relative), staged)
-                if hashlib.sha256(staged.read_bytes()).digest() != hashlib.sha256(_resolve_source(repo, relative).read_bytes()).digest():
+                # A6 (banca v11): re-checa no instante da cópia — entre o
+                # inventário e o copy2 um processo concorrente pode trocar o
+                # arquivo por symlink para fora do repo (vazava ~/.ssh p/ a
+                # skill instalada). O re-check por path não basta: resolve
+                # e confina às duas raízes legítimas (repo OU pacote).
+                _src = _resolve_source(repo, relative)
+                if _src.is_symlink():
+                    raise ValueError(
+                        f"Fonte virou link simbólico após o inventário: {relative}")
+                _roots = (Path(repo).resolve(),
+                          Path(__file__).resolve().parents[1].resolve())
+                _sr = _src.resolve()
+                if not any(_sr == r or r in _sr.parents for r in _roots):
+                    raise ValueError(f"Fonte escapa do pacote: {relative}")
+                shutil.copy2(_src, staged)
+                if hashlib.sha256(staged.read_bytes()).digest() != hashlib.sha256(_src.read_bytes()).digest():
                     raise ValueError(f"Cópia divergente: {relative}")
                 backup = stage / "old" / relative
                 if destination.exists():

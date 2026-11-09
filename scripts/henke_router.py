@@ -64,6 +64,10 @@ _HOMOGLYPHS = str.maketrans({
     # Latim estendido/armênio/IPA que a tabela não cobria (banca v10 — A5):
     "ɑ": "a", "ɛ": "e", "ı": "i", "ե": "e", "ռ": "r", "ʀ": "r",
     "ɢ": "g", "ʟ": "l", "ɴ": "n", "ɵ": "o", "ɸ": "o", "χ": "x",
+    # Leetspeak/dígitos-homoglifos (banca v11 — A3): 'd3l3t3', 'w1p3'
+    # dobram para a letra óbvia antes da comparação de termos.
+    "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t",
+    "@": "a", "$": "s", "!": "i",
 })
 
 
@@ -219,6 +223,13 @@ DESTRUCTIVE_SIGNALS = (
     "rm", "rd", "del", "dd of=", "dropdb", "dropuser", "drop database",
     "checkout --", "git restore", "restore --", "branch -d", "format e:",
     "format f:", "format a:", "format b:", "format g:", "sdelete64",
+    # Cobertura EN provada ausente (banca v11 — A3): paráfrases naturais que
+    # chegavam ao driver em EXECUTAR sem trava humana.
+    "nuke", "nuked", "nuking", "clean", "cleaned", "cleaning", "revert",
+    "reverted", "reverting", "prune", "pruned", "pruning", "undo", "undone",
+    "checkout .", "docker system prune", "docker volume prune",
+    "kubectl delete", "terraform destroy", "helm uninstall", "systemctl stop",
+    "systemctl disable", "roll back", "rolled back", "obliterate",
 )
 _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 
@@ -230,6 +241,9 @@ PUBLISH_ONLY_SIGNALS = (
     # bare push / prod (banca v10 — A5): "faz push", "mete em prod".
     "push", "prod", "em prod", "sobe em prod",
     "faxina", "limpa o repo", "apaga arquivos", "reversao", "reverte", "rollback",
+    # Publish/release EN (banca v11 — A3): 'ship it', 'go live'.
+    "ship", "shipped", "shipping", "go live", "goes live", "going live",
+    "push to prod", "push to production",
 )
 PUBLISH_SIGNALS = PUBLISH_ONLY_SIGNALS + DESTRUCTIVE_SIGNALS
 _PUBLISH_SIGNALS = PUBLISH_SIGNALS

