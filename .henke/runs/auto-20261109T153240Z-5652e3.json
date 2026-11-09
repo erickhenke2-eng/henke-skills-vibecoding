@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "run_id": "auto-20261109T153240Z-5652e3",
+  "mode": "EXECUTAR",
+  "archetype": "CARPINTEIRO",
+  "spec_path": null,
+  "created_at": "2026-11-09T15:32:40.110833+00:00",
+  "updated_at": "2026-11-09T15:34:06.629632+00:00",
+  "requires_human_auth": false,
+  "review_status": "not_required",
+  "gates": {
+    "stage_route": {
+      "exit_code": 0,
+      "summary": "mode=EXECUTAR archetype=CARPINTEIRO confidence=none skills=0",
+      "recorded_at": "2026-11-09T15:32:40.113399+00:00"
+    },
+    "stage_authorize": {
+      "exit_code": 0,
+      "summary": "escopo comum autorizado (policy=balanced, yes=False)",
+      "recorded_at": "2026-11-09T15:32:40.116400+00:00"
+    },
+    "stage_envelope": {
+      "exit_code": 0,
+      "summary": "envelope gravado em auto-20261109T153240Z-5652e3.envelope.json com 0 skill(s)",
+      "recorded_at": "2026-11-09T15:32:40.119545+00:00"
+    },
+    "dispatch": {
+      "exit_code": 0,
+      "summary": "0 skill(s) injetada(s) verbatim (sha256 conferido com disco)",
+      "recorded_at": "2026-11-09T15:32:40.122618+00:00"
+    },
+    "stage_dispatch": {
+      "exit_code": 0,
+      "summary": "driver=echo (simulated) — modo teste/CI",
+      "recorded_at": "2026-11-09T15:32:40.126135+00:00"
+    },
+    "repo_signals": {
+      "exit_code": 0,
+      "summary": "stdout_sha256=da7d685bca288ee3720ebb2e6d940c26b99127a2320d6fb29b1efc64817ab620;duration_ms=421",
+      "recorded_at": "2026-11-09T15:32:40.560974+00:00"
+    },
+    "hazard_scan": {
+      "exit_code": 0,
+      "summary": "stdout_sha256=101038e665452d9ccc86efc740bbfabe42bd35f13f3adea1a655f752cafddbbb;duration_ms=1344",
+      "recorded_at": "2026-11-09T15:32:41.893927+00:00"
+    },
+    "stage_gates": {
+      "exit_code": 0,
+      "summary": "portões executados: 2 · all_green=True",
+      "recorded_at": "2026-11-09T15:32:41.896117+00:00"
+    },
+    "tests": {
+      "exit_code": 0,
+      "summary": "test_cmd=`python -m unittest discover -s tests` → 109/109 testes",
+      "recorded_at": "2026-11-09T15:34:06.626601+00:00"
+    },
+    "stage_tests": {
+      "exit_code": 0,
+      "summary": "test_cmd=`python -m unittest discover -s tests` exit=0 109/109 testes",
+      "recorded_at": "2026-11-09T15:34:06.628626+00:00"
+    }
+  },
+  "scope_amendments": [],
+  "mandatory_gates": [
+    "scripts/repo_signals.py",
+    "scripts/metricas/hazard_scan.py"
+  ],
+  "outcome": "verified",
+  "reasons": [],
+  "prompt": "revisa o arquivo 'src/x.py' e corrige problemas reais encontrados",
+  "scope_paths": [
+    "scripts/henke_auto.py",
+    "scripts/henke_cli.py",
+    "scripts/install_skills.py",
+    "scripts/henke_driver_opencode.py"
+  ],
+  "policy_efetiva": {
+    "policy": "balanced",
+    "always_ask": [
+      "publish",
+      "destructive",
+      "metaconfig"
+    ],
+    "auto_approve": [
+      "non-publish"
+    ],
+    "allowed_cmds": [],
+    "source": "default",
+    "flag": null
+  },
+  "driver": "echo",
+  "rework_attempts": 0,
+  "route_snapshot": {
+    "mode": "EXECUTAR",
+    "archetype": "CARPINTEIRO",
+    "confidence": "none",
+    "skills": [],
+    "gates_required": [
+      "scripts/repo_signals.py",
+      "scripts/metricas/hazard_scan.py"
+    ],
+    "scope_paths": [
+      "scripts/henke_auto.py",
+      "scripts/henke_cli.py",
+      "scripts/install_skills.py",
+      "scripts/henke_driver_opencode.py"
+    ],
+    "requires_human_auth": false
+  },
+  "stages": [
+    {
+      "stage": "route",
+      "at": "2026-11-09T15:32:40.114401+00:00",
+      "exit_code": 0,
+      "detail": "mode=EXECUTAR archetype=CARPINTEIRO confidence=none skills=0"
+    },
+    {
+      "stage": "authorize",
+      "at": "2026-11-09T15:32:40.117375+00:00",
+      "exit_code": 0,
+      "detail": "escopo comum autorizado (policy=balanced, yes=False)"
+    },
+    {
+      "stage": "envelope",
+      "at": "2026-11-09T15:32:40.121084+00:00",
+      "exit_code": 0,
+      "detail": "envelope gravado em auto-20261109T153240Z-5652e3.envelope.json com 0 skill(s)"
+    },
+    {
+      "stage": "dispatch",
+      "at": "2026-11-09T15:32:40.127129+00:00",
+      "exit_code": 0,
+      "detail": "driver=echo (simulated) — modo teste/CI"
+    },
+    {
+      "stage": "gates",
+      "at": "2026-11-09T15:32:41.897123+00:00",
+      "exit_code": 0,
+      "detail": "portões executados: 2 · all_green=True"
+    },
+    {
+      "stage": "tests",
+      "at": "2026-11-09T15:34:06.629632+00:00",
+      "exit_code": 0,
+      "detail": "test_cmd=`python -m unittest discover -s tests` exit=0 109/109 testes"
+    }
+  ],
+  "skills_rodadas": [],
+  "envelope": "F:\\DEV\\ACTIVE\\henke-skills\\.henke\\runs\\auto-20261109T153240Z-5652e3.envelope.json",
+  "driver_result": {
+    "files_changed": [],
+    "notes": "driver echo (simulado): envelope persistido, nenhuma execução real"
+  },
+  "files_changed": []
+}

@@ -1,0 +1,14 @@
+{
+  "linguagens": [
+    "python"
+  ],
+  "framework": null,
+  "test_cmd": "python -m unittest discover -s tests",
+  "build_cmd": "python -m build",
+  "lint_cmd": null,
+  "source": [
+    "pyproject.toml",
+    "requirements.txt",
+    "tests"
+  ]
+}

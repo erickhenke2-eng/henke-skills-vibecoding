@@ -468,6 +468,18 @@ def _build_envelope(
         "skills": skills_payload,
         "tools": list(ENVELOPE_TOOLS),
     }
+    # Memória do projeto injetada verbatim (BambooAI-style): driver com contexto
+    # das decisões/diário recentes — sem isso cada run nasce amnésica.
+    memory: dict[str, str] = {}
+    for key, fname in (("diario", "DIARIO.md"), ("decisoes", "DECISOES.md")):
+        try:
+            f = repo_root / ".henke" / fname
+            if f.is_file():
+                memory[key] = f.read_text(encoding="utf-8", errors="replace")[-6000:]
+        except OSError:
+            pass
+    if memory:
+        envelope["memory"] = memory
     return envelope, ""
 
 
@@ -587,8 +599,18 @@ def _dispatch_driver(
             return None, err, 1  # driver executou e falhou: falha mecânica, não uso
         return result, "", 0
 
+    if isinstance(driver, str) and driver.split(":", 1)[0] == "opencode":
+        model = driver.split(":", 1)[1] if ":" in driver else "opencode/deepseek-v4.1-flash-free"
+        adapter = SCRIPTS_DIR / "henke_driver_opencode.py"
+        result, err = _call_cmd_driver(
+            f'"{sys.executable}" "{adapter}" {model}', envelope, repo_root, timeout_sec
+        )
+        if err:
+            return None, err, 1
+        return result, "", 0
+
     return None, (
-        f"driver desconhecido '{driver}'. Use echo | stdin | cmd:<template>."
+        f"driver desconhecido '{driver}'. Use echo | stdin | opencode[:model] | cmd:<template>."
     ), 2
 
 
@@ -957,7 +979,7 @@ def run_auto(args: argparse.Namespace) -> int:
     gates_timeout = float(timeout_opt) if timeout_opt else 300.0
     gres: dict | None = None
     rework_attempts = 0
-    real_driver = isinstance(driver, str) and driver.startswith("cmd:")
+    real_driver = isinstance(driver, str) and driver.startswith(("cmd:", "opencode"))
 
     if not gates_required:
         _record_stage(run_path, "gates", "nenhum portão obrigatório declarado pelo route")

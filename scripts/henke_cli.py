@@ -1000,6 +1000,7 @@ def _cmd_auto(
     yes: bool,
     policy: str,
     timeout: float | None,
+    resume: str | None = None,
 ) -> int:
     """`henke auto`: despacha para `scripts/henke_auto.py:run_auto` (import lazy)."""
     try:
@@ -1023,11 +1024,31 @@ def _cmd_auto(
         yes=bool(yes),
         policy=policy,
         timeout=timeout,
+        resume=resume,
     )
     try:
         return int(run_auto(ns))
     except SystemExit as exc:
         return exc.code if isinstance(exc.code, int) else 2
+
+
+def _cmd_trigger(kind: str, target: str | None, repo: Path, **kw) -> int:
+    """`henke trigger`: evento → prompt → mesma máquina `auto` (entrada não-interativa)."""
+    if kind == "commit":
+        prompt = (
+            "revisa o último commit (HEAD) e corrige qualquer problema real "
+            "encontrado nas mudanças"
+        )
+    elif kind == "ci":
+        prompt = "investiga e corrige a falha do CI/testes"
+    elif kind == "file":
+        if not target:
+            print("ERRO: `henke trigger file` exige um caminho alvo.", file=sys.stderr)
+            return 2
+        prompt = f"revisa o arquivo '{target}' e corrige problemas reais encontrados"
+    else:
+        return 2
+    return _cmd_auto(prompt, repo, dry_run=False, **kw)
 
 
 def _cmd_report(repo_root: Path, run_ref: str) -> int:
@@ -1168,6 +1189,15 @@ def main(argv: list[str] | None = None) -> int:
     p_auto.add_argument("--timeout", type=float, default=None, metavar="N", help="Teto em segundos")
     p_auto.add_argument("--resume", default=None, metavar="RUN", help="Retoma run bloqueada após `henke approve`")
 
+    p_trig = sub.add_parser("trigger", help="Dispara `auto` a partir de um evento (commit, falha de CI, arquivo)")
+    p_trig.add_argument("kind", choices=("commit", "ci", "file"), help="Tipo de evento")
+    p_trig.add_argument("target", nargs="?", default=None, help="Alvo (ex.: path para kind=file)")
+    p_trig.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_trig.add_argument("--driver", default=None, help="Driver de agente")
+    p_trig.add_argument("--yes", action="store_true", help="Confirma escopos comuns")
+    p_trig.add_argument("--policy", choices=("strict", "balanced", "yolo"), default=None)
+    p_trig.add_argument("--timeout", type=float, default=None, metavar="N")
+
     try:
         args = parser.parse_args(raw_argv)
     except SystemExit as exc:
@@ -1217,6 +1247,13 @@ def main(argv: list[str] | None = None) -> int:
             yes=args.yes,
             policy=args.policy,
             timeout=args.timeout,
+            resume=getattr(args, "resume", None),
+        )
+
+    if args.subcmd == "trigger":
+        return _cmd_trigger(
+            args.kind, getattr(args, "target", None), args.repo,
+            driver=args.driver, yes=args.yes, policy=args.policy, timeout=args.timeout,
         )
 
     if args.subcmd == "approve":
