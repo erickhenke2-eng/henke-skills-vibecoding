@@ -48,7 +48,7 @@ jobs:
       - name: Executar Bateria de Canários Adversariais (Evals)
         run: python evals/canaries.py
 
-      - name: Executar os 80 Canários Bilaterais dos Portões Métricos (M1-M80)
+      - name: Executar os 84 Canários Bilaterais dos Portões Métricos (M1-M84)
         run: python evals/canaries_metricas.py
 
       - name: Executar Benchmark Adversarial Completo — modo estrito (MISSED/ERROR/FALSE-RED reprova)
