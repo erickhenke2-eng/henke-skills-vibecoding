@@ -42,6 +42,12 @@ import subprocess
 import sys
 import tempfile
 
+SUITE_ROOT = Path(__file__).resolve().parents[2]
+if str(SUITE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SUITE_ROOT))
+
+from scripts.process_runner import run_process
+
 for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
         try:

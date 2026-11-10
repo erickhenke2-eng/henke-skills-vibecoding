@@ -54,6 +54,15 @@ jobs:
       - name: Executar Benchmark Adversarial Completo — modo estrito (MISSED/ERROR/FALSE-RED reprova)
         run: python evals/bench_corpus.py --suite-dir . --strict
 
+      - name: Executar Canários Wave 7 (supervisão, TIA, manifests, watch, higiene)
+        run: python evals/canaries_wave7.py
+
+      - name: Executar Suíte Completa de Testes via unittest discover (inclui Wave 7)
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Executar Benchmark Wave 7 (paralelo x sequencial, incremental x full)
+        run: python evals/bench_wave7.py
+
       - name: Executar Dogfooding do Hazard Scan (. no próprio repositório)
         run: python scripts/metricas/hazard_scan.py .
 

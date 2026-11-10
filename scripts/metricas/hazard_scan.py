@@ -32,6 +32,8 @@ Códigos de saída:
 """
 from __future__ import annotations
 
+SCANNER_VERSION = "wave7.1"
+
 import argparse
 import ast
 import fnmatch
@@ -1164,10 +1166,16 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
             cwd=str(cwd), capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=5,
             # A19 (banca v12): GIT_* herdado resolvia toplevel de repo estranho.
-            env={k: v for k, v in os.environ.items()
-                 if not k.startswith("GIT_")},
+            env={**{k: v for k, v in os.environ.items()
+                    if not k.startswith("GIT_")}, "LC_ALL": "C"},
         )
         if top_res.returncode != 0:
+            err_l = (top_res.stderr or "").lower()
+            if "not a git repository" in err_l or "not a git repo" in err_l:
+                # Alvo FORA de qualquer worktree (ex.: snapshot --staged extraído
+                # para tempdir): não existe índice, logo nada commitado —
+                # a verificação é n/a, não falha de infraestrutura.
+                return []
             # rc!=0 silencioso = .env commitado invisível (banca v10 A7).
             return [("ENV-CHECK-UNAVAILABLE", str(target), "git",
                      "git rev-parse falhou — arquivos sensíveis commitados não auditados")]

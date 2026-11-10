@@ -15,7 +15,7 @@ build/
 *.egg-info/
 .agents/
 
-# Preferências pessoais do harness
+# Preferências pessoais do harness e runtime local
 .henke/CONFIG.local.json
 
 # Custódia local — baseline é estado da máquina, não fonte compartilhada
@@ -37,3 +37,12 @@ build/
 *.pem
 *.key
 id_rsa*
+.henke/cache/
+.henke/report.html
+.henke/.cache_secret
+
+# Estado Wave 7 (manifestos incrementais, quarentena, sentinels e efêmeros)
+.henke/scan-manifests/
+.henke/quarantine/
+.henke/sessions/
+.henke/clean_log.jsonl

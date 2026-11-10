@@ -28,6 +28,7 @@ eliminando a dependência de CWD dos 14 portões mecânicos e fornecendo:
                        (quando `--run` informado) e sai 2 — nunca despacha para `check`
   - `henke approve`  : aprovação humana auditada de uma run (`.henke/runs/<id>.json`)
   - `henke scope`    : emenda de escopo justificada em uma run ativa
+  - `henke install-hook`: instala o pre-commit hook nativo de 1 comando no repositório Git
 
 Códigos de saída:
   0  sucesso / todos os portões aprovados
@@ -72,6 +73,15 @@ if str(_PKG_ROOT) not in sys.path:
 from scripts._paths import suite_root as _suite_root  # noqa: E402
 
 SUITE_ROOT = _suite_root()  # checkout OU <prefix>/henke_data (wheel)
+
+from scripts.gate_cache import (
+    clear_cache,
+    compute_cache_key,
+    enforce_ram_limit,
+    get_cached_gate,
+    store_cached_gate,
+)
+from scripts.process_runner import run_process
 
 GATE_MAP: dict[str, Path] = {
     "hazard": METRICAS_DIR / "hazard_scan.py",
@@ -140,10 +150,10 @@ def parse_test_runner_output(stdout: str, stderr: str) -> tuple[int, int]:
         failed = sum(int(m.group(2)) for m in m_cargo)
         return passed + failed, passed
 
-    # 3. Python unittest ("Ran N tests in X.XXXs")
+    # 3. Python unittest ("Ran N tests in X.XXXs" — usa a última ocorrência)
     m_ut = list(_UNITTEST_RAN_RE.finditer(combined))
     if m_ut:
-        ran = sum(int(m.group(1)) for m in m_ut)
+        ran = int(m_ut[-1].group(1))
         failed_count = 0
         for m_f in _UNITTEST_FAIL_RE.finditer(combined):
             for num in re.findall(r"(?:failures|errors)=(\d+)", m_f.group(1), flags=re.I):
@@ -194,6 +204,13 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
     skills_count = len(list(SUITE_ROOT.glob("henke-*/SKILL.md")))
     henke_dir = (repo_root / ".henke").is_dir()
 
+    from scripts.mission_classifier import classify_repository
+    classification = classify_repository(repo_root)
+    stacks_detected = [s.name for s in classification.detected_stacks]
+    stacks_configured = classification.configured_stacks
+    stacks_unconfigured = [s.name for s in classification.unconfigured_stacks]
+    active_gates = classification.active_gates
+
     report = {
         "status": "ok" if (py_ok and git_ok and not missing_scripts
                          and skills_count >= expected_skills) else "degraded",
@@ -207,6 +224,10 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
         "gates_available": len(GATE_MAP) - len(missing_scripts),
         "missing_gates": missing_scripts,
         "henke_initialized": henke_dir,
+        "stacks_detected": stacks_detected,
+        "stacks_configured": stacks_configured,
+        "stacks_unconfigured": stacks_unconfigured,
+        "active_gates": active_gates,
     }
     if as_json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -228,7 +249,6 @@ def _scrub_env() -> dict:
     e["PYTHONUTF8"] = "1"
     e["PYTHONIOENCODING"] = "utf-8"
     return e
-
 
 def _cmd_init(repo_root: Path) -> int:
     henke_dir = repo_root / ".henke"
@@ -594,6 +614,10 @@ def _cmd_exec(
     discovered = passed = 0
     if is_test_command(cmd_tokens, cmd_str):
         discovered, passed = parse_test_runner_output(out_text, err_text)
+        # w7: rc!=0 com "todos passaram" é suspeito — runner íntegro que falha
+        # reporta falhas; zera em vez de creditar um placar incoerente.
+        if rc != 0 and discovered > 0 and passed == discovered:
+            passed = 0
 
     # Lê prev_hash + append da entrada + LEDGER.json sob o MESMO lock
     # (read-modify-write atômico — concorrência não pode ver estado intermediário).
@@ -797,158 +821,476 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
             file=sys.stderr,
         )
         return 2
-    args = list(extra_args)
+
+    no_cache = False
+    args: list[str] = []
+    for a in extra_args:
+        if a == "--no-cache":
+            no_cache = True
+        elif a == "--clear-cache":
+            clear_cache(repo_root)
+            # DS-19: limpar e sair 0 SEM executar o portão parecia verde —
+            # o operador pedia veredito fresco e recebia nada. Limpa e SEGUE
+            # para a execução (equivalente a --no-cache nesta rodada).
+            no_cache = True
+            print("[OK] Cache de portões limpo — executando portão.")
+        else:
+            args.append(a)
+
     if not args and gate_name in ("hazard", "a11y", "assertless"):
         if gate_name == "assertless" and (repo_root / "tests").is_dir():
             args = [str(repo_root / "tests")]
         else:
             args = [str(repo_root)]
-    # A5 (banca v15): env herdado integral — PYTHONPATH=<repo> fazia o portão
-    # importar sitecustomize.py plantado. Strip de loader hooks.
-    _ge = {k: v for k, v in os.environ.items()
-           if not (k.upper().startswith(("PYTHON", "LD_", "DYLD_", "GIT_",
-                                         "NODE_", "BASH_ENV", "ZDOTDIR"))
-                   or k in ("VIRTUAL_ENV", "ENV"))}
-    res = subprocess.run([sys.executable, str(script_path), *args],
-                         cwd=str(repo_root), env=_ge)
+
+    cache_key = compute_cache_key(gate_name, script_path, args, repo_root)
+    if not no_cache:
+        cached = get_cached_gate(cache_key, repo_root=repo_root)
+        if cached is not None:
+            code = cached.get("exit_code", cached.get("returncode", 0))
+            print(f"[CACHE HIT] {gate_name} (exit {code})")
+            if cached.get("stdout"):
+                sys.stdout.write(cached["stdout"])
+                if not cached["stdout"].endswith("\n"):
+                    sys.stdout.write("\n")
+            if cached.get("stderr"):
+                sys.stderr.write(cached["stderr"])
+                if not cached["stderr"].endswith("\n"):
+                    sys.stderr.write("\n")
+            return code
+
+    res = run_process([sys.executable, str(script_path), *args], cwd=str(repo_root), timeout_sec=120.0)
+    out_text = res.stdout or ""
+    err_text = res.stderr or ""
+    if out_text:
+        sys.stdout.write(out_text)
+    if err_text:
+        sys.stderr.write(err_text)
+
+    store_cached_gate(
+        cache_key,
+        {
+            "gate": gate_name,
+            "exit_code": res.returncode,
+            "returncode": res.returncode,
+            "stdout": out_text,
+            "stderr": err_text,
+            "passed": res.returncode == 0 and not res.timed_out,
+        },
+        repo_root=repo_root,
+    )
+    enforce_ram_limit(500.0, repo_root=repo_root)
     return res.returncode
 
 
-def _git_staged_files(repo_root: Path) -> list[str] | None:
-    """Retorna os caminhos staged (`git diff --cached --name-only`) ou None se indisponível.
-
-    Usa `-z` para não quebrar em nomes com espaço/acentos; bytes decodificados em utf-8.
-    """
-    try:
-        res = subprocess.run(
-            ["git", "-C", str(repo_root),
-             "-c", "core.fsmonitor=false", "-c", "diff.external=",
-             "diff", "--cached", "--name-only", "-z"],
-            capture_output=True, timeout=30,
-            # M5 (banca v13): GIT_* herditário lia índice de repo estranho.
-            env={k: v for k, v in os.environ.items()
-                 if not k.startswith("GIT_")},
-        )
-    except OSError:
-        return None
-    if res.returncode != 0:
-        return None
-    raw = res.stdout if isinstance(res.stdout, bytes) else str(res.stdout).encode("utf-8")
-    text = raw.decode("utf-8", errors="replace")
-    return [p for p in text.split("\0") if p.strip()]
-
-
-def _is_test_file(path: Path) -> bool:
-    """Heurística honesta de 'arquivo de teste' para o escopo --staged do assertless_scan."""
-    if _TEST_FILE_RE.match(path.name):
-        return True
-    return "tests" in path.parts or "test" in path.parts
+def _format_manifest_output(scanner_id: str, res) -> str:
+    lines = []
+    for f in res.findings:
+        loc = f.get("location", "?")
+        scope = f.get("scope", "")
+        lines.append(f"{f.get('rule','?'):<26} {loc}  [{scope}]  {f.get('message','')}")
+    lines.append(
+        f"{len(res.scanned_files)} file(s) scanned this round, "
+        f"{len(res.reused_files)} reused, {len(res.findings)} finding(s)"
+    )
+    return "\n".join(lines)
 
 
 def _cmd_check(
     repo_root: Path,
     spec_path: str | None = None,
     as_json: bool = False,
+    no_cache: bool = False,
+    clear_cache_flag: bool = False,
     staged: bool = False,
+    full: bool = False,
+    jobs: int = 1,
+    gate_timeout: float = 120.0,
 ) -> int:
-    """Bateria agregada de portões.
+    if clear_cache_flag:
+        clear_cache(repo_root)
+        print("[OK] Cache de portões limpo.")
 
-    Com `staged=True`, hazard_scan e assertless_scan são restritos aos arquivos
-    listados por `git diff --cached --name-only` (honesto: nada staged -> portão
-    marcado como SKIP, nunca varredura silenciosa do repo inteiro). O a11y_scan
-    segue no repo inteiro, pois seu escopo é a árvore de UI e não o diff.
-    """
-    checks_to_run: list[tuple[str, list[str]]] = []
-    skipped: list[tuple[str, str]] = []
+    import tempfile
+    staged_temp_ctx = None
+    target_root = repo_root
 
     if staged:
-        staged_rel = _git_staged_files(repo_root)
-        if staged_rel is None:
-            print(
-                "ERRO: '--staged' requer um repositório Git legível "
-                "(falha em 'git diff --cached --name-only').",
-                file=sys.stderr,
+        # --staged implica --no-cache --full: manifestos, watch e cache desligados.
+        no_cache = True
+        full = True
+        try:
+            _git_env = {k: v for k, v in os.environ.items()
+                        if not k.startswith("GIT_")}
+            git_check = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                env=_git_env,
             )
+            if git_check.returncode == 0:
+                staged_temp_ctx = tempfile.TemporaryDirectory()
+                prefix = (Path(staged_temp_ctx.name).resolve().as_posix()) + "/"
+                co_res = subprocess.run(
+                    ["git", "checkout-index", "--prefix=" + prefix, "-a", "-f"],
+                    cwd=str(repo_root),
+                    capture_output=True,
+                    text=True,
+                    env=_git_env,
+                )
+                if co_res.returncode == 0:
+                    target_root = Path(staged_temp_ctx.name)
+                else:
+                    print(f"ERRO: Falha ao extrair snapshot do index Git via git checkout-index (exit {co_res.returncode}): {co_res.stderr}", file=sys.stderr)
+                    return 2
+            else:
+                print("ERRO: --staged exige repositório Git.", file=sys.stderr)
+                return 2
+        except Exception as exc:
+            print(f"ERRO: Falha ao extrair index Git para --staged: {exc}", file=sys.stderr)
             return 2
-        staged_abs = [
-            str(repo_root / rel) for rel in staged_rel
-            if (repo_root / rel).is_file()
-        ]
-        if staged_abs:
-            checks_to_run.append(("hazard_scan", [sys.executable, str(GATE_MAP["hazard"]), *staged_abs]))
-        else:
-            skipped.append(("hazard_scan", "nenhum arquivo staged existente em disco"))
-        staged_tests = [p for p in staged_abs if _is_test_file(Path(p))]
-        if staged_tests:
-            checks_to_run.append(("assertless_scan", [sys.executable, str(GATE_MAP["assertless"]), *staged_tests]))
-        else:
-            skipped.append(("assertless_scan", "nenhum arquivo de teste staged"))
-        # a11y_scan: escopo é a árvore de UI do repo, não o diff — permanece integral.
-        checks_to_run.append(("a11y_scan", [sys.executable, str(GATE_MAP["a11y"]), str(repo_root)]))
-    else:
-        checks_to_run.append(("hazard_scan", [sys.executable, str(GATE_MAP["hazard"]), str(repo_root)]))
-        tests_dir = repo_root / "tests"
+
+    try:
+        from scripts.mission_classifier import classify_repository, prompt_unconfigured_stack
+
+        classification = classify_repository(target_root)
+
+        # In interactive session, prompt user for any unconfigured stacks (only when checking working tree)
+        if classification.unconfigured_stacks and not staged:
+            is_interactive = sys.stdin.isatty()
+            cfg_path = repo_root / ".henke" / "CONFIG.json"
+            for unconf in list(classification.unconfigured_stacks):
+                prompt_unconfigured_stack(unconf.name, config_path=cfg_path, interactive=is_interactive)
+            # Re-classify in case user enabled a stack
+            classification = classify_repository(target_root)
+
+        checks_to_run: list[tuple[str, Path, list[str]]] = []
+        manifest_scanners: list[str] = []
+
+        # 1. Universal baseline gate: hazard_scan
+        checks_to_run.append(("hazard_scan", GATE_MAP["hazard"], [str(target_root)]))
+        manifest_scanners.append("hazard")
+
+        # 2. Universal assertless scan: se diretório tests/ existir no snapshot inspecionado
+        tests_dir = target_root / "tests"
         if tests_dir.is_dir():
-            checks_to_run.append(("assertless_scan", [sys.executable, str(GATE_MAP["assertless"]), str(tests_dir)]))
-        checks_to_run.append(("a11y_scan", [sys.executable, str(GATE_MAP["a11y"]), str(repo_root)]))
+            checks_to_run.append(("assertless_scan", GATE_MAP["assertless"], [str(tests_dir)]))
+            manifest_scanners.append("assertless")
 
-    if spec_path:
-        checks_to_run.append((
-            "contract_closure",
-            [sys.executable, str(GATE_MAP["contracts"]), "--repo", str(repo_root), "--spec", spec_path],
-        ))
+        # 3. Universal a11y scan: executado incondicionalmente para evitar regressões
+        checks_to_run.append(("a11y_scan", GATE_MAP["a11y"], [str(target_root)]))
+        manifest_scanners.append("a11y")
 
-    results: list[dict] = []
-    for gate_name, motivo in skipped:
-        results.append({
-            "gate": gate_name,
-            "exit_code": None,
-            "passed": False,
-            "skipped": True,
-            "output": f"pulado: {motivo}",
-        })
+        if spec_path:
+            checks_to_run.append((
+                "contract_closure",
+                GATE_MAP["contracts"],
+                ["--repo", str(target_root), "--spec", spec_path],
+            ))
 
-    overall_ok = True
-    for name, cmd in checks_to_run:
-        res = subprocess.run(
-            cmd,
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=300,
-        env=_scrub_env())
-        # exit 3 = n/a honesto (portão rodou, nada a verificar) — não é falha,
-        # mesma semântica de run_state/henke_gates; nunca conta como verde.
-        passed = res.returncode in (0, 3)
-        if not passed:
-            overall_ok = False
-        results.append({
-            "gate": name,
-            "exit_code": res.returncode,
-            "passed": passed,
-            "skipped": False,
-            "output": ((res.stdout or "") + (res.stderr or "")).strip(),
-        })
+        use_manifests = not staged
+        effective_no_cache = no_cache or staged
+        results: list[dict] = []
+        overall_ok = True
+
+        if use_manifests:
+            from scripts.metricas.scan_manifest import (
+                run_incremental_scan, scanner_specs,
+            )
+            spec_by_id = {s.scanner_id: s for s in scanner_specs()}
+            manifest_results: dict[str, dict] = {}
+            for name, _script, _args in checks_to_run:
+                scanner_id = name.replace("_scan", "")
+                if scanner_id not in manifest_scanners:
+                    continue
+                res = run_incremental_scan(
+                    repo_root, spec_by_id[scanner_id],
+                    full=full or effective_no_cache,
+                )
+                # DS-4: exit 3 = n/a (nada elegível a verificar) é veredito
+                # físico honesto — não reprova, mas também não é PASS.
+                passed = res.exit_code in (0, 3)
+                if not passed:
+                    overall_ok = False
+                manifest_results[name] = {
+                    "gate": name,
+                    "exit_code": res.exit_code,
+                    "passed": passed,
+                    "output": _format_manifest_output(scanner_id, res),
+                    "cached": False,
+                    "manifest": {
+                        "full_scan": res.full_scan,
+                        "scanned": list(res.scanned_files),
+                        "reused": len(res.reused_files),
+                        "invalidated": len(res.invalidated_files),
+                        "reasons": list(res.reasons),
+                    },
+                }
+            results.extend(manifest_results[n] for n, *_ in checks_to_run
+                           if n in manifest_results)
+
+        # Portões sem adapter (ou staged) executam como processos supervisionados.
+        script_gates = [(n, p, a) for n, p, a in checks_to_run
+                        if n.replace("_scan", "") not in manifest_scanners
+                        or not use_manifests]
+        if script_gates:
+            from scripts.gate_parallel import (
+                GateSpec, aggregate_exit_code, run_gates_parallel,
+            )
+            uncached: list[tuple[int, str, Path, list[str]]] = []
+            cached_results: dict[int, dict] = {}
+            for idx, (name, script_path, gate_args) in enumerate(script_gates):
+                key = compute_cache_key(name, script_path, gate_args, repo_root)
+                cached = None if effective_no_cache else get_cached_gate(key, repo_root=repo_root)
+                if cached is not None:
+                    exit_code = cached.get("exit_code", cached.get("returncode", 0))
+                    passed = exit_code in (0, 3)
+                    if not passed:
+                        overall_ok = False
+                    cached_results[idx] = {
+                        "gate": name,
+                        "exit_code": exit_code,
+                        "passed": passed,
+                        "output": cached.get("output", cached.get("stdout", "")).strip(),
+                        "cached": True,
+                    }
+                else:
+                    uncached.append((idx, name, script_path, gate_args))
+            specs = [
+                GateSpec(name, (sys.executable, str(script_path), *gate_args),
+                         target_root, timeout_sec=float(gate_timeout))
+                for _idx, name, script_path, gate_args in uncached
+            ]
+            par_results = run_gates_parallel(specs, max_parallel=jobs)
+            for (idx, name, script_path, gate_args), gres in zip(uncached, par_results):
+                passed = gres.passed
+                if not passed:
+                    overall_ok = False
+                out_text = ((gres.stdout or "") + (gres.stderr or "")).strip()
+                if not staged:
+                    store_cached_gate(
+                        compute_cache_key(name, script_path, gate_args, repo_root),
+                        {
+                            "gate": name,
+                            "exit_code": gres.exit_code,
+                            "returncode": gres.exit_code,
+                            "stdout": gres.stdout or "",
+                            "stderr": gres.stderr or "",
+                            "passed": passed,
+                            "output": out_text,
+                        },
+                        repo_root=repo_root,
+                    )
+                    enforce_ram_limit(500.0, repo_root=repo_root)
+                cached_results[idx] = {
+                    "gate": name,
+                    "exit_code": gres.exit_code,
+                    "passed": passed,
+                    "output": out_text,
+                    "cached": False,
+                }
+            for idx, (name, _p, _a) in enumerate(script_gates):
+                results.append(cached_results[idx])
+
+        if as_json:
+            print(json.dumps({
+                "repo": str(repo_root),
+                "passed": overall_ok,
+                "staged": staged,
+                "gates": results,
+            }, ensure_ascii=False, indent=2))
+        else:
+            for item in results:
+                if item["exit_code"] == 3:
+                    badge = "N/A (CACHED)" if item.get("cached") else "N/A"
+                elif item.get("cached"):
+                    badge = "CACHE HIT" if item["passed"] else "FAIL (CACHED)"
+                else:
+                    badge = "PASS" if item["passed"] else "FAIL"
+                print(f"[{badge}] {item['gate']} (exit {item['exit_code']})")
+                if item["output"]:
+                    for ln in item["output"].splitlines():
+                        print(f"  {ln}")
+
+        if not staged:
+            enforce_ram_limit(500.0, repo_root=repo_root)
+        return 0 if overall_ok else 1
+    finally:
+        if staged_temp_ctx is not None:
+            try:
+                staged_temp_ctx.cleanup()
+            except Exception:
+                pass
+
+
+def _cmd_install_hook(repo_root: Path, force: bool = False) -> int:
+    from scripts.install_hook import install_hook
+
+    ok, msg = install_hook(repo_root, force=force)
+    if ok:
+        print(f"[OK] {msg}")
+        return 0
+    else:
+        print(f"ERRO: {msg}", file=sys.stderr)
+        return 2 if "não é um repositório git" in msg.lower() else 1
+
+
+
+
+def _cmd_report_html(repo_root: Path, out_path: Path | None = None) -> int:
+    from scripts.report_generator import generate_report
+
+    try:
+        res = generate_report(repo_root, output_file=out_path)
+        print(f"[OK] Relatório gerado em: {res}")
+        return 0
+    except Exception as exc:
+        print(f"ERRO: {exc}", file=sys.stderr)
+        return 1
+
+
+def _cmd_test_impact(repo_root: Path, base: str, *, full: bool = False,
+                     run: bool = False, as_json: bool = False) -> int:
+    from scripts.import_graph import build_import_graph
+    from scripts.test_impact import (
+        GitDiscoveryError, ImpactSelection, build_unittest_command, select_tests,
+    )
+    try:
+        if full:
+            from scripts.test_impact import discover_changed_files
+            changed = discover_changed_files(repo_root, base)
+            sel = ImpactSelection("full", tuple(changed), (), ("forced_full",), ())
+        else:
+            graph = build_import_graph(repo_root)
+            sel = select_tests(repo_root, base, graph.direct,
+                               unresolved=graph.unresolved)
+    except GitDiscoveryError as exc:
+        print(f"ERRO: descoberta Git falhou: {exc}", file=sys.stderr)
+        return 2
 
     if as_json:
         print(json.dumps({
-            "repo": str(repo_root),
-            "staged": staged,
-            "passed": overall_ok,
-            "gates": results,
+            "mode": sel.mode,
+            "changed_files": list(sel.changed_files),
+            "test_files": list(sel.test_files),
+            "reasons": list(sel.reasons),
+            "unresolved_files": list(sel.unresolved_files),
         }, ensure_ascii=False, indent=2))
     else:
-        for item in results:
-            badge = "SKIP" if item.get("skipped") else ("PASS" if item["passed"] else "FAIL")
-            exit_txt = "-" if item.get("skipped") else str(item["exit_code"])
-            print(f"[{badge}] {item['gate']} (exit {exit_txt})")
-            if item["output"]:
-                for ln in item["output"].splitlines():
-                    print(f"  {ln}")
+        print(f"mode={sel.mode} tests={len(sel.test_files)} "
+              f"changed={len(sel.changed_files)} reasons={','.join(sel.reasons) or '-'}")
+        for t in sel.test_files:
+            print(f"  selected: {t}")
 
-    return 0 if overall_ok else 1
+    if not run:
+        return 0
+    if sel.mode == "selected" and not sel.test_files:
+        print("no_changes: nenhum teste a executar.")
+        return 0
+    cmd = build_unittest_command(sel, repo_root)
+    env = os.environ.copy()
+    env["HENKE_TEST_IMPACT"] = "1"
+    ledger = repo_root / ".henke" / "LEDGER.json"
+    exec_log = repo_root / ".henke" / "exec_log.jsonl"
+    return _cmd_exec(repo_root, ledger, exec_log, ["--"] + cmd)
+
+
+def _cmd_watch(repo_root: Path, *, quiet: bool = False,
+               poll: float = 0.75, debounce: float = 0.30) -> int:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("ERRO: 'henke watch' é exclusivamente foreground/interativo (TTY exigido).",
+              file=sys.stderr)
+        return 2
+    from scripts.henke_watch import WatchConfig, WatchController
+    cfg = WatchConfig(repo_root=repo_root, poll_interval_sec=poll,
+                      debounce_sec=debounce, quiet=quiet)
+    return WatchController(cfg).run_foreground()
+
+
+def _cmd_clean(repo_root: Path, *, execute: bool = False,
+               restore: str | None = None, purge_expired: bool = False,
+               confirm_batch: str | None = None, as_json: bool = False) -> int:
+    from scripts.henke_clean import (
+        plan_clean, purge_expired_batch, quarantine, restore_batch,
+        staging_leftovers,
+    )
+    if restore is not None:
+        if not execute:
+            print("ERRO: --restore exige --execute.", file=sys.stderr)
+            return 2
+        n = restore_batch(repo_root, restore)
+        if n == 0:
+            # DS-2: "0 restaurados" não é sucesso — todos os itens foram
+            # pulados (não-verificados, destino ocupado ou fora da raiz).
+            print(f"[FALHA] 0 item(ns) restaurado(s) do batch {restore} "
+                  "(veja clean_log.jsonl).", file=sys.stderr)
+            return 1
+        print(f"[OK] {n} item(ns) restaurado(s) do batch {restore}.")
+        return 0
+    if purge_expired:
+        if not execute or not confirm_batch:
+            print("ERRO: --purge-expired exige --execute e --confirm-batch <id>.",
+                  file=sys.stderr)
+            return 2
+        try:
+            n = purge_expired_batch(repo_root, confirm_batch,
+                                    now=datetime.now(timezone.utc))
+        except ValueError as exc:
+            print(f"ERRO: {exc}", file=sys.stderr)
+            return 2
+        print(f"[OK] batch {confirm_batch} purgado ({n}).")
+        return 0
+    candidates = plan_clean(repo_root)
+    leftovers = staging_leftovers(repo_root)
+    if as_json:
+        print(json.dumps({
+            "candidates": [
+                {"source": str(c.source), "kind": c.kind, "size_bytes": c.size_bytes}
+                for c in candidates
+            ],
+            "staging_leftovers": [str(p) for p in leftovers],
+            "dry_run": not execute,
+        }, ensure_ascii=False, indent=2))
+    else:
+        for c in candidates:
+            print(f"  [{c.kind}] {c.source} ({c.size_bytes} bytes)")
+        for p in leftovers:
+            print(f"  [staging-leftover] {p}")
+        print(f"{len(candidates)} candidato(s); "
+              f"{'EXECUTANDO quarentena' if execute else 'dry-run (use --execute para mover)'}")
+    if not execute:
+        return 0
+    if not candidates:
+        return 0
+    batch = quarantine(repo_root, candidates)
+    print(f"[OK] batch {batch.batch_id}: {len(batch.items)} item(ns) em quarentena "
+          f"(expira {batch.expires_at}).")
+    return 0
+
+
+def _cmd_session(args) -> int:
+    import scripts.henke_session as hs
+    if args.session_cmd == "start":
+        s = hs.start_session(args.agent, args.workspace.resolve(), args.run_id)
+        print(f"HENKE_SESSION_ID={s.session_id}")
+        print(s.session_id)
+        return 0
+    ws = args.workspace.resolve() if getattr(args, "workspace", None) else Path.cwd()
+    os.environ["HENKE_WORKSPACE"] = str(ws)
+    if args.session_cmd == "heartbeat":
+        hs.heartbeat(args.session_id)
+        print(f"[OK] heartbeat renovado: {args.session_id}")
+        return 0
+    if args.session_cmd == "end":
+        hs.end_session(args.session_id)
+        print(f"[OK] sessão encerrada: {args.session_id}")
+        return 0
+    if args.session_cmd == "gc":
+        n = hs.session_gc(ws, now=datetime.now(timezone.utc))
+        print(f"[OK] session gc: {n} sentinel(s) reaped.")
+        return 0
+    return 2
 
 
 def _iter_run_files(repo_root: Path) -> list[Path]:
@@ -1530,6 +1872,12 @@ def main(argv: list[str] | None = None) -> int:
              "(a11y_scan segue no repo inteiro)",
     )
     p_check.add_argument("--json", action="store_true", help="Saída em JSON")
+    p_check.add_argument("--no-cache", action="store_true", help="Ignora cache e força re-execução dos portões")
+    p_check.add_argument("--clear-cache", action="store_true", help="Limpa o cache de portões antes de executar")
+    p_check.add_argument("--full", action="store_true", help="Força scan integral (regrava manifesto após sucesso)")
+    p_check.add_argument("--jobs", type=int, default=1, help="Portões de processo em paralelo (1-4)")
+    p_check.add_argument("--gate-timeout", type=float, default=120.0, help="Timeout por portão em segundos")
+    p_check.add_argument("--state-dir", type=Path, default=None, help="Diretório de estado absoluto (equivale a HENKE_STATE_DIR)")
 
     p_app = sub.add_parser("approve", help="Aprova uma run pendente de autorização humana")
     p_app.add_argument("run_file", type=Path, help="Arquivo .henke/runs/<id>.json")
@@ -1550,6 +1898,52 @@ def main(argv: list[str] | None = None) -> int:
     p_gf.add_argument("--driver", default=None, help="Comando do revisor externo (sessão zerada)")
     p_gf.add_argument("--run", dest="run_ref", default=None, help="Run alvo (id ou caminho .henke/runs/<id>.json)")
     p_gf.add_argument("--json", action="store_true", help="Saída em JSON")
+    p_gf.add_argument("--no-cache", action="store_true", help="Ignora cache e força re-execução dos portões")
+
+    p_install = sub.add_parser("install-hook", help="Instala o pre-commit hook nativo no repositório Git")
+    p_install.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_install.add_argument("--force", action="store_true", help="Sobrescreve hook pré-existente sem criar backup .legacy")
+
+    
+    p_report_html = sub.add_parser("report-html", help="Gera o dashboard visual local em HTML autocontido")
+    p_report_html.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_report_html.add_argument("--out", type=Path, default=None, help="Caminho do arquivo HTML de saída (padrão: .henke/report.html)")
+
+    p_ti = sub.add_parser("test-impact", help="Seleciona arquivos de teste pelo diff (TIA conservativa)")
+    p_ti.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_ti.add_argument("--base", required=True, help="Ref Git base para o diff")
+    p_ti.add_argument("--full", action="store_true", help="Sempre suíte completa (CI/pré-merge)")
+    p_ti.add_argument("--run", action="store_true", help="Executa o comando selecionado via supervisor")
+    p_ti.add_argument("--json", action="store_true", help="Saída em JSON")
+
+    p_watch = sub.add_parser("watch", help="Modo watch foreground interativo (exige TTY)")
+    p_watch.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_watch.add_argument("--quiet", action="store_true", help="Suprime repetições verdes idênticas")
+    p_watch.add_argument("--poll-interval", type=float, default=0.75, help="Intervalo de polling (s)")
+    p_watch.add_argument("--debounce", type=float, default=0.30, help="Janela de debounce (s)")
+
+    p_clean = sub.add_parser("clean", help="Faxina allowlist: dry-run padrão; --execute move para quarentena")
+    p_clean.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
+    p_clean.add_argument("--execute", action="store_true", help="Executa a movimentação para quarentena")
+    p_clean.add_argument("--restore", default=None, help="Batch-id para restaurar da quarentena")
+    p_clean.add_argument("--purge-expired", action="store_true", help="Purgar batch expirado (exige --confirm-batch)")
+    p_clean.add_argument("--confirm-batch", default=None, help="Confirmação humana do batch-id a purgar")
+    p_clean.add_argument("--json", action="store_true", help="Saída em JSON")
+
+    p_session = sub.add_parser("session", help="Sentinel de sessão com rastreamento de artefatos")
+    session_sub = p_session.add_subparsers(dest="session_cmd", required=True)
+    p_sstart = session_sub.add_parser("start", help="Inicia sessão e imprime session_id")
+    p_sstart.add_argument("--agent", required=True, help="Nome do agente")
+    p_sstart.add_argument("--workspace", type=Path, default=Path("."), help="Worktree alvo")
+    p_sstart.add_argument("--run-id", required=True, help="ID da run associada")
+    p_shb = session_sub.add_parser("heartbeat", help="Renova janela de heartbeat (+1h)")
+    p_shb.add_argument("session_id", help="ID da sessão")
+    p_shb.add_argument("--workspace", type=Path, default=Path("."), help="Worktree alvo")
+    p_send = session_sub.add_parser("end", help="Encerra a sessão (state=closed)")
+    p_send.add_argument("session_id", help="ID da sessão")
+    p_send.add_argument("--workspace", type=Path, default=Path("."), help="Worktree alvo")
+    p_sgc = session_sub.add_parser("gc", help="Reapa sentinels expirados e roda ephemeral_gc")
+    p_sgc.add_argument("--workspace", type=Path, default=Path("."), help="Worktree alvo")
 
     p_report = sub.add_parser("report", help="Relatório markdown rastreável de uma run (5 seções fixas)")
     p_report.add_argument("run_id", help="ID da run ou caminho do arquivo .henke/runs/<id>.json")
@@ -1601,7 +1995,23 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_route(prompt_val, args.repo.resolve(), compact=is_compact)
 
     if args.subcmd == "check":
-        return _cmd_check(args.repo.resolve(), spec_path=args.spec, as_json=args.json, staged=args.staged)
+        state_dir_arg = getattr(args, "state_dir", None)
+        if state_dir_arg is not None:
+            if not Path(state_dir_arg).is_absolute():
+                print("ERRO: --state-dir deve ser caminho absoluto.", file=sys.stderr)
+                return 2
+            os.environ["HENKE_STATE_DIR"] = str(Path(state_dir_arg).resolve())
+        return _cmd_check(
+            args.repo.resolve(),
+            spec_path=args.spec,
+            as_json=args.json,
+            no_cache=getattr(args, "no_cache", False),
+            clear_cache_flag=getattr(args, "clear_cache", False),
+            staged=getattr(args, "staged", False),
+            full=getattr(args, "full", False),
+            jobs=getattr(args, "jobs", 1),
+            gate_timeout=getattr(args, "gate_timeout", 120.0),
+        )
 
     if args.subcmd == "goldfish":
         return _cmd_goldfish(
@@ -1615,11 +2025,30 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcmd == "report":
         return _cmd_report(args.repo.resolve(), args.run_id)
 
+    if args.subcmd == "report-html":
+        return _cmd_report_html(args.repo.resolve(), out_path=args.out)
+
     if args.subcmd == "status":
         return _cmd_list_runs(args.repo.resolve(), as_json=args.json)
 
     if args.subcmd == "setup":
         return _cmd_setup(args.dir)
+
+    if args.subcmd == "test-impact":
+        return _cmd_test_impact(args.repo.resolve(), args.base,
+                                full=args.full, run=args.run, as_json=args.json)
+
+    if args.subcmd == "watch":
+        return _cmd_watch(args.repo.resolve(), quiet=args.quiet,
+                          poll=args.poll_interval, debounce=args.debounce)
+
+    if args.subcmd == "clean":
+        return _cmd_clean(args.repo.resolve(), execute=args.execute,
+                          restore=args.restore, purge_expired=args.purge_expired,
+                          confirm_batch=args.confirm_batch, as_json=args.json)
+
+    if args.subcmd == "session":
+        return _cmd_session(args)
 
     if args.subcmd == "auto":
         return _cmd_auto(
@@ -1656,6 +2085,13 @@ def main(argv: list[str] | None = None) -> int:
             "--reason",
             args.reason,
         ])
+
+    if args.subcmd == "install-hook":
+        return _cmd_install_hook(args.repo.resolve(), force=args.force)
+
+    
+    if args.subcmd == "report":
+        return _cmd_report(args.repo.resolve(), out_path=args.out.resolve() if args.out else None)
 
     return 2
 

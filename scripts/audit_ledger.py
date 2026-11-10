@@ -304,22 +304,21 @@ def _verify_log_chain_core(raw_lines: list[str], log_p: Path) -> tuple[list[str]
             errors.append(f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash ausente na linha {idx} de '{log_p.name}'.")
             continue
 
-        if ehash_r:
-            cand_pipe = hashlib.sha256(
-                f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{sha_r}".encode("utf-8")
-            ).hexdigest()
-            body_no_ehash = {k: v for k, v in rec.items() if k != "entry_hash"}
-            cand_json1 = hashlib.sha256(
-                json.dumps(body_no_ehash, sort_keys=True, ensure_ascii=False).encode("utf-8")
-            ).hexdigest()
-            cand_json2 = hashlib.sha256(
-                json.dumps(body_no_ehash, sort_keys=True).encode("utf-8")
-            ).hexdigest()
-            if ehash_r not in (cand_pipe, cand_json1, cand_json2):
-                errors.append(
-                    f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash adulterado na linha {idx} de '{log_p.name}'."
-                )
-                continue
+        cand_pipe = hashlib.sha256(
+            f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{sha_r}".encode("utf-8")
+        ).hexdigest()
+        body_no_ehash = {k: v for k, v in rec.items() if k != "entry_hash"}
+        cand_json1 = hashlib.sha256(
+            json.dumps(body_no_ehash, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        cand_json2 = hashlib.sha256(
+            json.dumps(body_no_ehash, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if ehash_r not in (cand_pipe, cand_json1, cand_json2):
+            errors.append(
+                f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash adulterado na linha {idx} de '{log_p.name}'."
+            )
+            continue
 
         last_ehash = ehash_r
         verified_records.append({

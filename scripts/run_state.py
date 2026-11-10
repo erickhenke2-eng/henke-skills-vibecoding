@@ -691,11 +691,12 @@ def _git_untracked(repo_root: Path) -> list[str] | None:
     )
 
 
-def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
+def derive_run_outcome(run_data: dict, repo_root: Path | None = None) -> tuple[str, list[str]]:
     """Deriva mecanicamente ('verified' | 'failed' | 'blocked', reasons) a partir de run_data."""
     if not isinstance(run_data, dict):
         return "failed", ["INVALID-RUN-DATA: estrutura de run não é um objeto JSON"]
 
+    root_dir = Path(repo_root).resolve() if repo_root is not None else Path.cwd().resolve()
     reasons: list[str] = []
 
     # 1. Valida emendas de escopo antes de tudo (emenda sem justificativa invalida a run)
@@ -715,7 +716,16 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
     if reasons:
         return "failed", reasons
 
-    # 2. Verifica execução física dos portões
+    # 2. Verifica existência física da spec se declarada
+    spec_path_str = run_data.get("spec_path")
+    if spec_path_str:
+        spec_p = Path(spec_path_str)
+        if not spec_p.is_absolute():
+            spec_p = (root_dir / spec_p).resolve()
+        if not spec_p.is_file():
+            return "blocked", [f"INVALID-SPEC-PATH: spec declarada '{spec_path_str}' não existe fisicamente no disco"]
+
+    # 3. Verifica execução física dos portões
     gates = run_data.get("gates", {})
     if not isinstance(gates, dict):
         return "blocked", ["NO-GATES-EXECUTED: 'gates' não é um objeto na run"]
@@ -899,8 +909,11 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     if not isinstance(data, dict):
         return False, ["RUN-JSON-INVALID: raiz do JSON deve ser um objeto"]
 
+    # Dedução de repo_root a partir do caminho do arquivo se dentro de .henke/runs
+    repo_root = p.parent.parent.parent if (len(p.parents) >= 2 and p.parent.name == "runs" and p.parent.parent.name == ".henke") else Path.cwd().resolve()
+
     declared = data.get("outcome")
-    derived, reasons = derive_run_outcome(data)
+    derived, reasons = derive_run_outcome(data, repo_root=repo_root)
 
     # F-03: campos de decisão (mode/mandatory_gates/requires_human_auth/
     # gates_required) podem ser regravados pelo driver no arquivo da run —
