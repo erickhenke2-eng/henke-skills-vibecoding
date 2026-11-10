@@ -362,7 +362,9 @@ class TestStagingAndLogging(unittest.TestCase):
             staging.mkdir(parents=True)
             (staging / "f.txt").write_text("x")
             leftovers = staging_leftovers(repo)
-            self.assertIn(staging, leftovers)
+            # CI Windows: TEMP do runner usa short-name 8.3 (RUNNER~1) —
+            # staging_leftovers resolve o path; comparar pelo resolvido.
+            self.assertIn(staging.resolve(), leftovers)
 
     def test_clean_log_written(self):
         with tempfile.TemporaryDirectory() as td:
