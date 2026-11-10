@@ -75,8 +75,8 @@ CLI_PATH = SCRIPTS_DIR / "henke_cli.py"
 
 if str(_PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(_PKG_ROOT))
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
+# SCRIPTS_DIR NÃO entra no sys.path: com ele, `import test_impact` resolve
+# scripts/test_impact.py e colide com tests/test_impact.py no discover do CI.
 
 from scripts._paths import suite_root as _suite_root  # noqa: E402
 
@@ -373,13 +373,11 @@ def _child_env(repo: Path | None = None) -> dict:
 
 
 def _load_module(name: str):
-    """Importa scripts/<name>.py como `scripts.<name>` ou `<name>`; None se ausente."""
-    for modname in (f"scripts.{name}", name):
-        try:
-            return importlib.import_module(modname)
-        except Exception:
-            continue
-    return None
+    """Importa scripts/<name>.py como `scripts.<name>`; None se ausente."""
+    try:
+        return importlib.import_module(f"scripts.{name}")
+    except Exception:
+        return None
 
 
 # --- run_state (mesma suíte — import direto; henke_cli.py já faz o mesmo) ---
