@@ -149,8 +149,9 @@ class GatesRunnerTests(unittest.TestCase):
 
     # ---------- run_state: exit 3 na derivação mecânica ----------
 
-    def _run_with_gates(self, gate_exits: dict, mandatory: list | None = None):
-        run_path = init_run(self.repo, "run-na-test", mode="EXECUTAR",
+    def _run_with_gates(self, gate_exits: dict, mandatory: list | None = None,
+                        run_id: str = "run-na-test"):
+        run_path = init_run(self.repo, run_id, mode="EXECUTAR",
                             mandatory_gates=mandatory)
         for gate, ec in gate_exits.items():
             ev = self.repo / f"ev_{gate}.out"
@@ -160,9 +161,21 @@ class GatesRunnerTests(unittest.TestCase):
         return json.loads(run_path.read_text(encoding="utf-8"))
 
     def test_derive_na_gate_nao_reprova_mas_exige_verde(self):
-        data = self._run_with_gates({"hazard_scan": 0, "a11y_scan": 3, "mutant_hunt": 3})
+        data = self._run_with_gates({"hazard_scan": 0, "assertless_scan": 0,
+                                     "a11y_scan": 3, "mutant_hunt": 3})
         outcome, reasons = derive_run_outcome(data)
         self.assertEqual(outcome, "verified", reasons)
+
+    def test_derive_core_incompleto_e_blocked(self):
+        # DS-4: hazard sozinho não satisfaz run EXECUTAR — exige os 3.
+        for i, gates in enumerate(({"hazard_scan": 0},
+                                   {"hazard_scan": 0, "a11y_scan": 0},
+                                   {"assertless_scan": 0, "a11y_scan": 3})):
+            data = self._run_with_gates(gates, run_id=f"run-na-partial-{i}")
+            outcome, reasons = derive_run_outcome(data)
+            self.assertEqual(outcome, "blocked", (gates, reasons))
+            self.assertTrue(
+                any("MANDATORY-GATE-MISSING" in r for r in reasons), reasons)
 
     def test_derive_todos_na_e_blocked_antitautologia(self):
         data = self._run_with_gates({"a11y_scan": 3, "mutant_hunt": 3})

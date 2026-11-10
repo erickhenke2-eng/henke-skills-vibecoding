@@ -51,6 +51,16 @@ def _triad(tmp: Path, gate: str, exit_code: int = 0) -> dict:
     }
 
 
+def _core(tmp: Path) -> dict:
+    """Conjunto fundamental exigido para verified em EXECUTAR (DS-4):
+    hazard==0 + assertless==0 + a11y∈{0,3}."""
+    return {
+        "hazard_scan": _triad(tmp, "hazard_scan", 0),
+        "assertless_scan": _triad(tmp, "assertless_scan", 0),
+        "a11y_scan": _triad(tmp, "a11y_scan", 3),
+    }
+
+
 def _run(tmp: Path, gates: dict, **extra) -> Path:
     data = {"run_id": "r", "mode": "EXECUTAR", "archetype": "CARPINTEIRO",
             "outcome": "verified", "gates": gates}
@@ -96,21 +106,23 @@ class ForgedRunTests(unittest.TestCase):
         self.assertTrue(any("NO-GATES-EXECUTED" in r for r in reasons))
 
     def test_real_triad_verifies(self):
-        p = _run(self.t, {"hazard_scan": _triad(self.t, "hazard_scan", 0)})
+        p = _run(self.t, _core(self.t))
         ok, reasons = verify_run_file(p)
         self.assertTrue(ok, reasons)
 
     def test_evidence_tampering_invalidates(self):
-        g = _triad(self.t, "hazard_scan", 0)
-        p = _run(self.t, {"hazard_scan": g})
+        gates = _core(self.t)
+        g = gates["hazard_scan"]
+        p = _run(self.t, gates)
         Path(g["evidence_file"]).write_text("adulterado\n", encoding="utf-8")
         ok, reasons = verify_run_file(p)
         self.assertFalse(ok)
         self.assertTrue(any("EVIDENCE" in r for r in reasons), reasons)
 
     def test_evidence_missing_invalidates(self):
-        g = _triad(self.t, "hazard_scan", 0)
-        p = _run(self.t, {"hazard_scan": g})
+        gates = _core(self.t)
+        g = gates["hazard_scan"]
+        p = _run(self.t, gates)
         Path(g["evidence_file"]).unlink()
         ok, reasons = verify_run_file(p)
         self.assertFalse(ok)
@@ -127,10 +139,8 @@ class ForgedRunTests(unittest.TestCase):
         self.assertTrue(any("ALL-GATES-N/A" in r for r in reasons))
 
     def test_one_green_plus_na_verifies(self):
-        gates = {
-            "hazard_scan": _triad(self.t, "hazard_scan", 0),
-            "a11y_scan": _triad(self.t, "a11y_scan", 3),
-        }
+        gates = _core(self.t)
+        gates["mutant_hunt"] = _triad(self.t, "mutant_hunt", 3)
         p = _run(self.t, gates)
         ok, reasons = verify_run_file(p)
         self.assertTrue(ok, reasons)
@@ -171,7 +181,7 @@ class ForgedRunTests(unittest.TestCase):
         data = {
             "run_id": "r", "mode": "EXECUTAR",
             "gates": {
-                "hazard_scan": _triad(self.t, "hazard_scan", 0),
+                **_core(self.t),
                 "anotacao": {"exit_code": 3, "manual": True},
             },
         }
@@ -199,10 +209,12 @@ class ForgedRunTests(unittest.TestCase):
         # passa a checagem de manifesto e testa o confinamento isoladamente.
         _append_evidence_manifest("r", "hazard_scan", str(repo_file), sha, "x", 0, False,
                                   run_path=self.t / ".henke" / "runs" / "r.json")
-        p = _run(self.t, {"hazard_scan": {
+        gates = {"hazard_scan": {
             "exit_code": 0, "command": "x",
             "evidence_file": str(repo_file), "evidence_sha256": sha,
-        }})
+        }, "assertless_scan": _triad(self.t, "assertless_scan", 0),
+            "a11y_scan": _triad(self.t, "a11y_scan", 3)}
+        p = _run(self.t, gates)
         ok, reasons = verify_run_file(p)
         self.assertFalse(ok)
         self.assertTrue(any("OUTSIDE-SCOPE" in r for r in reasons), reasons)
@@ -214,10 +226,12 @@ class ForgedRunTests(unittest.TestCase):
         sha = hashlib.sha256(outside.read_bytes()).hexdigest()
         _append_evidence_manifest("r", "hazard_scan", str(outside), sha, "x", 0, False,
                                   run_path=self.t / ".henke" / "runs" / "r.json")
-        p = _run(self.t, {"hazard_scan": {
+        gates = {"hazard_scan": {
             "exit_code": 0, "command": "x",
             "evidence_file": str(outside), "evidence_sha256": sha,
-        }})
+        }, "assertless_scan": _triad(self.t, "assertless_scan", 0),
+            "a11y_scan": _triad(self.t, "a11y_scan", 3)}
+        p = _run(self.t, gates)
         ok, reasons = verify_run_file(p)
         self.assertFalse(ok)
         self.assertTrue(any("OUTSIDE-SCOPE" in r or "EVIDENCE" in r for r in reasons), reasons)
@@ -228,7 +242,9 @@ class ForgedRunTests(unittest.TestCase):
         data = {
             "run_id": "r", "mode": "EXECUTAR",
             "mandatory_gates": ["hazard_scan"],
-            "gates": {"scripts/metricas/hazard_scan.py": _triad(self.t, "hs", 0)},
+            "gates": {"scripts/metricas/hazard_scan.py": _triad(self.t, "hs", 0),
+                      "assertless_scan": _triad(self.t, "assertless_scan", 0),
+                      "a11y_scan": _triad(self.t, "a11y_scan", 3)},
         }
         derived, reasons = derive_run_outcome(data)
         self.assertEqual(derived, "verified", reasons)

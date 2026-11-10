@@ -18,8 +18,15 @@ _HERE = Path(__file__).resolve().parents[1]
 
 
 def _candidate_roots() -> list[Path]:
+    roots: list[Path] = []
+    # DS-8: `--prefix`/`--target` instalam scripts em <alvo>/scripts e dados
+    # em <alvo>/henke_data — fora dos sysconfig paths do interpretador atual.
+    # Procura henke_data ao lado de _HERE e nos ancestrais do próprio pacote
+    # (site-packages → <prefix>). A checagem exige henke-*/SKILL.md dentro.
+    for anc in (_HERE, *_HERE.parents):
+        roots.append(anc / "henke_data")
     keys = ("data", "platlib", "purelib")
-    roots = [Path(sysconfig.get_path(k)) / "henke_data" for k in keys]
+    roots += [Path(sysconfig.get_path(k)) / "henke_data" for k in keys]
     # Scheme de usuário — `pip install --user` e pipx instalam dados aqui,
     # fora do alcance dos três paths padrão acima (ALTO instalador, banca).
     for scheme in ("nt_user", "posix_user"):

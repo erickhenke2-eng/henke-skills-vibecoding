@@ -154,16 +154,19 @@ class CliPackTests(unittest.TestCase):
         """--timeout propaga; sem flag, honra timeout_sec de .henke/PROJECT.json; fallback 180."""
         captured = {}
 
-        class _FakeCP:
+        class _FakeProc:
             returncode = 0
-            stdout = ""
-            stderr = ""
+            pid = 1
 
-        def fake_run(cmd, **kwargs):
+            def communicate(self, timeout=None):
+                captured["timeout"] = timeout
+                return b"", b""
+
+        def fake_popen(cmd, **kwargs):
             captured.update(kwargs)
-            return _FakeCP()
+            return _FakeProc()
 
-        with mock.patch.object(subprocess, "run", fake_run):
+        with mock.patch.object(subprocess, "Popen", fake_popen):
             code, _, err = run_cli([
                 "exec", "--repo", str(self.repo), "--timeout", "7", "--", "echo", "hi",
             ])

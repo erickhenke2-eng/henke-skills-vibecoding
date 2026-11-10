@@ -116,28 +116,35 @@ def inventory(repo):
             if path.name in IGNORED_FILES or path.suffix in IGNORED_SUFFIXES:
                 continue
             files.append(rel)
-    # [HENKE-PATCH] portões mecânicos e métricos instalados junto às skills que os invocam
-    root_gate_scripts = [
-        repo / "scripts" / "_paths.py",          # importado por vários scripts — sem ele o CLI morre
-        repo / "scripts" / "gate_pipeline.py",   # invocado por henke_gates (ratchet/fence)
-        repo / "scripts" / "validate_skills.py", # chamado por install_skills e doctor
-        repo / "scripts" / "repo_signals.py",
-        repo / "scripts" / "henke_router.py",
-        repo / "scripts" / "spec_drift.py",
-        repo / "scripts" / "audit_ledger.py",
-        repo / "scripts" / "henke_gate.py",
-        repo / "scripts" / "henke_cli.py",
-        repo / "scripts" / "run_state.py",
-        repo / "scripts" / "henke_auto.py",
-        repo / "scripts" / "henke_detect.py",
-        repo / "scripts" / "henke_gates.py",
-        repo / "scripts" / "henke_report.py",
-        repo / "scripts" / "henke_driver_opencode.py",
-        repo / "scripts" / "henke_driver_agent.py",
+    # [HENKE-PATCH] portões mecânicos e métricos instalados junto às skills que os invocam.
+    # DS-7b: os scripts são fonte do PRÓPRIO pacote (__file__), não `repo/scripts`
+    # — num wheel `repo` é henke_data/ e não tem scripts/, então o instalador
+    # distribuído instalava wrappers sem nenhum script funcional.
+    _scripts_dir = Path(__file__).resolve().parent
+    root_gate_names = [
+        "_paths.py",          # importado por vários scripts — sem ele o CLI morre
+        "gate_pipeline.py",   # invocado por henke_gates (ratchet/fence)
+        "validate_skills.py", # chamado por install_skills e doctor
+        "repo_signals.py",
+        "henke_router.py",
+        "spec_drift.py",
+        "audit_ledger.py",
+        "henke_gate.py",
+        "henke_cli.py",
+        "run_state.py",
+        "henke_auto.py",
+        "henke_detect.py",
+        "henke_gates.py",
+        "henke_report.py",
+        "henke_driver_opencode.py",
+        "henke_driver_agent.py",
     ]
-    for rel in sorted(repo.glob("scripts/metricas/*.py")) + root_gate_scripts:
+    for rel in sorted(_scripts_dir.glob("metricas/*.py")):
         if rel.is_file():
-            files.append(rel.relative_to(repo))
+            files.append(Path("scripts") / "metricas" / rel.name)
+    for name in root_gate_names:
+        if (_scripts_dir / name).is_file():
+            files.append(Path("scripts") / name)
     # Wrappers da CLI global `henke`: instalados em <dest>/bin/ e resolvem
     # <dest>/scripts/henke_cli.py automaticamente (caminho relativo ao bin/).
     for wrapper in (repo / "bin" / "henke", repo / "bin" / "henke.cmd"):

@@ -284,6 +284,11 @@ DESTRUCTIVE_SIGNALS = (
     # chegavam ao driver em EXECUTAR sem trava humana.
     "nuke", "nuked", "nuking", "clean", "cleaned", "cleaning", "revert",
     "reverted", "reverting", "prune", "pruned", "pruning", "undo", "undone",
+    # DS-10: flexões PT de revert/reset + "git reset"/"reset the <db>" — uma
+    # flexão mudava modo/auth (o auto já tinha "reverta"/"reseta"/"reset").
+    "reverta", "revertemos", "revertido", "revertida", "reverter",
+    "git reset", "reset the", "reseta", "resetar", "resete", "resetemos",
+    "resetou",
     "checkout .", "docker system prune", "docker volume prune",
     "kubectl delete", "terraform destroy", "helm uninstall", "systemctl stop",
     "systemctl disable", "roll back", "rolled back", "obliterate",
@@ -299,12 +304,16 @@ DESTRUCTIVE_SIGNALS = (
     "format t:", "format u:", "format v:", "format w:", "format x:",
     "format y:", "format z:",
     # banca v16 — A1: mesma lacuna lexical do auto (listas precisam espelhar).
-    "formata", "formatar", "formato", "formatando", "formatem",
+    # DS-12a: formas nuas de "format*" eram falso-positivo — "ajusta o formato
+    # da data"/"reformat the code" exigiam auth destrutiva. Destrutivo real já
+    # é coberto pelas frases completas e pelos literais de drive/flag abaixo.
     "detona", "detonar", "detonei", "detonando", "estoura", "arregaça",
-    "reformat", "reformatar", "deleter",
+    "deleter",
     "format a drive", "format the drive", "format the disk",
     "format drive", "format disk", "format usb", "format pendrive",
     "formata o disco", "formata o hd", "formatar o disco", "formatar o pendrive",
+    "formata o pendrive", "formata o cartao", "formata o sd", "formatar o hd",
+    "formata a particao", "formatar o cartao", "formatar o sd", "formata o ssd",
     "format /", "diskpart", "fdisk", "newfs", "mke2fs", "blkdiscard",
     "wipefs", "srm", "secure erase", "hdparm --security-erase",
     "dd if", "dd bs", "dd count", "dd conv",
@@ -837,10 +846,12 @@ def route_request(prompt: str, repo_root: Path | None = None, suite_root: Path |
     if is_compound_exec:
         archetype = "CARPINTEIRO"
         gates_required = list(MODE_GATES["EXECUTAR_COMPOUND"])
-    elif mode == "PLANEJAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-plan-", "henke-arch-"))):
+    elif mode == "PLANEJAR":
         # Modo antes de skill: PLANEJAR com lead henke-audit-* NÃO pode cair na
         # matriz ANALISAR — perderia spec_drift, o único portão que impõe o
-        # escopo declarado da spec (ALTO-7 da banca).
+        # escopo declarado da spec (ALTO-7 da banca). E ANALISAR com lead de
+        # planejamento NÃO pode cair na matriz PLANEJAR — omitiria hazard/
+        # assertless/coverage/a11y do portão obrigatório (DS-9).
         archetype = "ESTADISTA"
         gates_required = list(MODE_GATES["PLANEJAR"])
     elif mode == "ANALISAR" or (mode != "EXECUTAR" and lead_skill.startswith(("henke-audit-", "henke-debug-"))):

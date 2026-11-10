@@ -381,7 +381,10 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     # A4 (banca v16): PATH com entrada relativa ou dentro do repo resolvia
     # `git` plantado → portões liam stdout forjado (diff vazio/status limpo).
     try:
-        _rr = Path.cwd().resolve()
+        # DS-12b: o filtro tem que usar o repo efetivo (`root` = --repo
+        # resolvido na entrada), não o CWD do processo — os portões rodam
+        # com cwd=root, que pode ser outro diretório.
+        _rr = root
         _parts = []
         for _d in child_env.get("PATH", "").split(os.pathsep):
             if not _d or not os.path.isabs(_d):

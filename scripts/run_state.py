@@ -453,7 +453,7 @@ def _load_evidence_manifest(run_id: str, run_path: Path | None = None) -> dict |
 # de nascimento e verify_run_file re-ancora antes de confiar.
 _ANCHORED_FIELDS = ("mode", "mandatory_gates", "requires_human_auth",
                     "gates_required", "driver", "spec_path", "ignored_start",
-                    "untracked_start",
+                    "untracked_start", "ignored_start_hashes",
                     "prompt", "route_snapshot")
 # `approval_binding` fica de fora de propósito: approve_run o muta
 # legitimamente (re-ancora head). O que o binding cobre (prompt/route/driver
@@ -646,6 +646,28 @@ def _git_ignored(repo_root: Path) -> list[str] | None:
     )
 
 
+def _git_ignored_hashes(repo_root: Path) -> dict[str, dict] | None:
+    """{path: {sha256,size}} dos ignorados presentes (DS-8): o conjunto de
+    NOMES sozinho não vê reescrita de conteúdo — `.env`/`dist/payload.js`
+    sobrescritos mantêm o mesmo `!!` e passam invisíveis a todo portão.
+    None = git indisponível."""
+    names = _git_ignored(repo_root)
+    if names is None:
+        return None
+    out: dict[str, dict] = {}
+    for rel in names:
+        p = Path(repo_root) / rel
+        try:
+            if p.is_file() and not p.is_symlink():
+                out[rel] = {"sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+                            "size": p.stat().st_size}
+            elif p.is_dir():
+                out[rel] = {"sha256": None, "size": -1}
+        except OSError:
+            out[rel] = {"sha256": None, "size": -2}
+    return out
+
+
 def _git_untracked(repo_root: Path) -> list[str] | None:
     """Arquivos untracked não-ignorados (status -uall → '??').
     A2 (banca v16): baseline cobria só ignorados — deletar `??` era invisível
@@ -794,20 +816,29 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
         # Fallback de portões obrigatórios para o modo EXECUTAR:
         # Exige ao menos os portões fundamentais executados (hazard_scan, assertless_scan, a11y_scan)
         # com exit code 0, barrando runs compostas unicamente por portões fictícios/dummy.
-        core_fundamental = ("hazard_scan", "assertless_scan", "a11y_scan")
-        executed_core = [
-            g for g in core_fundamental
-            if any(
-                (g_name == g or Path(g_name).stem == g)
-                and isinstance(g_info, dict)
-                and g_info.get("exit_code") == 0
-                for g_name, g_info in coverage_gates.items()
-            )
+        # DS-4 (auditoria consolidada): `if not executed_core` liberava a run
+        # com UM único portão verde — hazard_scan sozinho satisfazia uma run
+        # EXECUTAR sem testes. Exige o conjunto completo: hazard e assertless
+        # verdes (0), a11y verde ou n/a (0|3 — sem arquivos de UI elegíveis).
+        def _exit_of(gate: str) -> int | None:
+            for g_name, g_info in coverage_gates.items():
+                if (g_name == gate or Path(g_name).stem == gate) \
+                        and isinstance(g_info, dict):
+                    ec = g_info.get("exit_code")
+                    return ec if isinstance(ec, int) else None
+            return None
+        missing_core = [
+            g for g in ("hazard_scan", "assertless_scan")
+            if _exit_of(g) != 0
         ]
-        if not executed_core:
+        a11y_exit = _exit_of("a11y_scan")
+        if a11y_exit not in (0, 3):
+            missing_core.append("a11y_scan")
+        if missing_core:
             return "blocked", [
-                "MANDATORY-GATE-MISSING: nenhum dos portões fundamentais "
-                "('hazard_scan', 'assertless_scan', 'a11y_scan') foi executado com sucesso"
+                "MANDATORY-GATE-MISSING: portões fundamentais ausentes ou não "
+                f"verdes — exige hazard_scan==0, assertless_scan==0 e "
+                f"a11y_scan∈{{0,3}}; faltando/falhos: {', '.join(missing_core)}"
             ]
         if run_data.get("spec_path"):
             spec_gates = ["spec_drift", "contract_closure"]
@@ -1170,6 +1201,7 @@ def init_run(
         "spec_sha256": spec_sha256,
         "head_start": head_start,
         "ignored_start": _git_ignored(repo_root),
+        "ignored_start_hashes": _git_ignored_hashes(repo_root),
         "untracked_start": _git_untracked(repo_root),
         "created_at": now,
         "updated_at": now,
@@ -1447,7 +1479,8 @@ def approve_run(run_path: Path, approver: str = "human",
                 "repositório — aprovação recusada")
         # B5 (banca v13): chaves extras do binding não eram exibidas no
         # resumo nem cobertas por token/fingerprint — whitelist fecha o schema.
-        _BINDING_KEYS = {"head", "scope_sha256", "driver", "run_id", "repo", "bound_at"}
+        _BINDING_KEYS = {"head", "scope_sha256", "driver", "run_id", "repo",
+                         "bound_at", "dirty_start"}
         data["approval_binding"] = {k: v for k, v in _b.items() if k in _BINDING_KEYS}
         data["review_status"] = "approved"
         data["approved_by"] = approver.strip() or "human"

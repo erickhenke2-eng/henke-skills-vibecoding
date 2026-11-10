@@ -549,12 +549,15 @@ def main():
           f"({100*instrumented/len(defects):.0f}%)")
 
     if args.strict:
-        bad = miss + err + fred
+        # DS-11: NO-INSTRUMENT tem que reprovar — remover um scanner do corpus
+        # deixava a CI verde contando zero recall sobre zero instrumentados.
+        bad = miss + err + fred + noins
         if bad:
             print(f"\n--strict: {bad} não-conformidade(s) "
-                  f"({miss} MISSED · {err} ERROR · {fred} FALSE-RED) — reprovado.")
+                  f"({miss} MISSED · {err} ERROR · {fred} FALSE-RED · "
+                  f"{noins} NO-INSTRUMENT) — reprovado.")
             sys.exit(1)
-        print("\n--strict: nenhum MISSED/ERROR/FALSE-RED — aprovado.")
+        print("\n--strict: nenhum MISSED/ERROR/FALSE-RED/NO-INSTRUMENT — aprovado.")
 
 
 if __name__ == "__main__":

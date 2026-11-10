@@ -168,12 +168,15 @@ DESTRUCTIVE_VERBS = (
     "format y:", "format z:", "format d:",
     # banca v16 — A1: lacuna lexical (gírias PT, format bare, ferramentas de
     # disco, git destrutivo, PS, verbos EN qualificados p/ evitar FP).
-    "formata", "formatar", "formato", "formatando", "formatem",
+    # DS-12a: formas nuas de "format*" removidas — falso-positivo em
+    # "o formato da data"/"reformat the code"; frases completas cobrem.
     "detona", "detonar", "detonei", "detonando", "estoura", "arregaça",
-    "reformat", "reformatar", "deleter",
+    "deleter",
     "format a drive", "format the drive", "format the disk",
     "format drive", "format disk", "format usb", "format pendrive",
     "formata o disco", "formata o hd", "formatar o disco", "formatar o pendrive",
+    "formata o pendrive", "formata o cartao", "formata o sd", "formatar o hd",
+    "formata a particao", "formatar o cartao", "formatar o sd", "formata o ssd",
     "format /", "diskpart", "fdisk", "newfs", "mke2fs", "blkdiscard",
     "wipefs", "srm", "secure erase", "hdparm --security-erase",
     "dd if", "dd bs", "dd count", "dd conv",
@@ -330,7 +333,7 @@ def _atomic_write_json(path: Path, data: object) -> None:
     os.replace(tmp_path, path)
 
 
-def _child_env() -> dict:
+def _child_env(repo: Path | None = None) -> dict:
     # A2 (banca v11): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* do
     # ambiente redirecionam o git interno (âncora HEAD, status --ignored,
     # check-ignore) para outro repo/index — strip em todo filho.
@@ -351,7 +354,9 @@ def _child_env() -> dict:
     # A4 (banca v16): PATH com entrada relativa ou dentro do repo resolvia
     # `git`/`npm` plantado → portões e auditoria liam stdout forjado. Mesma
     # regra do `henke exec`: remove CWD e dirs que resolvem no repo.
-    _rr = Path.cwd().resolve()
+    # DS-12b: o filtro tem que usar o REPO efetivo (--repo), não o CWD do
+    # processo — o subprocesso roda com cwd=<repo>, que pode ser outro.
+    _rr = Path(repo).resolve() if repo is not None else Path.cwd().resolve()
     _parts = []
     for _d in env.get("PATH", "").split(os.pathsep):
         if not _d or not os.path.isabs(_d):
@@ -486,7 +491,7 @@ def _route(prompt: str, repo_root: Path) -> dict:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                env=_child_env(),
+                env=_child_env(repo_root),
                 timeout=60,
             )
             if res.returncode == 0 and (res.stdout or "").strip():
@@ -656,13 +661,55 @@ def _git_head(repo_root: Path) -> str | None:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "rev-parse", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=15, env=_child_env(),
+            timeout=15, env=_child_env(repo_root),
         )
         if res.returncode == 0:
             return (res.stdout or "").strip() or None
     except (OSError, subprocess.TimeoutExpired):
         pass
     return None
+
+
+def _tracked_dirty_snapshot(repo_root: Path) -> dict[str, str]:
+    """{relpath: sha256|DELETED|NONFILE|UNREADABLE} dos arquivos RASTREADOS
+    sujos (DS-2 — aprovação não vinculava o worktree): aprovar, editar um
+    arquivo tracked sem commit e dar --resume mantinha o mesmo HEAD e era
+    aceito — execução sobre conteúdo diferente do aprovado, ou trabalho
+    pré-existente do usuário creditado ao driver."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "status", "--porcelain", "-z", "--untracked-files=no"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, env=_child_env(repo_root),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    if res.returncode != 0 or not res.stdout:
+        return {}
+    snap: dict[str, str] = {}
+    _VALID_XY = " MADRCUT?!"
+    for ent in res.stdout.split("\x00"):
+        # rename 'R  novo\0antigo\0' — a entrada do antigo não tem prefixo XY;
+        # só aceita entradas com códigos válidos + espaço na posição 2.
+        if len(ent) < 4 or ent[2] != " " or any(
+                c not in _VALID_XY for c in ent[:2]):
+            continue
+        rel = ent[3:].strip()
+        if not rel:
+            continue
+        p = Path(repo_root) / rel
+        try:
+            if p.is_file() and not p.is_symlink():
+                snap[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+            elif not p.exists():
+                snap[rel] = "DELETED"
+            else:
+                snap[rel] = "NONFILE"
+        except OSError:
+            snap[rel] = "UNREADABLE"
+    return snap
 
 
 # --- Redação de segredos (crouton R2): prompt/memória vão para disco em
@@ -867,7 +914,7 @@ def _run_capturing_tree(
         encoding="utf-8",
         errors="replace",
         cwd=str(cwd),
-        env=_child_env(),
+        env=_child_env(cwd),
         **_popen_tree_kwargs(),
     )
     try:
@@ -1379,6 +1426,19 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             )
             if fp_now != binding.get("scope_sha256"):
                 stale.append("escopo/prompt da run divergiu do snapshot aprovado")
+            # DS-2: worktree rastreada na aprovação vs. agora — editar arquivo
+            # tracked sem commit mantinha o HEAD e escapava de todas as âncoras.
+            dirty_then = binding.get("dirty_start")
+            if isinstance(dirty_then, dict):
+                dirty_now = _tracked_dirty_snapshot(repo_root)
+                if dirty_now != dirty_then:
+                    changed = sorted(set(dirty_now) ^ set(dirty_then))
+                    for k in set(dirty_now) & set(dirty_then):
+                        if dirty_now[k] != dirty_then[k]:
+                            changed.append(k)
+                    stale.append(
+                        "worktree rastreada divergiu da aprovada (dirty_start): "
+                        + ", ".join(sorted(set(changed))[:10]))
         # Comprovante LOCAL de aprovação (fora do repo): o binding é self-signed
         # dentro do próprio arquivo — uma run plantada por clone com binding
         # recomputado passaria em TODAS as checagens acima e executaria o
@@ -1531,6 +1591,9 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             "driver": driver,
             "run_id": run_id,
             "repo": str(repo_root.resolve()),
+            # DS-2: snapshot dos tracked-sujos na aprovação — editar arquivo
+            # tracked entre approve e --resume diverge o binding e recusa.
+            "dirty_start": _tracked_dirty_snapshot(repo_root),
             "bound_at": _now_iso(),
         }
     _patch_run(run_path, lambda d: d.update(run_patch))
@@ -1765,7 +1828,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                          "-uall", "--ignored", "-z"],
                         cwd=str(repo_root), capture_output=True, text=True,
                         encoding="utf-8", errors="replace", timeout=30,
-                        env=_child_env(),
+                        env=_child_env(repo_root),
                     )
                     if _si.returncode == 0:
                         cur_ig = {
@@ -1812,6 +1875,39 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                         )
                         new_ignored += [f"{p} (deletado)" for p in gone_ignored]
                         new_ignored += _gone_ut
+                        # DS-8: mesmo conjunto de nomes ≠ mesmo conteúdo —
+                        # `.env`/`dist/payload.js` reescritos mantêm o `!!` e
+                        # eram invisíveis. Compara hash+size do baseline.
+                        _ig_hash = None
+                        if isinstance(_sc, dict):
+                            _ig_hash = (_sc.get("fields") or {}).get(
+                                "ignored_start_hashes")
+                        if _ig_hash is None and isinstance(_rd, dict):
+                            _ig_hash = _rd.get("ignored_start_hashes")
+                        if isinstance(_ig_hash, dict):
+                            for p in set(_ig_hash) & cur_ig:
+                                if (p.startswith(".henke/")
+                                        and p.lower() not in _never_declared) \
+                                        or p in declared:
+                                    continue
+                                want = _ig_hash.get(p) or {}
+                                want_sha = want.get("sha256")
+                                if not want_sha:
+                                    continue  # dir/erro no baseline — sem comparação
+                                cur_p = Path(repo_root) / p
+                                try:
+                                    if cur_p.is_file() and not cur_p.is_symlink():
+                                        cur_sha = hashlib.sha256(
+                                            cur_p.read_bytes()).hexdigest()
+                                        if cur_sha != want_sha or \
+                                                cur_p.stat().st_size != want.get("size"):
+                                            new_ignored.append(
+                                                f"{p} (conteúdo modificado)")
+                                    else:
+                                        new_ignored.append(
+                                            f"{p} (tipo alterado)")
+                                except OSError:
+                                    new_ignored.append(f"{p} (ilegível)")
                     elif _si.returncode != 0:
                         # A8 (banca v14): git rc!=0 = enumeração indisponível,
                         # não "nada ignorado" — a auditoria NÃO rodou.
@@ -1827,7 +1923,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                         cwd=str(repo_root), capture_output=True, text=True,
                         input="\n".join(sorted(declared)) + "\n",
                         encoding="utf-8", errors="replace", timeout=30,
-                        env=_child_env(),
+                        env=_child_env(repo_root),
                     )
                     if _ci.returncode == 0:
                         # Rastreado+modificado aparece em `touched` mesmo casando
@@ -1868,16 +1964,31 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             # MÉDIO-2 (banca v13): direção simétrica — declarado mas NÃO
             # tocado = JSON do driver forjado (spoof via cat) ou declaração
             # falsa; inconclusivo, não verde.
+            # DS-3: `.henke/runs/../src/foo` começava com o prefixo isento e
+            # escapava do phantom — normaliza ANTES da isenção e marca
+            # `..`/absoluto como declaração inválida (evasão, não declaração).
             try:
+                import posixpath as _pp
                 _touched_set = {str(t).replace("\\", "/").strip() for t in (touched or [])}
-                phantom = [
-                    d for d in (declared or [])
-                    if str(d).replace("\\", "/").strip() not in _touched_set
-                    and not str(d).replace("\\", "/").strip().startswith(
-                        (".henke/runs/", ".henke/evidence/"))
-                ]
+                phantom = []
+                invalid_declared = []
+                for d in (declared or []):
+                    nd = _pp.normpath(str(d).replace("\\", "/").strip())
+                    if nd.startswith("../") or nd == ".." or nd.startswith("/") \
+                            or _pp.isabs(nd) or (len(nd) > 1 and nd[1] == ":"):
+                        invalid_declared.append(str(d))
+                        continue
+                    if nd not in _touched_set and not nd.startswith(
+                            (".henke/runs/", ".henke/evidence/")):
+                        phantom.append(str(d))
             except Exception:
                 phantom = []
+                invalid_declared = []
+            if invalid_declared:
+                audit_findings.append((2,
+                    "FILES-CHANGED-INVALID: declarados com '..' ou caminho "
+                    "absoluto — declaração malformada é evasão, não escopo: "
+                    + ", ".join(sorted(invalid_declared)[:15])))
             if phantom:
                 audit_findings.append((2,
                     "FILES-CHANGED-PHANTOM: declarados sem contraparte no "
@@ -2017,7 +2128,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                      "-uall", "--ignored", "-z"],
                     cwd=str(repo_root), capture_output=True, text=True,
                     encoding="utf-8", errors="replace", timeout=30,
-                    env=_child_env(),
+                    env=_child_env(repo_root),
                 )
                 if _si2.returncode == 0:
                     _cur2 = {
@@ -2080,12 +2191,23 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                 test_timeout = 180.0
             t_exit, t_out = _invoke_test_cmd(repo_root, str(test_cmd), test_timeout)
         discovered = passed = 0
+        _recognized_runner = False
         try:
-            cli_mod = _load_module("henke_cli")
-            if cli_mod is not None and hasattr(cli_mod, "parse_test_runner_output"):
-                discovered, passed = cli_mod.parse_test_runner_output(t_out, "")
+            _al_t = _load_module("audit_ledger")
+            _itc = getattr(_al_t, "is_test_cmd", None) if _al_t else None
+            _recognized_runner = bool(_itc(str(test_cmd))) if _itc else False
         except Exception:
-            pass
+            _recognized_runner = False
+        # DS-1: `test_cmd="echo '99 passed'"` mintava verde — só parseia
+        # contagem de teste quando o comando é um runner RECONHECIDO; saída
+        # de comando arbitrário nunca vira evidência de teste.
+        if _recognized_runner:
+            try:
+                cli_mod = _load_module("henke_cli")
+                if cli_mod is not None and hasattr(cli_mod, "parse_test_runner_output"):
+                    discovered, passed = cli_mod.parse_test_runner_output(t_out, "")
+            except Exception:
+                pass
         detail = f"{passed}/{discovered} testes" if discovered else "saída registrada no exec_log"
         # Tríade física real — a bateria de testes é portão verificável, não
         # atestação: evidência no diretório da run, hash validado por verify_run_file.
@@ -2100,6 +2222,13 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         if tests_ev is None:
             record_gate(run_path, "tests", 2,
                         f"test_cmd=`{test_cmd}` → EVIDENCE-WRITE-FAILED", manual=True)
+        elif _recognized_runner and discovered <= 0:
+            # DS-1: runner reconhecido com 0 testes descobertos nunca é verde —
+            # "Ran 0 tests" é tão perigoso quanto suíte ausente (regra do exec).
+            record_gate(run_path, "tests", 2,
+                        f"test_cmd=`{test_cmd}` → ZERO-TESTS-DISCOVERED "
+                        "(runner reconhecido sem nenhum teste)", manual=True)
+            detail = "0 testes descobertos — runner reconhecido"
         else:
             record_gate(run_path, "tests", int(t_exit),
                         f"test_cmd=`{test_cmd}` → {detail}",

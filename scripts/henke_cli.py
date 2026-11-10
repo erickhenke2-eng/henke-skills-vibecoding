@@ -391,6 +391,59 @@ def is_test_command(cmd_tokens: list[str], cmd_str: str) -> bool:
     return False
 
 
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Derruba `proc` e todos os descendentes — subprocess.run(timeout)
+    mata só o filho direto e abandona netos vivos (DS-12)."""
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+    else:
+        # start_new_session: o filho é líder do próprio grupo — killpg só
+        # atinge a árvore dele, nunca o nosso (DS-15 do relatório wave6).
+        try:
+            import signal
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+
+def _run_capture_tree(argv: list[str], *, cwd: Path, env: dict,
+                      timeout_sec: float) -> tuple[int, bytes, bytes, bool]:
+    """Popen com kill de árvore no timeout. Retorna (rc, stdout, stderr,
+    timed_out) — o chamador registra o timeout no ledger em vez de sair
+    sem rastro (DS-12)."""
+    if os.name == "nt":
+        proc = subprocess.Popen(
+            argv, cwd=str(cwd), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
+    else:
+        proc = subprocess.Popen(
+            argv, cwd=str(cwd), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True)
+    timed_out = False
+    try:
+        out, err = proc.communicate(timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _kill_process_tree(proc)
+        out, err = proc.communicate()
+    return proc.returncode, out or b"", err or b"", timed_out
+
+
 def _resolve_exec_timeout(repo_root: Path, cli_timeout: float | None) -> float:
     """Resolve o teto de timeout do `henke exec`.
 
@@ -516,24 +569,17 @@ def _cmd_exec(
     timeout_sec = _resolve_exec_timeout(repo_root, cli_timeout)
 
     try:
-        res = subprocess.run(
-            exec_tokens,
-            cwd=str(repo_root),
-            capture_output=True,
-            env=child_env,
-            timeout=timeout_sec,
-        )
-    except subprocess.TimeoutExpired:
-        print(f"ERRO: Comando expirou após {timeout_sec}s: '{cmd_str}'", file=sys.stderr)
-        return 2
+        # DS-12: subprocess.run(timeout) abandona netos — Popen + nova sessão
+        # + kill de árvore; o timeout é registrado no ledger abaixo (exit 124),
+        # não some num early-return sem rastro.
+        rc, raw_out, raw_err, timed_out = _run_capture_tree(
+            exec_tokens, cwd=repo_root, env=child_env, timeout_sec=timeout_sec)
     except OSError as exc:
         print(f"ERRO ao executar '{cmd_str}': {exc}", file=sys.stderr)
         return 2
 
     # B9 (banca v13): sha cobria texto com errors="replace" — byte-streams
     # distintos colidiam em U+FFFD. Hash sobre os BYTES capturados.
-    raw_out = res.stdout or b""
-    raw_err = res.stderr or b""
     out_text = raw_out.decode("utf-8", errors="replace")
     err_text = raw_err.decode("utf-8", errors="replace")
     if out_text:
@@ -542,7 +588,12 @@ def _cmd_exec(
         sys.stderr.write(err_text)
 
     stdout_sha256 = hashlib.sha256(raw_out + raw_err).hexdigest()
-    discovered, passed = parse_test_runner_output(out_text, err_text)
+    # DS-1: `henke exec -- echo "10 passed"` gravava 10/10 no exec_log —
+    # contagem só vale quando o COMANDO é um runner de teste reconhecido;
+    # saída de comando arbitrário nunca vira evidência de teste.
+    discovered = passed = 0
+    if is_test_command(cmd_tokens, cmd_str):
+        discovered, passed = parse_test_runner_output(out_text, err_text)
 
     # Lê prev_hash + append da entrada + LEDGER.json sob o MESMO lock
     # (read-modify-write atômico — concorrência não pode ver estado intermediário).
@@ -628,13 +679,14 @@ def _cmd_exec(
                     print(f"ERRO: Log de execução corrompido em '{exec_log_path}': {exc}", file=sys.stderr)
                     return 2
 
-            chain_payload = f"{prev_hash}|{cmd_str}|{res.returncode}|{discovered}|{stdout_sha256}"
+            chain_payload = f"{prev_hash}|{cmd_str}|{rc}|{discovered}|{stdout_sha256}"
             entry_hash = hashlib.sha256(chain_payload.encode("utf-8")).hexdigest()
 
             log_entry = {
                 "timestamp": _now_iso(),
                 "cmd": cmd_str,
-                "exit": res.returncode,
+                "exit": rc if not timed_out else 124,
+                "timed_out": timed_out,
                 "testes_descobertos": discovered,
                 "testes_passados": passed,
                 "stdout_sha256": stdout_sha256,
@@ -680,7 +732,7 @@ def _cmd_exec(
                 if _ledger_pre is not None and discovered > 0:
                     ledger_item = {
                         "cmd": cmd_str,
-                        "exit": res.returncode,
+                        "exit": rc,
                         "testes_descobertos": discovered,
                         "testes_passados": passed,
                         "stdout_sha256": stdout_sha256,
@@ -726,7 +778,13 @@ def _cmd_exec(
         )
         return 2
 
-    return res.returncode
+    if timed_out:
+        # timeout registrado no exec_log (exit 124 + timed_out) acima —
+        # infra: sai 2, não o rc do filho (que pode nem ter terminado).
+        print(f"ERRO: Comando expirou após {timeout_sec}s: '{cmd_str}'",
+              file=sys.stderr)
+        return 2
+    return rc
 
 
 def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")) -> int:

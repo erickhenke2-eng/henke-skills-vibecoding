@@ -144,6 +144,11 @@ def _npm_script_name(cmd: str) -> str | None:
 _TEST_CMD_RE = re.compile(
     r"\b(?:pytest|py\.test|tox|nox|jest|vitest|mocha|unittest|playwright|"
     r"cargo\s+test|go\s+test|ctest|dotnet\s+test|deno\s+test|"
+    # DS-1: runners que o ledger aceitava como saída mas o classificador
+    # não reconhecia — `make test`/`rspec`/`phpunit`/`mvn`/`gradle`/`sbt`/`mix`.
+    r"make\s+(?:test|tests|check)\b|rspec\b|phpunit\b|"
+    r"mvn(?:w)?\s+(?:test|verify)\b|gradle(?:w)?\s+test\b|sbt\s+test\b|"
+    r"mix\s+test\b|"
     r"(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?\s+"
     # F1 (opus v15): `\S*test\S*` casava 'latest'/'attest'/'pretest' — script
     # token exige prefixo 'test'/'t' (mesma borda do is_test_cmd).

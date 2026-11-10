@@ -1139,23 +1139,28 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         from scripts.run_state import _append_evidence_manifest
         (t / ".henke" / "evidence" / "r2").mkdir(parents=True)
         (t / ".henke" / "runs").mkdir(parents=True, exist_ok=True)
-        m78_ev = t / ".henke" / "evidence" / "r2" / "hazard_scan.out"
-        m78_ev.write_text("scan limpo\n", encoding="utf-8")
-        m78_sha = hashlib.sha256(m78_ev.read_bytes()).hexdigest()
         m78_ok = t / ".henke" / "runs" / "r2.json"
-        _append_evidence_manifest("r2", "hazard_scan", str(m78_ev), m78_sha, "hazard_scan .", 0, False,
-                                  run_path=m78_ok)
+        # DS-4: run EXECUTAR íntegra exige o conjunto fundamental COMPLETO
+        # (hazard==0 + assertless==0 + a11y∈{0,3}) — um só portão não basta.
+        m78_gates: dict = {}
+        for _g, _ec in (("hazard_scan", 0), ("assertless_scan", 0), ("a11y_scan", 3)):
+            _ev = t / ".henke" / "evidence" / "r2" / f"{_g}.out"
+            _ev.write_text(f"{_g} ok\n", encoding="utf-8")
+            _sha = hashlib.sha256(_ev.read_bytes()).hexdigest()
+            _append_evidence_manifest("r2", _g, str(_ev), _sha, f"{_g} .", _ec, False,
+                                      run_path=m78_ok)
+            m78_gates[_g] = {
+                "exit_code": _ec,
+                "command": f"{_g} .",
+                "evidence_file": str(_ev),
+                "evidence_sha256": _sha,
+            }
         m78_ok.write_text(json.dumps({
             "run_id": "r2",
             "mode": "EXECUTAR",
             "archetype": "CARPINTEIRO",
             "outcome": "verified",
-            "gates": {"hazard_scan": {
-                "exit_code": 0,
-                "command": "hazard_scan .",
-                "evidence_file": str(m78_ev),
-                "evidence_sha256": m78_sha,
-            }}
+            "gates": m78_gates
         }), encoding="utf-8")
         # Custódia como init_run: sidecar de âncoras fora do repo (banca v8
         # F-06) — verify falha fechado sem ele.
