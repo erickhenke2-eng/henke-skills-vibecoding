@@ -1993,24 +1993,22 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             except (TypeError, ValueError):
                 test_timeout = 180.0
             t_exit, t_out = _invoke_test_cmd(repo_root, str(test_cmd), test_timeout)
-        discovered = passed = 0
-        _recognized_runner = False
+        # DS-1 + P0-02: contrato tipado único (exec_contract) — antes o auto
+        # parseava sem a regra w7 do cli (rc≠0 + placar perfeito mintava
+        # verde no auto e não no exec). UMA função decide nos dois caminhos;
+        # indisponível = runner não reconhecido (fail-closed).
+        _verdict = None
         try:
-            _al_t = _load_module("audit_ledger")
-            _itc = getattr(_al_t, "is_test_cmd", None) if _al_t else None
-            _recognized_runner = bool(_itc(str(test_cmd))) if _itc else False
+            _ec = _load_module("exec_contract")
+            if _ec is not None:
+                _verdict = _ec.evaluate_execution(
+                    str(test_cmd), int(t_exit), t_out or "", "")
         except Exception:
-            _recognized_runner = False
-        # DS-1: `test_cmd="echo '99 passed'"` mintava verde — só parseia
-        # contagem de teste quando o comando é um runner RECONHECIDO; saída
-        # de comando arbitrário nunca vira evidência de teste.
-        if _recognized_runner:
-            try:
-                cli_mod = _load_module("henke_cli")
-                if cli_mod is not None and hasattr(cli_mod, "parse_test_runner_output"):
-                    discovered, passed = cli_mod.parse_test_runner_output(t_out, "")
-            except Exception:
-                pass
+            _verdict = None
+        _recognized_runner = bool(_verdict.is_test) if _verdict else False
+        discovered = _verdict.discovered if _verdict else 0
+        passed = _verdict.passed if _verdict else 0
+        _verdict_reason = _verdict.reason if _verdict else "contract_unavailable"
         detail = f"{passed}/{discovered} testes" if discovered else "saída registrada no exec_log"
         # Tríade física real — a bateria de testes é portão verificável, não
         # atestação: evidência no diretório da run, hash validado por verify_run_file.
@@ -2034,7 +2032,8 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
             detail = "0 testes descobertos — runner reconhecido"
         else:
             record_gate(run_path, "tests", int(t_exit),
-                        f"test_cmd=`{test_cmd}` → {detail}",
+                        f"test_cmd=`{test_cmd}` → {detail} "
+                        f"[{_verdict_reason}]",
                         command=str(test_cmd), evidence_file=tests_ev)
         _record_stage(run_path, "tests", f"test_cmd=`{test_cmd}` exit={t_exit} {detail}", exit_code=0 if t_exit == 0 else 1)
         test_info = {"cmd": test_cmd, "exit": t_exit, "detail": detail}

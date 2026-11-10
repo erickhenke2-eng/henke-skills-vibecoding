@@ -603,16 +603,24 @@ def _cmd_exec(
         sys.stderr.write(err_text)
 
     stdout_sha256 = hashlib.sha256(raw_out + raw_err).hexdigest()
-    # DS-1: `henke exec -- echo "10 passed"` gravava 10/10 no exec_log —
-    # contagem só vale quando o COMANDO é um runner de teste reconhecido;
-    # saída de comando arbitrário nunca vira evidência de teste.
-    discovered = passed = 0
-    if is_test_command(cmd_tokens, cmd_str):
-        discovered, passed = parse_test_runner_output(out_text, err_text)
-        # w7: rc!=0 com "todos passaram" é suspeito — runner íntegro que falha
-        # reporta falhas; zera em vez de creditar um placar incoerente.
-        if rc != 0 and discovered > 0 and passed == discovered:
-            passed = 0
+    # DS-1 + P0-02: contrato TIPADO de evidência (scripts/exec_contract.py) —
+    # `henke exec -- echo "10 passed"` nunca minta (is_test=False → zeros);
+    # rc≠0 com placar perfeito zera (w7); contagens só existem p/ runner
+    # reconhecido. `reason` fica no ledger p/ auditoria do PORQUÊ.
+    try:
+        from scripts.exec_contract import evaluate_execution as _eval_exec
+    except ImportError:
+        try:
+            from exec_contract import evaluate_execution as _eval_exec  # type: ignore[no-redef]
+        except ImportError:
+            _eval_exec = None  # type: ignore[assignment]
+    if _eval_exec is None:
+        # Contrato indisponível = nenhuma evidência mintada (fail-closed).
+        print("ERRO: exec_contract indisponível — execução não registrada.",
+              file=sys.stderr)
+        return 2
+    _verdict = _eval_exec(cmd_str, rc, out_text, err_text)
+    discovered, passed = _verdict.discovered, _verdict.passed
 
     # Lê prev_hash + append da entrada + LEDGER.json sob o MESMO lock
     # (read-modify-write atômico — concorrência não pode ver estado intermediário).
@@ -708,6 +716,8 @@ def _cmd_exec(
                 "timed_out": timed_out,
                 "testes_descobertos": discovered,
                 "testes_passados": passed,
+                # P0-02: por que a evidência vale/não vale — auditável.
+                "evidence_reason": _verdict.reason,
                 "stdout_sha256": stdout_sha256,
                 "prev_hash": prev_hash,
                 "entry_hash": entry_hash,
@@ -717,7 +727,7 @@ def _cmd_exec(
             # ainda não existe. Antes, ledger corrompido wedgiava o exec_log
             # para sempre (linha extra sem tip-update).
             _ledger_pre: list[dict] | None = None
-            if is_test_command(cmd_tokens, cmd_str):
+            if _verdict.is_test:
                 _ledger_pre = []
                 if ledger_path.is_file():
                     try:
