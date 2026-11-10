@@ -12,6 +12,37 @@ __pycache__/
 .venv/
 dist/
 build/
+*.egg-info/
+.agents/
 
-# Preferências pessoais do harness
+# Preferências pessoais do harness e runtime local
 .henke/CONFIG.local.json
+
+# Custódia local — baseline é estado da máquina, não fonte compartilhada
+.henke/gate-baseline.json
+# Estado de execução é custódia LOCAL (sidecar/manifesto/exec-tip vivem fora
+# do repo): run files, evidência e ledgers tracked sempre falham a verificação
+# em outro clone e seriam forja-plantável via commit (banca v8 — F-10).
+.henke/runs/
+.henke/evidence/
+.henke/exec_log.jsonl
+.henke/LEDGER.json
+# Locks de processo — lock órfão commitado herdaria trava morta no clone
+.henke/*.lock
+
+# Segredos e chaves — nunca entram no repo
+.env
+.env.*
+.secrets/
+*.pem
+*.key
+id_rsa*
+.henke/cache/
+.henke/report.html
+.henke/.cache_secret
+
+# Estado Wave 7 (manifestos incrementais, quarentena, sentinels e efêmeros)
+.henke/scan-manifests/
+.henke/quarantine/
+.henke/sessions/
+.henke/clean_log.jsonl

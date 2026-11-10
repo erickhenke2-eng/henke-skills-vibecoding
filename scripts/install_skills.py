@@ -1,19 +1,87 @@
 #!/usr/bin/env python3
 """Install validated files with staging, rollback and manifest-based zombie cleanup."""
 import argparse
+import contextlib
 import hashlib
 import json
 import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 MANIFEST = ".henke-manifest.json"
+INSTALL_LOCK = ".henke-install.lock"
+LOCK_TIMEOUT_SEC = 120.0
+
+# Teto por arquivo (banca v9 — M5): um blob gigante no inventário ia para
+# 4 destinos com 3+ leituras completas (copy + verify + manifest hash).
+MAX_FILE_SIZE = 64 * 1024 * 1024
+LOCK_RETRY_SEC = 0.1
 IGNORED_DIRS = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", "node_modules"}
 IGNORED_FILES = {".DS_Store", "Thumbs.db"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
+
+
+@contextlib.contextmanager
+def _install_lock(user_root, timeout=LOCK_TIMEOUT_SEC):
+    """Lock exclusivo por destino cobrindo stage→publish→manifest.
+
+    Sem o lock, dois instaladores no mesmo user_root liam o manifesto de uma
+    versão enquanto o outro publicava outra — misturando artefatos. O arquivo
+    `.lock` nasce com O_CREAT|O_EXCL (criação atômica em POSIX e Windows) e
+    carrega o PID para diagnóstico de lock estale.
+    """
+    user_root.mkdir(parents=True, exist_ok=True)
+    lock_path = user_root / INSTALL_LOCK
+    deadline = time.monotonic() + timeout
+    fd = None
+    while fd is None:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    "Lock de instalação retido por outro processo: "
+                    f"{lock_path}. Se o instalador anterior morreu, remova o "
+                    "arquivo e tente novamente.")
+            time.sleep(LOCK_RETRY_SEC)
+    try:
+        os.write(fd, f"pid={os.getpid()}\n".encode("ascii"))
+        yield
+    finally:
+        # A8: unlink só se o arquivo ainda é O NOSSO lock — se o lock expirou
+        # e outro processo recriou o arquivo, remover apagaria o lock dele.
+        try:
+            same = os.stat(lock_path).st_ino == os.fstat(fd).st_ino
+        except OSError:
+            same = False
+        os.close(fd)
+        if same:
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+
+
+def _resolve_source(repo, rel):
+    """Resolve o caminho físico de um arquivo do inventário.
+
+    Num checkout é `repo/rel`; numa instalação via wheel, `repo` aponta para
+    `<prefix>/henke_data` (skills e docs) enquanto `scripts/*` vivem no pacote
+    em site-packages — o fallback cobre esse layout.
+    """
+    src = repo / rel
+    if src.is_file():
+        return src
+    pkg_root = Path(__file__).resolve().parents[1]
+    alt = pkg_root / rel
+    if alt.is_file():
+        return alt
+    return src
 
 
 def inventory(repo):
@@ -23,11 +91,24 @@ def inventory(repo):
     editor debris are excluded so they never reach the user's machine.
     """
     files = [Path("PROTOCOLO.md")]
+    if (repo / "docs" / "designs" / "TEMPLATE.md").is_file():
+        files.append(Path("docs/designs/TEMPLATE.md"))
     for skill_dir in sorted(repo.glob("henke-*")):
-        if not skill_dir.is_dir():
+        # Symlinks do repo-fonte não são seguidos — clone hostil com
+        # `henke-x/leak -> ~/.ssh/config` instalaria conteúdo arbitrário na
+        # área de skills (banca v7 — F-10).
+        if skill_dir.is_symlink() or not skill_dir.is_dir():
             continue
+        repo_resolved = repo.resolve()
         for path in sorted(skill_dir.rglob("*")):
-            if not path.is_file():
+            # rglob pode descer em diretório-symlink (py<3.13): o resolved
+            # tem que continuar dentro do repo — senão é link para fora.
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                if repo_resolved not in path.resolve().parents:
+                    continue
+            except OSError:
                 continue
             rel = path.relative_to(repo)
             if any(part in IGNORED_DIRS for part in rel.parts):
@@ -35,18 +116,65 @@ def inventory(repo):
             if path.name in IGNORED_FILES or path.suffix in IGNORED_SUFFIXES:
                 continue
             files.append(rel)
-    # [HENKE-PATCH] portões mecânicos e métricos instalados junto às skills que os invocam
-    root_gate_scripts = [
-        repo / "scripts" / "repo_signals.py",
-        repo / "scripts" / "henke_router.py",
-        repo / "scripts" / "spec_drift.py",
-        repo / "scripts" / "audit_ledger.py",
-        repo / "scripts" / "henke_gate.py",
+    # [HENKE-PATCH] portões mecânicos e métricos instalados junto às skills que os invocam.
+    # DS-7b: os scripts são fonte do PRÓPRIO pacote (__file__), não `repo/scripts`
+    # — num wheel `repo` é henke_data/ e não tem scripts/, então o instalador
+    # distribuído instalava wrappers sem nenhum script funcional.
+    _scripts_dir = Path(__file__).resolve().parent
+    root_gate_names = [
+        "_paths.py",          # importado por vários scripts — sem ele o CLI morre
+        "gate_pipeline.py",   # invocado por henke_gates (ratchet/fence)
+        "validate_skills.py", # chamado por install_skills e doctor
+        "repo_signals.py",
+        "henke_router.py",
+        "spec_drift.py",
+        "audit_ledger.py",
+        "henke_gate.py",
+        "henke_cli.py",
+        "run_state.py",
+        "henke_auto.py",
+        "henke_detect.py",
+        "henke_gates.py",
+        "henke_report.py",
+        "henke_driver_opencode.py",
+        "henke_driver_agent.py",
     ]
-    for rel in sorted(repo.glob("scripts/metricas/*.py")) + root_gate_scripts:
+    for rel in sorted(_scripts_dir.glob("metricas/*.py")):
         if rel.is_file():
-            files.append(rel.relative_to(repo))
-    return files
+            files.append(Path("scripts") / "metricas" / rel.name)
+    for name in root_gate_names:
+        if (_scripts_dir / name).is_file():
+            files.append(Path("scripts") / name)
+    # Wrappers da CLI global `henke`: instalados em <dest>/bin/ e resolvem
+    # <dest>/scripts/henke_cli.py automaticamente (caminho relativo ao bin/).
+    for wrapper in (repo / "bin" / "henke", repo / "bin" / "henke.cmd"):
+        if wrapper.is_file():
+            files.append(wrapper.relative_to(repo))
+    # Contenção unificada (banca v9 — A9): TODA entrada do inventário — skill,
+    # script, bin/, arquivo raiz — resolve dentro do repo sem atravessar
+    # symlink/junction. resolve() segue junction do Windows (is_symlink() não
+    # pega junction); um `scripts/metricas -> C:\evil` instalaria portões
+    # arbitrários que a próxima run executa.
+    repo_resolved = repo.resolve()
+    confined: list[Path] = []
+    for rel in files:
+        src = repo / rel
+        try:
+            resolved = src.resolve()
+        except OSError:
+            continue
+        if resolved != repo_resolved and repo_resolved not in resolved.parents:
+            continue
+        if src.is_symlink():
+            continue
+        try:
+            if src.stat().st_size > MAX_FILE_SIZE:
+                print(f"Aviso: arquivo acima de {MAX_FILE_SIZE // (1024 * 1024)}MB ignorado: {rel}", file=sys.stderr)
+                continue
+        except OSError:
+            continue
+        confined.append(rel)
+    return confined
 
 
 def read_manifest(path):
@@ -55,10 +183,12 @@ def read_manifest(path):
         data = json.loads(path.read_text(encoding="utf-8"))
         entries = data.get("files", [])
         hashes = data.get("hashes", {})
-        assert isinstance(entries, list) and all(isinstance(e, str) for e in entries)
-        assert isinstance(hashes, dict)
+        if not (isinstance(entries, list) and all(isinstance(e, str) for e in entries)):
+            raise ValueError("manifesto: 'files' deve ser lista de strings")
+        if not isinstance(hashes, dict):
+            raise ValueError("manifesto: 'hashes' deve ser objeto")
         return set(entries), hashes
-    except (OSError, ValueError, KeyError, AssertionError):
+    except (OSError, ValueError, KeyError):
         if path.exists():
             print(f"Aviso: manifesto ilegível em {path}; zumbis não serão removidos.", file=sys.stderr)
         return set(), {}
@@ -67,10 +197,17 @@ def read_manifest(path):
 def safe_member(target, rel):
     """Resolve a manifest entry inside target; reject traversal and symlinks."""
     normalized_rel = str(rel).replace("\\", "/")
+    # B9 (banca v13): entrada "" → parts vazio → parts[-1] IndexError.
+    if not normalized_rel.strip():
+        raise ValueError(f"Entrada de manifesto vazia: {rel!r}")
     rel_path = PurePosixPath(normalized_rel)
     if rel_path.is_absolute() or ".." in rel_path.parts or rel == MANIFEST:
         raise ValueError(f"Entrada de manifesto insegura: {rel}")
-    victim = target.joinpath(*rel_path.parts).resolve()
+    # Resolve só os PAIS — resolver o componente final transformava symlink
+    # legítimo em seu alvo: ou abortava a instalação inteira, ou deletava o
+    # arquivo resolvido deixando o link zumbi (banca v9 — M6).
+    parent = target.joinpath(*rel_path.parts[:-1]).resolve()
+    victim = parent / rel_path.parts[-1]
     target_resolved = target.resolve()
     if not victim.is_relative_to(target_resolved):
         raise ValueError(f"Caminho de manifesto escapa do destino: {rel}")
@@ -82,13 +219,27 @@ def safe_member(target, rel):
     return victim
 
 
-def install(repo, user_root, dry_run=False):
-    subprocess.run([sys.executable, str(repo / "scripts/validate_skills.py")], check=True)
+def install(repo, user_root, dry_run=False, lock_timeout=LOCK_TIMEOUT_SEC):
+    # A5 (banca v11): o validador da FONTE executava antes de qualquer
+    # contenção — pacote hostil rodava código com privilégio do usuário no
+    # install. Prefere a cópia da PRÓPRIA suíte (scripts/ do pacote).
+    _validator = Path(__file__).resolve().parent / "validate_skills.py"
+    if not _validator.is_file():
+        _validator = _resolve_source(repo, Path("scripts/validate_skills.py"))
+    subprocess.run([sys.executable, str(_validator)], check=True)
     files = inventory(repo)
     targets = [user_root / p for p in (".agents/skills", ".gemini/config/skills", ".gemini/skills", ".claude/skills")]
     if dry_run:
         print("[DRY-RUN] " + "\n".join(map(str, targets)))
         return
+    # Lock exclusivo por destino: cobre TODA a transação stage→publish→manifesto
+    # — instaladores paralelos não podem misturar versões dos artefatos.
+    with _install_lock(user_root, timeout=lock_timeout):
+        _publish(repo, targets, files)
+
+
+def _publish(repo, targets, files):
+    """Transação stage→publish→manifest (invocada sob _install_lock)."""
     # Stage all content before changing any installed file; keep unrelated skills intact.
     transactions, changed, created = [], [], []
     def mkdir(path):
@@ -146,8 +297,22 @@ def install(repo, user_root, dry_run=False):
                     raise ValueError(f"Destino não é arquivo: {destination}")
                 staged = stage / "new" / relative
                 staged.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(repo / relative, staged)
-                if hashlib.sha256(staged.read_bytes()).digest() != hashlib.sha256((repo / relative).read_bytes()).digest():
+                # A6 (banca v11): re-checa no instante da cópia — entre o
+                # inventário e o copy2 um processo concorrente pode trocar o
+                # arquivo por symlink para fora do repo (vazava ~/.ssh p/ a
+                # skill instalada). O re-check por path não basta: resolve
+                # e confina às duas raízes legítimas (repo OU pacote).
+                _src = _resolve_source(repo, relative)
+                if _src.is_symlink():
+                    raise ValueError(
+                        f"Fonte virou link simbólico após o inventário: {relative}")
+                _roots = (Path(repo).resolve(),
+                          Path(__file__).resolve().parents[1].resolve())
+                _sr = _src.resolve()
+                if not any(_sr == r or r in _sr.parents for r in _roots):
+                    raise ValueError(f"Fonte escapa do pacote: {relative}")
+                shutil.copy2(_src, staged)
+                if hashlib.sha256(staged.read_bytes()).digest() != hashlib.sha256(_src.read_bytes()).digest():
                     raise ValueError(f"Cópia divergente: {relative}")
                 backup = stage / "old" / relative
                 if destination.exists():
@@ -162,9 +327,19 @@ def install(repo, user_root, dry_run=False):
                 (stage / "old").mkdir(exist_ok=True)
                 shutil.copy2(old_manifest, stage / "old" / MANIFEST)
         for target, stage in zip(targets, transactions):
+            target_resolved = target.resolve()
             for relative in files:
                 destination = target.joinpath(*relative.parts)
                 mkdir(destination.parent)
+                # Rechecagem no instante da escrita (TOCTOU): entre a validação
+                # do stage e o os.replace, um diretório pode virar symlink que
+                # desviaria a escrita para fora do destino (ALTO-8 da banca).
+                real_dest = destination.resolve()
+                if real_dest != destination.absolute() and not real_dest.is_relative_to(target_resolved):
+                    raise ValueError(f"Destino escapa por link simbólico: {destination}")
+                parent_resolved = destination.parent.resolve()
+                if not parent_resolved.is_relative_to(target_resolved):
+                    raise ValueError(f"Diretório de destino atravessa link simbólico: {destination}")
                 # Record before replacing so rollback also handles an interrupted replacement.
                 changed.append((destination, stage / "old" / relative))
                 os.replace(stage / "new" / relative, destination)
@@ -182,7 +357,10 @@ def install(repo, user_root, dry_run=False):
                 "version": 2,
                 "files": sorted(new_set),
                 "hashes": {
-                    str(rel).replace("\\", "/"): hashlib.sha256((repo / rel).read_bytes()).hexdigest()
+                    # Hash dos bytes INSTALADOS (destino), não da fonte re-lida —
+                    # mutação entre cópia e manifesto criava zumbi permanente
+                    # (banca v9 — M5).
+                    str(rel).replace("\\", "/"): hashlib.sha256((target / rel).read_bytes()).hexdigest()
                     for rel in files
                 }
             }
@@ -218,7 +396,25 @@ def install(repo, user_root, dry_run=False):
                     directory.rmdir()
                 except OSError:
                     pass
+    # Wrapper POSIX precisa de bit executável no destino (o bit pode se perder no
+    # checkout em Windows/copy2); no Windows o .cmd já é invocável sem chmod.
+    if os.name == "posix":
+        for target in targets:
+            sh_wrapper = target / "bin" / "henke"
+            if sh_wrapper.is_file():
+                try:
+                    sh_wrapper.chmod(sh_wrapper.stat().st_mode | 0o755)
+                except OSError:
+                    pass
     print(f"Instalados {len(files) - 1} arquivos de skills e PROTOCOLO.md nos quatro destinos.")
+    bin_dirs = [target / "bin" for target in targets if (target / "bin" / "henke").is_file()]
+    if bin_dirs:
+        print()
+        print("CLI 'henke' instalada. Para chamá-la de qualquer diretório, adicione UM destes caminhos ao PATH:")
+        for d in bin_dirs:
+            print(f"  - {d}")
+        print("Alternativa sem PATH: 'pipx install .' ou 'pip install .' na raiz deste repositório "
+              "(expõe 'henke' via [project.scripts]).")
 
 
 if __name__ == "__main__":
@@ -227,7 +423,11 @@ if __name__ == "__main__":
     parser.add_argument("--user-root", type=Path, default=Path.home())
     args = parser.parse_args()
     try:
-        install(Path(__file__).resolve().parents[1], args.user_root.resolve(), args.dry_run)
+        try:
+            from scripts._paths import suite_root
+        except ImportError:
+            from _paths import suite_root
+        install(suite_root(), args.user_root.resolve(), args.dry_run)
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f"Instalação falhou: {error}", file=sys.stderr)
         sys.exit(1)

@@ -6,10 +6,14 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: Validação de Integridade, Portões & Canários
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -38,32 +42,32 @@ jobs:
       - name: Executar Validador Estrito da Suíte
         run: python scripts/validate_skills.py
 
-      - name: Testar Validador contra Adulterações (Astra Canaries)
-        run: python tests/test_validator.py
-
-      - name: Testar Instalador, Transações Atômicas & Rollback
-        run: python tests/test_install.py
-
-      - name: Testar Portão de Custódia (Git Baseline & Scope)
-        run: python tests/test_gate.py
-
-      - name: Testar Spec Drift & Audit Ledger
-        run: python tests/test_evals.py
+      - name: Executar Bateria Completa de Testes Unitários
+        run: python -m unittest discover -s tests -p "test_*.py"
 
       - name: Executar Bateria de Canários Adversariais (Evals)
         run: python evals/canaries.py
 
-      - name: Testar Portões Métricos Assimilados
-        run: python tests/test_metric_gates.py
-
-      - name: Executar os 70 Canários Bilaterais dos Portões Métricos (M1-M70)
+      - name: Executar os 84 Canários Bilaterais dos Portões Métricos (M1-M84)
         run: python evals/canaries_metricas.py
 
-      - name: Executar Benchmark Adversarial Completo (17 Defeitos + 3 Controles)
-        run: python evals/bench_corpus.py --suite-dir .
+      - name: Executar Benchmark Adversarial Completo — modo estrito (MISSED/ERROR/FALSE-RED reprova)
+        run: python evals/bench_corpus.py --suite-dir . --strict
+
+      - name: Executar Canários Wave 7 (supervisão, TIA, manifests, watch, higiene)
+        run: python evals/canaries_wave7.py
+
+      - name: Executar Suíte Completa de Testes via unittest discover (inclui Wave 7)
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Executar Benchmark Wave 7 (paralelo x sequencial, incremental x full)
+        run: python evals/bench_wave7.py
 
       - name: Executar Dogfooding do Hazard Scan (. no próprio repositório)
         run: python scripts/metricas/hazard_scan.py .
+
+      - name: Executar Dogfooding do Assertless Scan (tests/ da própria suíte)
+        run: python scripts/metricas/assertless_scan.py tests
 
       - name: Testar Dry-Run do Instalador (Linux/macOS)
         if: runner.os == 'Linux'

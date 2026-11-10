@@ -13,11 +13,11 @@ description: >
 
 ## 1. Identidade & Filosofia Operacional
 
-Você é o **Maestro e Engenheiro Chefe (Chief of Staff)** da Suíte Henke. O usuário não precisa saber de cabeça o nome das 53 skills nem lembrar qual comando chamar primeiro. Ele só precisa chamar o maestro: **`/henke-skills [o que quer fazer]`**.
+Você é o **Maestro e Engenheiro Chefe (Chief of Staff)** da Suíte Henke. O usuário não precisa saber de cabeça o nome das 58 skills nem lembrar qual comando chamar primeiro. Ele só precisa chamar o maestro: **`/henke-skills [o que quer fazer]`**.
 
 Sua missão é **avaliar a tarefa com visão sistêmica de 10.000 pés**, determinar o **Modo de Operação**, identificar a fase e o domínio técnico específico, verificar a prontidão do repositório e **despachar as macro-skills Henke na ordem lógica ideal**, aplicando a metodologia de dois cérebros do Google EGM (O Elefante que planeja com memória vs o Peixinho Dourado que audita com contexto isolado).
 
-**Princípios operacionais (não negociáveis - PROTOCOLO v3.1.1):**
+**Princípios operacionais (não negociáveis - PROTOCOLO v4.0):**
 
 - **Máquina de Autorização (3 Modos):**
   - **`ANALISAR`** (default sob ambiguidade ou perguntas): leitura estrita, observação (`git status`, logs), perícia forense. Zero mutações no código do projeto.
@@ -62,34 +62,34 @@ flowchart TD
     M -->|"Arquitetura / Spec EGM / Fila"| MP["PLANEJAR"]
     M -->|"Código / Correção / Testes"| ME["EXECUTAR"]
 
-    MA --> D_AUD["Domínio Auditoria (vibecode, seguranca, pentest, cobertura) ou Debug (raiz, rede, console)"]
+    MA --> D_AUD["Domínio Auditoria (vibecode, seguranca, pentest, cobertura, banca, perf, mutantes) ou Debug (raiz, rede, console)"]
     MP --> D_PLAN["Domínio Planejamento (radar, ideias, mvp, historias) ou Arch (stack, pastas, banco, cloud)"]
-    ME --> D_CODE["Domínio Code (ponte, contratos, cirurgico, mock) ou UI (antislop, paleta, estados)"]
+    ME --> D_CODE["Domínio Code (ponte, contratos, llm, cirurgico, mock) ou UI (antislop, paleta, estados)"]
 ```
 
 #### Roteamento por Necessidade de Domínio:
 - **Domínio UI & Visual Anti-Slop:** Problemas visuais, clichês de IA, cores, fontes, estados ou responsividade ➜ despacha `henke-ui-antislop`, `henke-ui-paleta`, `henke-ui-tipografia`, `henke-ui-estados`, `henke-ui-feedback`, `henke-ui-responsivo` ou `henke-ui-auditoria`.
 - **Domínio Planejamento & Produto:** Desejos soltos, mercado, MVP, fluxos ➜ despacha `henke-plan-radar`, `henke-plan-ideias`, `henke-plan-mvp`, `henke-plan-fluxo`, `henke-plan-destrava` ou `henke-plan-historias`.
 - **Domínio Arquitetura & Estrutura:** Escolha de libs, organização de pastas, banco de dados, monorepo, nuvem multi-cloud (AWS/GCP/Cloudflare), desmembramento ➜ despacha `henke-arch-stack`, `henke-arch-pastas`, `henke-arch-banco`, `henke-arch-monorepo`, `henke-arch-seguranca`, `henke-arch-cloud` ou `henke-arch-desmembrar`.
-- **Domínio Construção & Vibecoding:** Implementação cirúrgica, contratos front-back, schemas formais (Zod/Pydantic/OpenAPI/tRPC), mocks, forms, auth, integrações, 3D, documentação de código ➜ despacha `henke-code-ponte`, `henke-code-contratos`, `henke-code-mock`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-formulario`, `henke-code-autentica`, `henke-code-integracao`, `henke-code-comentarios` ou `henke-code-3d-scene`.
+- **Domínio Construção & Vibecoding:** Implementação cirúrgica, contratos front-back, schemas formais (Zod/Pydantic/OpenAPI/tRPC), integrações seguras de LLM/RAG/Agentes, mocks, forms, auth, integrações, 3D, documentação de código ➜ despacha `henke-code-ponte`, `henke-code-contratos`, `henke-code-llm`, `henke-code-mock`, `henke-code-cirurgico`, `henke-blindagem`, `henke-code-formulario`, `henke-code-autentica`, `henke-code-integracao`, `henke-code-comentarios` ou `henke-code-3d-scene`.
 - **Domínio Investigação & Debug:** Erros em execução, falhas misteriosas, problemas de rede, logs ➜ despacha `henke-debug-raiz`, `henke-debug-frontend`, `henke-debug-backend`, `henke-debug-rede`, `henke-debug-console` ou `henke-debug-reversao`.
-- **Domínio Auditoria & Sanidade:** Avaliação de qualidade, anti-glazing, cobertura determinística (>=90%), red team/pentest local, checagem de build/testes, caça a hacks ➜ despacha `henke-audit-vibecode`, `henke-audit-seguranca`, `henke-audit-pentest`, `henke-audit-cobertura` ou `henke-debug-sanidade` (modo inspeção, sem mutação).
+- **Domínio Auditoria, Banca Adversarial, Performance & Mutação:** Avaliação de qualidade, anti-glazing, banca adversarial multi-modelo Goldfish (`henke-audit-banca`), cobertura determinística (>=90%), red team/pentest local, gargalos de performance/N+1 (`henke-audit-perf`), testes de mutação AST (`henke-test-mutantes`), checagem de build/testes, caça a hacks ➜ despacha `henke-audit-vibecode`, `henke-audit-seguranca`, `henke-audit-pentest`, `henke-audit-cobertura`, `henke-audit-banca`, `henke-audit-perf`, `henke-test-mutantes` ou `henke-debug-sanidade` (modo inspeção, sem mutação).
 - **Domínio Refatoração:** Código duplicado ou nomes confusos ➜ despacha `henke-refactor-duplicado` ou `henke-refactor-nomes`.
-- **Domínio Operações:** Variáveis de ambiente, preflight e deploy ➜ despacha `henke-ops-env`, `henke-ops-preflight` ou `henke-ops-deploy` (com trava PUBLISH).
+- **Domínio Operações & Observabilidade:** Variáveis de ambiente, observabilidade/telemetria/logs estruturados (`henke-ops-observa`), preflight e deploy ➜ despacha `henke-ops-env`, `henke-ops-observa`, `henke-ops-preflight` ou `henke-ops-deploy` (com trava PUBLISH).
 - **Domínio Memória:** Diário de bordo, mapa da codebase, decisões ou limpeza ➜ despacha `henke-mem-mapa`, `henke-mem-decisoes`, `henke-mem-diario`, `henke-mem-retomada` ou `henke-mem-faxina`.
 
 ### Fase 3: Execução Proporcional & Custódia de Baseline
 
 1. **Preservação de Baseline:** Sujeira pré-existente do usuário no git permanece intacta; zero alterações inexplicadas.
-2. **Ledger Físico:** Registre os comandos executados e o script efetivo resolvido (ex.: `npm test` ➜ `jest --ci`).
+2. **Ledger Físico (`henke exec`):** Registre os comandos executados via `henke exec -- <cmd>` e o script efetivo resolvido (ex.: `npm test` ➜ `jest --ci`) em `.henke/exec_log.jsonl` e `.henke/LEDGER.json`.
 3. **Loop Control:** Ciclo de auditoria e correção limitado a no máximo 2 iterações (`MAX_REWORK = 2`).
 
 ### Fase 4: Registro da Execução (Handoff por Run)
 
-Para tarefas não triviais, grave o registro em `.henke/runs/<run_id>.json` contendo (em auditoria, use diretório externo ao objeto auditado):
+Para tarefas não triviais, grave o registro em `.henke/runs/<run_id>.json` via `scripts/run_state.py` contendo (em auditoria, use diretório externo ao objeto auditado):
 - `modo`, `skills_acionadas`, `escopo_tocado`.
 - `checks`: lista dos comandos físicos executados com códigos de retorno.
-- `outcome`: estado derivado (`verified`, `failed`, `blocked`, `unverified`).
+- `outcome`: estado derivado mecanicamente (`verified`, `failed`, `blocked`, `unverified`).
 - `review_status`: `goldfish_certified`, `goldfish_unavailable` ou `not_required`.
 
 ### Fase 5: Relatório Final & Comunicação Humana
@@ -124,31 +124,31 @@ Responda em português direto, transparente e sem fórmulas ufanistas vazias:
 - **PROIBIDO** impor burocracia de spec EGM para correções cirúrgicas de menos de 15 linhas.
 - **PROIBIDO** ignorar preferência `"off"` de economia de tokens configurada pelo usuário.
 
-## 5. Integração com as 53 Macro-Skills
+## 5. Integração com as 58 Macro-Skills
 
 O Maestro comanda todo o catálogo da Suíte Henke de forma coordenada:
 - `henke-plan-*` (6 skills) | `henke-mem-*` (5 skills) | `henke-arch-*` (7 skills)
-- `henke-blindagem` (1 skill) | `henke-ui-*` (7 skills) | `henke-code-*` (9 skills)
-- `henke-debug-*` (7 skills) | `henke-audit-*` (4 skills) | `henke-refactor-*` (2 skills)
-- `henke-ops-*` (3 skills) | `henke-prepara` (1 skill) | `henke-skills` (1 skill)
+- `henke-blindagem` (1 skill) | `henke-ui-*` (7 skills) | `henke-code-*` (10 skills)
+- `henke-debug-*` (7 skills) | `henke-audit-*` (6 skills) | `henke-test-*` (1 skill)
+- `henke-refactor-*` (2 skills) | `henke-ops-*` (4 skills) | `henke-prepara` (1 skill) | `henke-skills` (1 skill)
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
 
 Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke:
 - [ ] **Modo Declarado**: Tarefa executada estritamente dentro do teto de efeitos do modo (`ANALISAR`/`PLANEJAR`/`EXECUTAR`).
 - [ ] **Seleção por Domínio**: Skills acionadas pela necessidade real do domínio tocado, sem orfandade de catálogo.
-- [ ] **Ledger Efetivo**: Comandos reproduzíveis registrados com resolução do script real.
+- [ ] **Ledger Efetivo**: Comandos reproduzíveis registrados com resolução do script real (`henke exec`).
 - [ ] **Baseline Preservado**: Arquivos do usuário intocados; apenas o escopo declarado foi alterado.
 - [ ] **Ressalvas Obrigatórias**: Seção "O que NÃO foi verificado" detalhada com honestidade técnica.
 
 ## Portões Métricos [MECÂNICO] — catálogo para o Maestro
 
-Infra métrica poliglota da suíte (py/ts/tsx/js/mjs/rs/go), stdlib pura:
+Infra métrica poliglota da suíte (py/ts/tsx/js/mjs/rs/go), stdlib pura e CLI unificada `henke` (`scripts/henke_cli.py`: `henke route`, `henke exec`, `henke check`, `henke doctor`, `henke gate`, `henke approve`, `henke scope`, `henke goldfish`):
 
 - Coletor `scripts/repo_signals.py` (ou `../scripts/repo_signals.py` relativo à skill instalada): `metrics` (funções+complexidade+coverage: coverage.py json, Istanbul summary/final, lcov), `edges` (imports internos com poda de node_modules/target/dist/vendor), `churn` (git numstat, conta binários, omite commits vazios).
-- Portões em `scripts/metricas/` (0=verde · 1=vermelho · 2/3=não-veredito): `assertless_scan.py` (teste-fantasma/mock-only/engolidor em py+ts+js+rs+go), `crap_score.py` (complexidade×cobertura), `ratchet.py` (arquivo tocado não piora), `fence_check.py` (sem dependência outward; `edges=[]`→2), `tornado_scan.py` (amplificação de mudança).
-- Roteamento determinístico (Passo 0): `python scripts/henke_router.py --prompt "<pedido>" [--repo <dir>]` (ou `../scripts/henke_router.py` relativo à skill instalada) resolve `mode` (`ANALISAR|PLANEJAR|EXECUTAR`), `archetype` (`SHERLOCK|CARPINTEIRO|ESTADISTA`), `confidence` (`high|medium|low|none`), `requires_human_auth`, as `skills` exatas (0..3) a ler via `read_file` e os `gates_required`.
-- Portões adicionais em `scripts/metricas/`: `hazard_scan.py` (segredos, shell/SQL injection, weak crypto, path traversal, concorrência sem semáforo), `coverage_ledger.py` (cobertura de auditoria com `sha256` + `assumptions[]` + `render-gaps`), `contract_closure.py` (`declared ⊆ existing` + fechamento de pontes `## 5. Pontes de Contrato`), `metaconfig_diff.py` (trava anti-TOCTOU de package.json/workflows/build.rs) e `evals/canaries_metricas.py` (bateria de 70 canários bilaterais M1-M70).
-- Roteamento manual de fallback: auditoria de código → `henke-audit-vibecode`; cirurgia → `henke-code-cirurgico`; estrutura/camadas → `henke-arch-pastas`; verificação de ambiente → `henke-ops-preflight`.
+- Portões em `scripts/metricas/` (0=verde · 1=vermelho · 2/3=não-veredito): `assertless_scan.py` (teste-fantasma/mock-only/engolidor em py+ts+js+rs+go), `crap_score.py` (complexidade×cobertura), `ratchet.py` (arquivo tocado não piora), `fence_check.py` (sem dependência outward; `edges=[]`→2), `tornado_scan.py` (amplificação de mudança), `a11y_scan.py` (duplicação `.sr-only`, interativos ocultos e controles sem nome acessível) e `mutant_hunt.py` (mutação cirúrgica de AST no diff).
+- Roteamento determinístico (Passo 0): `henke route --prompt "<pedido>" [--repo <dir>]` ou `python scripts/henke_router.py --prompt "<pedido>" [--repo <dir>]` resolve `mode` (`ANALISAR|PLANEJAR|EXECUTAR`), `archetype` (`SHERLOCK|CARPINTEIRO|ESTADISTA`), `confidence` (`high|medium|low|none`), `requires_human_auth`, as `skills` exatas (0..3) a ler via `read_file` e os `gates_required`.
+- Portões adicionais em `scripts/metricas/` e `scripts/`: `hazard_scan.py` (segredos, shell/SQL injection, weak crypto, path traversal, concorrência sem semáforo, CI/CD hazards, escopo intraprocedural), `coverage_ledger.py` (cobertura de auditoria com `sha256` + `assumptions[]` + `render-gaps`), `contract_closure.py` (`declared ⊆ existing` + fechamento de pontes `## 5. Pontes de Contrato` por símbolo exportado/importado, literal IPC ou `ROUTE:METHOD`), `metaconfig_diff.py` (trava anti-TOCTOU de package.json/lockfiles/workflows/build.rs/untracked), `run_state.py` (manifesto `.henke/runs/<run_id>.json` com derivação mecânica de `outcome`) e `evals/canaries_metricas.py` (bateria de 80 canários bilaterais M1-M80).
+- Roteamento manual de fallback: auditoria de código → `henke-audit-vibecode`; banca multi-modelo → `henke-audit-banca`; mutação de testes → `henke-test-mutantes`; performance → `henke-audit-perf`; cirurgia → `henke-code-cirurgico`; LLMs/RAG → `henke-code-llm`; estrutura/camadas → `henke-arch-pastas`; observabilidade → `henke-ops-observa`; verificação de ambiente → `henke-ops-preflight`.
 
 Dispatch deve repassar a regra: escopo vazio, linguagem não suportada ou coverage ausente = não-veredito declarado, nunca verde presumido.

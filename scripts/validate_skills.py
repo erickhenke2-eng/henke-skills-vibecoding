@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validação estrutural da Suíte Henke (PROTOCOLO v3.4).
+Validação estrutural da Suíte Henke (PROTOCOLO v4.0).
 Endurecido para rejeitar adulterações: YAML inválido, chaves duplicadas,
 links quebrados e ausência de marcadores mínimos. Não avalia semântica.
 """
@@ -57,7 +57,11 @@ def strip_code(text: str) -> str:
     return re.sub(r"(`+)[^`\n]*?\1", "", "".join(out))
 
 
-root = Path(__file__).resolve().parents[1]
+try:
+    from scripts._paths import suite_root
+except ImportError:
+    from _paths import suite_root
+root = suite_root()
 skills = sorted(p for p in root.glob("henke-*/SKILL.md") if p.is_file())
 errors = []
 
@@ -80,9 +84,9 @@ else:
         if marker not in proto_text:
             errors.append(f"PROTOCOLO.md sem estrutura canônica obrigatória: marcador ausente '{marker}'")
 
-# 2. Validação da contagem de skills (53 skills esperadas)
-if len(skills) != 53:
-    errors.append(f"Inventário divergente: esperadas 53 skills, encontradas {len(skills)}")
+# 2. Validação da contagem de skills (58 skills esperadas)
+if len(skills) != 58:
+    errors.append(f"Inventário divergente: esperadas 58 skills, encontradas {len(skills)}")
 
 names = set()
 for path in skills:

@@ -159,14 +159,9 @@ Responda em português:
 **Papel no ecossistema:** é o rastreador — quando ninguém sabe onde tá o problema, ele acha.
 
 ## 6. Verificação de Entrega & Custódia (Protocolo Henke)
+Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. O checklist canônico de entrega vive no PROTOCOLO §12 — confirme cada item lá antes de declarar a tarefa concluída:
 
-Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da Suíte Henke. Antes de declarar qualquer tarefa como concluída, confirme mentalmente cada item:
-
-- [ ] **Entrega Real (Zero Stubs)**: Funcionalidade entregue de verdade até a ponta, sem cascas vazias, mocks permanentes ou comentários delegando a solução para depois.
-- [ ] **Regra Portão vs Produto**: Se o teste conflitou com a nova exigência, o teste foi corrigido — sem hacks como `.sr-only`, textos invisíveis ou dados falsos.
-- [ ] **Ledger de Evidência**: Comandos executáveis documentados no relatório para que o auditor possa re-executar os testes verbatim.
-- [ ] **Custódia de Ambiente**: Branch e worktree corretas, baseline do usuário preservado e variáveis de ambiente apontando para os binários compilados na worktree ativa.
-- [ ] **Ressalvas Transparentes**: Seção "O que NÃO foi verificado" preenchida com clareza (testes não rodados por falta de hardware, APIs externas não chamadas, etc.).
+- [ ] Checklist canônico de entrega do PROTOCOLO §12 cumprido (entrega real zero-stub, portão vs produto, ledger de evidência, custódia de ambiente, ressalvas transparentes).
 
 ## Portões Métricos & Doutrina Sherlock Holmes [MECÂNICO]
 

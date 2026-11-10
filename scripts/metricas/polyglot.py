@@ -24,8 +24,8 @@ class CommentSpan(NamedTuple):
     end_col: int     # 0-indexed
     text: str        # comment slice
 
-C_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx", ".rs", ".go"}
-JS_EXTS = {".ts", ".tsx", ".js", ".mjs", ".jsx"}
+C_EXTS = {".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".rs", ".go"}
+JS_EXTS = {".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts", ".jsx"}
 TEST_RE = re.compile(
     r"(\.test\.|\.spec\.|_test\.go$|_test\.rs$|(?:^|/)test_[^/]*\.py$|_test\.py$|"
     r"(?:^|/)tests?/|__tests__)")
@@ -45,10 +45,37 @@ KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "new", "delete",
             "assert", "expect", "describe", "it", "test", "specify"}
 
 
+# A9 (banca v12): TODA pasta oculta era podada — `.platform/evil.py` e
+# `.github/scripts` eram invisíveis a metrics/edges/ledger. Só os dot-dirs
+# pesados/de-VCS continuam fora.
+_DOT_PRUNE = {
+    ".git", ".hg", ".svn", ".venv", ".tox", ".nox", ".mypy_cache",
+    ".pytest_cache", ".ruff_cache", ".next", ".nuxt", ".svelte-kit",
+    ".turbo", ".idea", ".vscode", ".parcel-cache", ".yarn", ".npm",
+    ".pnpm-store", ".cache",
+}
+
+
+def _is_reparse_dir(p: Path) -> bool:
+    """Junction/symlink/reparse — portável py3.11+ (Path.is_junction é 3.12+).
+    Em dúvida, True: diretório que não lemos não é descido."""
+    try:
+        if p.is_symlink():
+            return True
+        st = p.lstat()
+    except OSError:
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
 def iter_source_files(root: Path, exts=None):
     """os.walk com poda in-place de diretórios mortos (O(N) em arquivos vivos)."""
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS and not d.startswith(".")]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in PRUNE_DIRS and d not in _DOT_PRUNE
+            and not _is_reparse_dir(Path(dirpath) / d)
+        ]
         for fn in filenames:
             if exts is None or Path(fn).suffix.lower() in exts:
                 yield Path(dirpath) / fn
@@ -72,18 +99,48 @@ def mask_c_like(text: str, lang: str = "") -> str:
             i = j
         elif c == "/" and nxt == "*":
             j = text.find("*/", i + 2)
-            j = n - 2 if j == -1 else j
-            for k in range(i, j + 2):
-                if out[k] != "\n":
+            if j == -1:
+                # `/*` sem fechamento (p.ex. dentro de regex `/ab\/*/` em
+                # início de linha, lido como divisão) NÃO mascara até o EOF —
+                # engolia todo o arquivo seguinte (falso-verde, banca v10 A3).
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                for k in range(i, j):
                     out[k] = " "
-            i = j + 2
-        elif (lang not in ("rs", "go")) and text.startswith("<!--", i):
-            j = text.find("-->", i + 4)
-            j = n - 3 if j == -1 else j
-            for k in range(i, j + 3):
-                if out[k] != "\n":
+                i = j
+            else:
+                for k in range(i, j + 2):
+                    if out[k] != "\n":
+                        out[k] = " "
+                i = j + 2
+        elif text.startswith("<!--", i):
+            if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+                # Annex B: `<!--` em JS é comentário de LINHA — tratá-lo como
+                # bloco até `-->` mascara o resto do arquivo (falso-verde A1).
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                for k in range(i, j):
                     out[k] = " "
-            i = j + 3
+                i = j
+            elif lang not in ("rs", "go"):
+                j = text.find("-->", i + 4)
+                if j == -1:
+                    # F2 (banca v11): '<!--' não fechado mascarava até EOF —
+                    # igual ao caso '/*': só a linha corrente some.
+                    j = text.find("\n", i)
+                    j = n if j == -1 else j
+                    for k in range(i, j):
+                        out[k] = " "
+                    i = j
+                else:
+                    for k in range(i, j + 3):
+                        if out[k] != "\n":
+                            out[k] = " "
+                    i = j + 3
+            else:
+                if not c.isspace():
+                    prev = c
+                i += 1
         elif c in "'\"":
             # 'a/'static é lifetime — existe só em Rust. Fora de rs, ' é string.
             if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
@@ -97,7 +154,7 @@ def mask_c_like(text: str, lang: str = "") -> str:
             i = j
         elif c == "`":
             i = _mask_template(text, out, i)
-        elif c == "/" and _regex_start(prev):
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts") and _regex_ctx_ok(text, i):
             j = _regex_end(text, i)
             for k in range(i, j):
                 if out[k] != "\n":
@@ -219,18 +276,47 @@ def mask_comments_only(text: str, lang: str = "") -> str:
             i = j
         elif c == "/" and nxt == "*":
             j = text.find("*/", i + 2)
-            j = n - 2 if j == -1 else j
-            for k in range(i, j + 2):
-                if out[k] != "\n":
+            if j == -1:
+                # `/*` sem fechamento (p.ex. dentro de regex `/ab\/*/` em
+                # início de linha, lido como divisão) NÃO mascara até o EOF —
+                # engolia todo o arquivo seguinte (falso-verde, banca v10 A3).
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                for k in range(i, j):
                     out[k] = " "
-            i = j + 2
-        elif (lang not in ("rs", "go")) and text.startswith("<!--", i):
-            j = text.find("-->", i + 4)
-            j = n - 3 if j == -1 else j
-            for k in range(i, j + 3):
-                if out[k] != "\n":
+                i = j
+            else:
+                for k in range(i, j + 2):
+                    if out[k] != "\n":
+                        out[k] = " "
+                i = j + 2
+        elif text.startswith("<!--", i):
+            if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+                j = text.find("\n", i)
+                j = n if j == -1 else j
+                for k in range(i, j):
                     out[k] = " "
-            i = j + 3
+                i = j
+            elif lang not in ("rs", "go"):
+                j = text.find("-->", i + 4)
+                if j == -1:
+                    # F2 (banca v11): '<!--' não fechado mascarava até EOF.
+                    j = text.find("\n", i)
+                    j = n if j == -1 else j
+                    for k in range(i, j):
+                        out[k] = " "
+                    i = j
+                else:
+                    for k in range(i, j + 3):
+                        if out[k] != "\n":
+                            out[k] = " "
+                    i = j + 3
+            else:
+                i += 1
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts") and _regex_ctx_ok(text, i):
+            # Regex literal: pula sem mascarar — `/*` dentro não pode abrir
+            # comentário (A2: antes, máscara comia até EOF).
+            i = _regex_end(text, i)
         elif c in "'\"`":
             if c == "'" and lang == "rs" and _looks_like_lifetime(text, i):
                 i += 1
@@ -266,29 +352,63 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
         l_idx = bisect.bisect_right(line_starts, pos) - 1
         return l_idx + 1, pos - line_starts[l_idx]
 
+    def _regex_end(text: str, start: int) -> int:
+        """Posição após o '/' de fechamento de um regex literal; -1 se não fecha
+        antes do fim da linha (regex JS não cruza \n — então não era regex)."""
+        i = start + 1
+        in_class = False
+        while i < len(text):
+            ch = text[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "[":
+                in_class = True
+            elif ch == "]":
+                in_class = False
+            elif ch == "/" and not in_class:
+                return i + 1
+            elif ch == "\n":
+                return -1
+            i += 1
+        return -1
+
     i, n = 0, len(text)
     is_hash_lang = lang in ("py", "python", "tf", "tfvars", "toml", "yaml", "yml", "dockerfile", "sh", "bash")
-    can_html_comment = lang not in ("rs", "go")
+    # H1 (banca v15): '//'/'/*'/'<!--' rodavam em TODAS as langs — o '//' de
+    # uma URL num .yml abria CommentSpan contendo um marker de supressão e
+    # calava o finding da própria linha. C-like só nas langs c-like.
+    is_clike = lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts",
+                        "rs", "go", "java", "c", "cpp", "h", "hpp", "cs",
+                        "kt", "swift", "scala", "php")
+    can_html_comment = lang in ("html", "htm", "xml", "md", "vue", "svelte",
+                                "jsx", "tsx")
     while i < n:
         c = text[i]
         nxt = text[i + 1] if i + 1 < n else ""
-        if c == "/" and nxt == "/":
+        if is_clike and c == "/" and nxt == "/":
             j = text.find("\n", i)
             j = n if j == -1 else j
             sl, sc = _offset_to_pos(i)
             el, ec = _offset_to_pos(j)
             spans.append(CommentSpan(sl, sc, el, ec, text[i:j]))
             i = j
-        elif c == "/" and nxt == "*":
+        elif is_clike and c == "/" and nxt == "*":
             j = text.find("*/", i + 2)
             end_pos = n if j == -1 else j + 2
             sl, sc = _offset_to_pos(i)
             el, ec = _offset_to_pos(end_pos)
             spans.append(CommentSpan(sl, sc, el, ec, text[i:end_pos]))
             i = end_pos
-        elif can_html_comment and text.startswith("<!--", i):
-            j = text.find("-->", i + 4)
-            end_pos = n if j == -1 else j + 3
+        elif can_html_comment and text.startswith("<!--", i) and not is_hash_lang:
+            if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
+                # Annex B: comentário de LINHA em JS — o span não pode engolir
+                # o resto do arquivo (A1).
+                j = text.find("\n", i)
+                end_pos = n if j == -1 else j
+            else:
+                j = text.find("-->", i + 4)
+                end_pos = n if j == -1 else j + 3
             sl, sc = _offset_to_pos(i)
             el, ec = _offset_to_pos(end_pos)
             spans.append(CommentSpan(sl, sc, el, ec, text[i:end_pos]))
@@ -305,6 +425,17 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
                 i += 1
                 continue
             i = _template_end(text, i) if c == "`" else _string_end(text, i, c)
+        elif c == "/" and lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"):
+            # Regex literal JS: `/a\/*/` contém `/*` que, lido como comentário,
+            # engole o resto da linha — inclusive um marker de supressão forjado
+            # logo depois (A15/A11/F1-banca). Char anterior operador → regex;
+            # word-char → retrocede o identificador e exige keyword (`return`,
+            # `typeof`, ...) — `foo /re/` é divisão, `return /re/` é regex.
+            if _regex_ctx_ok(text, i):
+                end = _regex_end(text, i)
+                i = end if end != -1 else i + 1
+            else:
+                i += 1
         else:
             i += 1
     return spans
@@ -364,7 +495,69 @@ def _template_end(text, i):
     return n
 
 
-_REGEX_PREV = set("=(,:[!&|?{};\n") | {"return", "=>", "typeof", "case", "do", "else"}
+# Keywords JS/TS após as quais '/' abre regex (operando), não divisão.
+# `=>` e operadores já são cobertos pelo conjunto de chars.
+_REGEX_KEYWORDS = frozenset({
+    "return", "typeof", "case", "in", "of", "throw", "void", "new",
+    "delete", "do", "else", "instanceof", "yield", "await", "default",
+})
+
+# `)` que fecha parêntese de CONTROLE DE FLUXO abre posição de statement —
+# `if (x) /re/` é regex. `)` de chamada comum (`f() /re/`) é divisão.
+_REGEX_PAREN_KW = frozenset({"if", "for", "while", "switch", "catch", "with"})
+
+
+def _regex_ctx_ok(text: str, i: int) -> bool:
+    """True se '/' em `i` abre regex literal (posição de operando)."""
+    j = i - 1
+    while j >= 0 and text[j] in " \t":
+        j -= 1
+    if j < 0:
+        return True  # início de arquivo = posição de expressão
+    c = text[j]
+    # `\n` NÃO é contexto de regex: `a\n/eval(x)/g` é divisão legítima em
+    # JS/Rust — tratar newline como abertura de regex mascara sinks inteiros.
+    if c == "<" and i >= 1 and text[i - 1] == "<":
+        # F3 (banca v11): `</` em posição de tag de fechamento JSX
+        # (`<div></a>{eval(x)}</div>`) não é início de regex — o "regex"
+        # engolia o sink até a próxima '/'. Char antes do '<' em posição de
+        # elemento (`>`,`{`,`(`,`=`, operadores) fecha a heurística.
+        m = i - 2
+        while m >= 0 and text[m] in " \t":
+            m -= 1
+        if m >= 0 and text[m] in ">{([=,:!&|?;":
+            return False
+    if c in "(,=:[!&|?{};+-*/%^~<>":
+        return True
+    if c == ")":
+        # `if (x) /re/` — `)` de parêntese de keyword de controle abre statement:
+        # regex. `f(a) /re/` — `)` de chamada: divisão. Retrocede ao `(` de
+        # abertura e exige a keyword de controle.
+        depth = 0
+        k = j
+        while k >= 0:
+            if text[k] == ")":
+                depth += 1
+            elif text[k] == "(":
+                depth -= 1
+                if depth == 0:
+                    break
+            k -= 1
+        if k <= 0:
+            return False
+        m = k - 1
+        while m >= 0 and text[m] in " \t":
+            m -= 1
+        e = m
+        while m >= 0 and (text[m].isalnum() or text[m] in "_$"):
+            m -= 1
+        return text[m + 1:e + 1] in _REGEX_PAREN_KW
+    if c.isalnum() or c in "_$":
+        k = j
+        while k >= 0 and (text[k].isalnum() or text[k] in "_$"):
+            k -= 1
+        return text[k + 1:j + 1] in _REGEX_KEYWORDS
+    return False
 
 
 def _regex_start(prev):

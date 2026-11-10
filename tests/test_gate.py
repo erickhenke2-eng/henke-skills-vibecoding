@@ -146,29 +146,31 @@ class GateTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_cli_exit_codes(self):
-        """--help funciona; baseline+check via CLI retornam 0/1 nos caminhos certos."""
+        """--help sai 2 (portão sem veredito nunca é verde — banca v10 A1);
+        baseline+check via CLI retornam 0/1 nos caminhos certos."""
         script = ROOT / "scripts" / "henke_gate.py"
-        help_res = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True)
-        self.assertEqual(help_res.returncode, 0)
+        help_res = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        self.assertEqual(help_res.returncode, 2)
+        self.assertIn("usage:", (help_res.stdout or "") + (help_res.stderr or ""))
         out = self.repo / ".gate.json"
         res = subprocess.run(
             [sys.executable, str(script), "baseline", "--out", str(out)],
-            cwd=self.repo, capture_output=True, text=True,
+            cwd=self.repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         self.assertEqual(res.returncode, 0, res.stderr)
         (self.repo / "scripts").mkdir()
-        (self.repo / "scripts" / "ok.py").write_text("x = 1\n")
+        (self.repo / "scripts" / "ok.py").write_text("x = 1\n", encoding="utf-8")
         ok = subprocess.run(
             [sys.executable, str(script), "check", "--baseline", str(out), "--scope", "scripts/*"],
-            cwd=self.repo, capture_output=True, text=True,
+            cwd=self.repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
-        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
-        (self.repo / "violacao.txt").write_text("fora\n")
+        self.assertEqual(ok.returncode, 0, (ok.stdout or "") + (ok.stderr or ""))
+        (self.repo / "violacao.txt").write_text("fora\n", encoding="utf-8")
         bad = subprocess.run(
             [sys.executable, str(script), "check", "--baseline", str(out), "--scope", "scripts/*"],
-            cwd=self.repo, capture_output=True, text=True,
+            cwd=self.repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
-        self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
+        self.assertEqual(bad.returncode, 1, (bad.stdout or "") + (bad.stderr or ""))
 
 
 if __name__ == "__main__":

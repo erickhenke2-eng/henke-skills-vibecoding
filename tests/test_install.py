@@ -54,6 +54,11 @@ class InstallTests(unittest.TestCase):
             self.assertTrue((target / "scripts" / "metricas" / "hazard_scan.py").is_file())
             self.assertTrue((target / "scripts" / "metricas" / "coverage_ledger.py").is_file())
             self.assertTrue((target / "scripts" / "metricas" / "contract_closure.py").is_file())
+            self.assertTrue((target / "scripts" / "metricas" / "a11y_scan.py").is_file())
+            self.assertTrue((target / "scripts" / "metricas" / "mutant_hunt.py").is_file())
+            self.assertTrue((target / "scripts" / "henke_cli.py").is_file())
+            self.assertTrue((target / "scripts" / "run_state.py").is_file())
+            self.assertTrue((target / "docs" / "designs" / "TEMPLATE.md").is_file())
             self.assertEqual((target / "unrelated.txt").read_text(), "preserve")
             self.assertFalse(list(target.glob(".henke-install-*")))
 
@@ -80,6 +85,18 @@ class InstallTests(unittest.TestCase):
         with self.assertRaises(OSError):
             installer.install(ROOT, self.user)
         self.assertEqual(snapshot(self.user), before)
+
+    def test_install_lock_blocks_parallel_installer(self):
+        """Lock .henke-install.lock por destino bloqueia instalador concorrente."""
+        lock = self.user / ".henke-install.lock"
+        lock.write_text("pid=999999\n", encoding="utf-8")
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Lock"):
+                installer.install(ROOT, self.user, lock_timeout=0.2)
+        finally:
+            lock.unlink(missing_ok=True)
+        # Destino intacto: nada foi publicado nem removido sob lock alheio.
+        self.assertEqual((self.user / TARGETS[0] / "PROTOCOLO.md").read_text(), "old protocol")
 
     def test_missing_dependency_has_actionable_error(self):
         result = subprocess.run([sys.executable, "-S", str(ROOT / "scripts/validate_skills.py")], capture_output=True, text=True, encoding="utf-8")

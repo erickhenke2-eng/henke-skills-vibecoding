@@ -1,0 +1,12 @@
+{
+  "metric": "skill_checklist_dedup",
+  "date": "2026-11-09",
+  "files_changed": 46,
+  "bytes_removed": 45448,
+  "bytes_added": 18630,
+  "net_bytes_saved_per_file": 583,
+  "net_bytes_saved_full_catalog": 26818,
+  "est_tokens_saved_per_skill_injection": 146,
+  "method": "chars/4 — estimativa conservadora pt-BR; medido sobre o diff real dos SKILL.md",
+  "note": "46 skills compartilhavam o checklist genérico de §6 (byte-identical); 7 variantes com itens específicos mantidas. Fonte canônica: PROTOCOLO §12."
+}

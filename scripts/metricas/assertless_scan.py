@@ -103,7 +103,7 @@ TEST_FUNC = re.compile(r"^test[A-Za-z0-9_]*$")
 # with a non-ASCII name that pytest itself collects and runs - the scan reported clean
 # over tests it never read.
 TEST_FILE = re.compile(
-    r"^(?:test_\w*|\w+_test)\.py$|.*\.(?:test|spec)\.(?:ts|tsx|js|mjs|jsx)$|.*_test\.(?:go|rs)$",
+    r"^(?:test_\w*|\w+_test)\.py$|.*\.(?:test|spec)\.(?:ts|tsx|js|mjs|cjs|mts|cts|jsx)$|.*_test\.(?:go|rs)$",
     re.IGNORECASE)
 UNITTEST_ASSERT = re.compile(r"^(?:assert[A-Z][A-Za-z0-9]*|fail)$")
 MOCK_ASSERT = re.compile(r"^assert_[a-z0-9_]+$")
@@ -131,7 +131,9 @@ _RS_ASSERT = re.compile(
     r"\bassert(?:_eq|_ne|_matches)?\s*!|\bpanic!|should_panic|insta::|assert_fs")
 _GO_ASSERT = re.compile(
     r"\bt\.(?:Error|Fatal|Fail)\w*\s*\(|\b(?:assert|require)\.[A-Z]\w+\s*\(|"
-    r"\bpanic\s*\(|\bt\.Helper\s*\(")
+    r"\bpanic\s*\("
+    # t.Helper() NÃO é asserção — é marcador de stack-frame (A3-banca).
+)
 
 
 class _Fn(NamedTuple):
@@ -163,13 +165,15 @@ def scan_polyglot(path: Path, helpers):
         if ext in _pg.JS_EXTS:
             real_expect = mock_expect = 0
             for m in _JS_EXPECT.finditer(body):
-                # cadeia completa: do ')' que fecha expect(...) até o ';'
-                pe = _pg._paren_end(body, body.find("(", m.start()))
+                open_p = body.find("(", m.start())
+                pe = _pg._paren_end(body, open_p) if open_p != -1 else -1
                 chain = body[pe:pe + 400] if pe != -1 else ""
                 mm = _JS_MATCHER.search(chain)
                 if not mm:
                     continue  # expect(x) solto, sem matcher → não é asserção
-                if _JS_MOCK_ONLY.search(mm.group(0)):
+                matcher_call = chain[:mm.end()]
+                full_expr = body[m.start():pe] + matcher_call
+                if _JS_MOCK_ONLY.search(full_expr):
                     mock_expect += 1
                 else:
                     real_expect += 1
@@ -350,11 +354,49 @@ def literal_value(node, consts, depth=0):
     if depth > 16:
         return _UNKNOWN
     if isinstance(node, ast.Name):
-        node = consts.get(node.id)
+        # Resolução por-ponto: último binding ≤ a linha de USO do nome.
+        # Literal → fold; binding não-literal ou inexistente antes do uso →
+        # _UNKNOWN. Bindings POSTERIORES ao uso não contaminam (F4).
+        hist = consts.get(node.id)
+        if not hist:
+            return _UNKNOWN
+        ln_use = getattr(node, "lineno", -1)
+        chosen = None
+        for bln, bval in hist:
+            if bln <= ln_use:
+                chosen = bval
+            else:
+                break
+        node = chosen
         if node is None:
             return _UNKNOWN
     if isinstance(node, ast.Constant):
         return node.value if _small(node.value) else _UNKNOWN
+    if isinstance(node, ast.NamedExpr):
+        # `assert (ok := True)` — NamedExpr é binding + uso no mesmo nó (B3).
+        return literal_value(node.value, consts, depth + 1)
+    if isinstance(node, ast.Attribute):
+        # Laundering por atributo: `self.ok = True; assert self.ok` — o
+        # atributo é binding rastreado com chave pontilhada (B4).
+        dotted = _dotted_name(node)
+        if dotted is None:
+            return _UNKNOWN
+        hist = consts.get(dotted)
+        if not hist:
+            return _UNKNOWN
+        ln_use = getattr(node, "lineno", -1)
+        chosen = None
+        for bln, bval in hist:
+            if bln <= ln_use:
+                chosen = bval
+            else:
+                break
+        node = chosen
+        if node is None:
+            return _UNKNOWN
+        if isinstance(node, ast.Constant):
+            return node.value if _small(node.value) else _UNKNOWN
+        return _UNKNOWN
     if isinstance(node, (ast.Tuple, ast.List, ast.Set, ast.Dict)):
         if not is_literal(node):
             return _UNKNOWN
@@ -364,14 +406,37 @@ def literal_value(node, consts, depth=0):
             return _UNKNOWN
         return value if _small(value) else _UNKNOWN
     if isinstance(node, ast.BoolOp):
-        wants = isinstance(node.op, ast.Or)
-        for v in node.values[:-1]:
+        if isinstance(node.op, ast.Or):
+            # `X or True` é sempre truthy mesmo com X desconhecido — o or só
+            # pode ser falsy se TODOS os operandos forem falsy (B2).
+            saw_unknown = False
+            for v in node.values:
+                value = literal_value(v, consts, depth + 1)
+                if value is _UNKNOWN:
+                    saw_unknown = True
+                    continue
+                if bool(value):
+                    return value
+            return _UNKNOWN if saw_unknown else False
+        saw_unknown = False
+        for v in node.values:
             value = literal_value(v, consts, depth + 1)
             if value is _UNKNOWN:
-                return _UNKNOWN
-            if bool(value) is wants:
+                saw_unknown = True
+                continue
+            if not bool(value):
                 return value
-        return literal_value(node.values[-1], consts, depth + 1)
+        return _UNKNOWN if saw_unknown else True
+    if isinstance(node, ast.Compare) and len(node.ops) == 1:
+        # `assert x == x` / `x is x` / `x != x` — mesmo operando estrutural
+        # (Name/atributo/literal, nunca Call não-determinístico) decide sem
+        # conhecer o valor (B1).
+        l, r = node.left, node.comparators[0]
+        if ast.dump(l) == ast.dump(r) and not _contains_call(l):
+            same = isinstance(node.ops[0], (ast.Eq, ast.Is))
+            diff = isinstance(node.ops[0], (ast.NotEq, ast.IsNot))
+            if same or diff:
+                return same
     operands, apply = [], None
     if isinstance(node, ast.UnaryOp):
         operands, apply = [node.operand], _UNARY.get(type(node.op))
@@ -394,10 +459,35 @@ def literal_value(node, consts, depth=0):
     return result if _small(result) else _UNKNOWN
 
 
+def _dotted_name(node) -> str | None:
+    """`self.ok.flag` → 'self.ok.flag'; nada que não seja Name.Attribute.*."""
+    parts = []
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def _contains_call(node) -> bool:
+    """True se a subárvore contém Call/Subscript — operandos não-determinísticos
+    não são tautologia estrutural (`f() == f()` pode divergir)."""
+    return any(isinstance(n, (ast.Call, ast.Subscript, ast.Await, ast.Yield))
+               for n in ast.walk(node))
+
+
 def _bound_names(target):
-    """Every plain name this assignment target binds."""
+    """Every binding key this assignment target binds — nome puro E chave
+    pontilhada de atributo (`self.ok` → 'self.ok'; B4 laundering)."""
     if isinstance(target, ast.Name):
         yield target.id
+    elif isinstance(target, ast.Attribute):
+        dotted = _dotted_name(target)
+        if dotted is not None:
+            yield dotted
     elif isinstance(target, (ast.Tuple, ast.List)):
         for e in target.elts:
             yield from _bound_names(e)
@@ -421,31 +511,32 @@ def _each_binding(body):
 
 
 def constant_bindings(body, inherited=None, shadowed=()):
-    """Map each name bound ONLY to literals in this scope to its literal node.
+    """Map each bound name to its binding HISTORY: [(lineno, literal|None), ...]
+    em ordem de aparição. `None` = binding não-literal naquele ponto.
 
-    Extracting an expected value to a name is the cheapest idiom swap there is —
-    it changes the wording of a test without changing what it proves — so a
-    constant-bound name must contribute exactly what the inline literal
-    contributed. A name bound anywhere in the same scope to something else (a
-    call, an attribute, a loop variable) is never constant, whichever binding is
-    written first. `shadowed` names — this test's own parameters — drop any
-    inherited module constant of the same name, so a fixture value is never read
-    as a literal; rebinding a parameter to a literal still makes it constant,
-    because that is the same hoist one step further along.
+    Resolução é POR-PONTO (F4 banca v6): `ok = True; assert ok; ok = compute()`
+    — a rebind tardia em 12 não lava a tautologia do assert em 8. O estado do
+    nome numa linha é o ÚLTIMO binding ≤ essa linha: literal → constante;
+    não-literal ou inexistente → não-constante. `shadowed` (parâmetros do
+    teste) entram como binding não-literal na linha -1 — um valor de fixture
+    nunca lê como literal.
     """
-    const, real = dict(inherited or {}), set()
+    const: dict[str, list[tuple[int, object]]] = {}
+    if inherited:
+        for n, hist in inherited.items():
+            const[n] = list(hist)
     for n in shadowed:
-        const.pop(n, None)
+        const[n] = [(-1, None)]
     for targets, value in _each_binding(body):
         literal = value is not None and is_literal(value)
+        ln = getattr(targets[0] if targets else value, "lineno", -1)
         for t in targets:
             for n in _bound_names(t):
-                if literal:
-                    if n not in real:
-                        const[n] = value
-                else:
-                    real.add(n)
-                    const.pop(n, None)
+                const.setdefault(n, []).append((ln, value if literal else None))
+    # _each_binding não garante ordem de fonte — o "último binding ≤ uso" só
+    # é correto com histórico ordenado por linha.
+    for hist in const.values():
+        hist.sort(key=lambda e: e[0])
     return const
 
 
@@ -587,26 +678,62 @@ def call_cannot_fail(name, args, scope):
     """
     if name in ("assertTrue", "assertFalse") and args:
         return const_truth(args[0], scope) is (name == "assertTrue")
-    if name in ("assertEqual", "assertEquals", "assertNotEqual") and len(args) >= 2:
-        left, right = (literal_value(a, scope.consts) for a in args[:2])
-        if left is _UNKNOWN or right is _UNKNOWN:
-            return False
-        try:
-            same = bool(left == right)
-        except Exception:
-            return False
-        return same if name != "assertNotEqual" else not same
+    _EQ_POS = {"assertEqual", "assertEquals", "assertIs", "assertDictEqual",
+               "assertListEqual", "assertTupleEqual", "assertSetEqual",
+               "assertMultiLineEqual", "assertSequenceEqual", "assertCountEqual",
+               "assertAlmostEqual"}
+    _EQ_NEG = {"assertNotEqual", "assertIsNot", "assertNotAlmostEqual"}
+    if name in _EQ_POS | _EQ_NEG and len(args) >= 2:
+        # assertEqual(x, x) / assertIs(obj, obj) — tautologia por identidade,
+        # sem literal nenhum: mesma expressão dos dois lados nunca falha.
+        if ast.dump(args[0]) == ast.dump(args[1]):
+            return name in _EQ_POS
+        if name in ("assertEqual", "assertEquals", "assertNotEqual"):
+            left, right = (literal_value(a, scope.consts) for a in args[:2])
+            if left is _UNKNOWN or right is _UNKNOWN:
+                return False
+            try:
+                same = bool(left == right)
+            except Exception:
+                return False
+            return same if name != "assertNotEqual" else not same
     return False
 
 
-def can_propagate(body, helpers, b, scope):
+def can_propagate(body, helpers, b, scope, exc_name=None):
     """True when a broad handler body can still turn the test red.
 
     An `assert` counts only when it could fail: a constant-true assert is the
     one-token evasion off `except Exception: pass`, and it eats the failure
     identically — as does the same tautology written `self.assertTrue(True)`.
+    `exc_name` é o nome de `except ... as e`: a exceção capturada é sempre
+    truthy, logo `assert e` é tautologia que não propaga (B5). Um
+    `try: raise; except: pass` interno também não propaga — a raise está
+    contida se todos os handlers internos são broad-e-engolem.
     """
-    for node in own_scope(body):
+    if exc_name:
+        scope = scope._replace(
+            consts={**scope.consts,
+                    exc_name: [(-1, ast.Constant(value=True))]})
+    nodes = list(own_scope(body))
+    # Spans de corpo de try cujos handlers TODOS engolem — raises/asserts
+    # dentro desses spans estão contidos e não propagam.
+    swallowed = []
+    for node in nodes:
+        if isinstance(node, ast.Try) and node.handlers and node.body:
+            if all(is_broad(h.type, b)
+                   and not can_propagate(h.body, helpers, b, scope, h.name)
+                   for h in node.handlers):
+                swallowed.append((node.body[0].lineno,
+                                  getattr(node.body[-1], "end_lineno", -1)))
+
+    def _inside_swallowed(n):
+        ln = getattr(n, "lineno", -1)
+        return any(a <= ln <= bb for a, bb in swallowed)
+
+    for node in nodes:
+        if _inside_swallowed(node):
+            continue
         if isinstance(node, ast.Raise):
             return True
         if isinstance(node, ast.Assert):
@@ -629,6 +756,20 @@ def can_propagate(body, helpers, b, scope):
     return False
 
 
+def is_constant_tautology(node):
+    """Verifica se a expressão de teste é uma tautologia constante óbvia (ex: assert True, assert 1 == 1, assert not False)."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.UnaryOp) and isinstance(node.operand, ast.Constant):
+        return True
+    if isinstance(node, ast.Compare):
+        if isinstance(node.left, ast.Constant) and all(isinstance(c, ast.Constant) for c in node.comparators):
+            return True
+    if isinstance(node, ast.BoolOp) and all(isinstance(v, ast.Constant) for v in node.values):
+        return True
+    return False
+
+
 def classify(fn, helpers, b, module_consts, class_consts):
     """Return (real_assertions, mock_assertions, swallow_reason_or_None)."""
     real = mock = 0
@@ -638,14 +779,32 @@ def classify(fn, helpers, b, module_consts, class_consts):
                   assigned_values(fn.body), class_consts)
     for node in own_scope(fn.body):
         if isinstance(node, ast.Assert):
-            if observes_only_mock([node.test], scope):
+            # const_truth resolve `ok = True; assert ok` / `assert not done`
+            # (done=False) — a mesma tautologia que is_constant_tautology pega
+            # em literais, mas através de nomes vinculados (C2-banca).
+            if is_constant_tautology(node.test) or const_truth(node.test, scope) is True:
+                pass
+            elif observes_only_mock([node.test], scope):
                 mock += 1
             else:
                 real += 1
         elif isinstance(node, ast.ExceptHandler):
-            if not swallow and is_broad(node.type, b) and not can_propagate(node.body, helpers, b, scope):
+            if not swallow and is_broad(node.type, b) and not can_propagate(node.body, helpers, b, scope, node.name):
                 swallow = "broad except whose body cannot propagate — the test cannot go red"
         elif isinstance(node, (ast.With, ast.AsyncWith)):
+            # A17 (banca v16): `with pytest.raises(E):`/`assertRaises`/`fail()`
+            # é a forma canônica de asserção negativa — conta como asserção.
+            for _i in node.items:
+                _ce = _i.context_expr
+                _f = _ce.func if isinstance(_ce, ast.Call) else None
+                _attr = (_f.attr if isinstance(_f, ast.Attribute)
+                         else (_f.id if isinstance(_f, ast.Name) else ""))
+                _base = (_f.value.id if isinstance(_f, ast.Attribute)
+                         and isinstance(_f.value, ast.Name) else None)
+                if (_attr in ("raises", "assertRaises", "assertWarns",
+                              "assertLogs", "warns")
+                        or (_attr == "fail" and _base in b.pytest_mods)):
+                    real += 1
             if not swallow and any(suppresses_broadly(i.context_expr, b) for i in node.items):
                 swallow = "suppress() of a broad exception — the test cannot go red"
         elif isinstance(node, ast.Call):
@@ -655,6 +814,14 @@ def classify(fn, helpers, b, module_consts, class_consts):
                 if UNITTEST_ASSERT.match(f.attr) and base in SELF_NAMES:
                     if observes_only_mock(node.args + [k.value for k in node.keywords], scope):
                         mock += 1
+                    elif (
+                        f.attr in ("assertTrue", "assertFalse")
+                        and node.args
+                        and is_constant_tautology(node.args[0])
+                    ):
+                        pass
+                    elif call_cannot_fail(f.attr, node.args, scope):
+                        pass
                     else:
                         real += 1
                 elif f.attr in PYTEST_ASSERT and base in b.pytest_mods:
@@ -872,6 +1039,36 @@ class RecordingParser(argparse.ArgumentParser):
         raise SystemExit(2)
 
 
+def scan_test_file(path: Path, helpers):
+    """Escaneia UM arquivo de teste. Retorna (scanned_count, findings) ou None.
+
+    `None` sinaliza erro de leitura/parse — jamais findings vazios por erro.
+    Função pura extraída de `run()` para o adapter incremental da Wave 7:
+    mesmas regras, mesmo formato de findings `(veredito, path, _Fn, why)`.
+    """
+    f = Path(path)
+    if f.suffix.lower() != ".py":
+        return scan_polyglot(f, helpers)
+    try:
+        tree = ast.parse(f.read_text(encoding="utf-8-sig"), filename=str(f))
+    except (OSError, SyntaxError, ValueError, RecursionError) as e:
+        print(f"error: cannot parse {f}: {e} ({_RECORD})", file=sys.stderr)
+        return None
+    b = bindings(tree)
+    module_consts = constant_bindings(tree.body)
+    scanned, findings = 0, []
+    for fn, class_consts in test_functions(tree, class_constants(tree)):
+        scanned += 1
+        real, mock, swallow = classify(fn, helpers, b, module_consts, class_consts)
+        if real == 0 and mock == 0:
+            findings.append(("NO-ASSERTION", f, fn, "executes code, asserts nothing"))
+        elif real == 0:
+            findings.append(("MOCK-ONLY", f, fn, f"{mock} assertion(s) on the double, none on the code under test"))
+        if swallow:
+            findings.append(("SWALLOWED", f, fn, swallow))
+    return scanned, findings
+
+
 def run(argv):
     global _RECORD
     ap = RecordingParser(description="Flag tests that execute code without asserting on it.")
@@ -897,30 +1094,12 @@ def run(argv):
 
     scanned, findings = 0, []
     for f in files:
-        # [HENKE-PATCH] .py segue o caminho AST original; demais linguagens usam o lexer.
-        if f.suffix.lower() != ".py":
-            n, poly_findings = scan_polyglot(f, helpers)
-            if n is None:
-                return 2
-            scanned += n
-            findings.extend(poly_findings)
-            continue
-        try:
-            tree = ast.parse(f.read_text(encoding="utf-8-sig"), filename=str(f))
-        except (OSError, SyntaxError, ValueError, RecursionError) as e:
-            print(f"error: cannot parse {f}: {e} ({excusal})", file=sys.stderr)
+        out = scan_test_file(f, helpers)
+        if out is None:
             return 2
-        b = bindings(tree)
-        module_consts = constant_bindings(tree.body)
-        for fn, class_consts in test_functions(tree, class_constants(tree)):
-            scanned += 1
-            real, mock, swallow = classify(fn, helpers, b, module_consts, class_consts)
-            if real == 0 and mock == 0:
-                findings.append(("NO-ASSERTION", f, fn, "executes code, asserts nothing"))
-            elif real == 0:
-                findings.append(("MOCK-ONLY", f, fn, f"{mock} assertion(s) on the double, none on the code under test"))
-            if swallow:
-                findings.append(("SWALLOWED", f, fn, swallow))
+        n, file_findings = out
+        scanned += n
+        findings.extend(file_findings)
 
     if not scanned:
         print(f"error: no test functions found — nothing to audit ({excusal})", file=sys.stderr)

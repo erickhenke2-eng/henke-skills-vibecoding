@@ -36,6 +36,8 @@ import hashlib
 import io
 import json
 import os
+import re
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 from pathlib import Path
 import subprocess
 import sys
@@ -55,6 +57,14 @@ for _p in (str(_HERE), str(_SCRIPTS)):
 
 import repo_signals as _rs  # noqa: E402
 import hazard_scan as _hs   # noqa: E402
+
+# A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
+# no ambiente redirecionariam o git dos vereditos para outro repo/index.
+_GIT_ENV = {k: v for k, v in os.environ.items() if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                or k.startswith("LD_") or k.startswith("DYLD_")
+                or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                         "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                         "DOTNET_STARTUP_HOOKS"))}
 
 VALID_PROFILES = ("quick", "standard", "deep")
 VALID_UNIT_STATUS = ("pending", "covered", "finding_confirmed", "needs_validation", "deferred", "out_of_scope")
@@ -183,7 +193,11 @@ def verify_ledger(
     if not isinstance(data, dict) or "units" not in data or "metadata" not in data:
         return False, ["SCHEMA-ERR: campos obrigatórios 'metadata' e 'units' ausentes"], {}
 
+    # H3 (banca v15): units null/lista e metadata não-dict explodiam em
+    # traceback exit 1 (código de veredito-vermelho) — schema validado.
     meta = data["metadata"]
+    if not isinstance(meta, dict) or not isinstance(data["units"], list):
+        return False, ["SCHEMA-ERR: 'metadata' deve ser objeto e 'units' lista"], {}
     profile = meta.get("profile", "standard")
     if profile not in VALID_PROFILES:
         return False, [f"SCHEMA-ERR: profile inválido '{profile}'"], {}
@@ -204,11 +218,26 @@ def verify_ledger(
     counts = {s: 0 for s in VALID_UNIT_STATUS}
     unenforced_assumptions = 0
 
+    seen_paths: set = set()
     for u in units:
+        if not isinstance(u, dict):
+            # F35 (banca v11): entrada não-dict explodia com traceback exit 1
+            # — crash veste código de veredito-vermelho; erro validado é 2.
+            errors.append(f"INVALID-UNIT: entrada não-objeto {u!r:.60}")
+            continue
         uid = u.get("unit_id", "<sem-id>")
         rel = u.get("path", "")
         status = u.get("status", "")
         mapped_paths.add(rel)
+        # H3 (banca v14): unidades duplicadas do mesmo path inflavam o
+        # denominador — 10 arquivos + 10 dups "covered" = 90% verde falso.
+        if isinstance(rel, str) and rel:
+            if rel in seen_paths:
+                errors.append(f"DUPLICATE-PATH [{uid}]: '{rel}' repetida no ledger")
+            seen_paths.add(rel)
+        # M12 (banca v14): path não-string explodia/virava lixo no mapping.
+        elif rel:
+            errors.append(f"INVALID-UNIT [{uid}]: 'path' não-string {rel!r:.40}")
 
         if status not in VALID_UNIT_STATUS:
             errors.append(f"INVALID-STATUS [{uid}]: status '{status}' desconhecido")
@@ -220,8 +249,13 @@ def verify_ledger(
                 errors.append(f"STALE-DELETED [{uid}]: arquivo '{rel}' não existe mais no disco")
         else:
             cur_sha, _ = _file_sha256_and_lines(disk_files[rel])
-            if cur_sha != u.get("sha256") and status in ("covered", "finding_confirmed", "needs_validation"):
-                errors.append(f"STALE-HASH [{uid}]: arquivo '{rel}' mudou após a auditoria (sha256 divergente)")
+            # A10 v12 + H4 v14: sha checado p/ todo status E OBRIGATÓRIO —
+            # omitir o campo desligava o detector de mutação.
+            if u.get("sha256"):
+                if cur_sha != u.get("sha256"):
+                    errors.append(f"STALE-HASH [{uid}]: arquivo '{rel}' mudou após a auditoria (sha256 divergente)")
+            else:
+                errors.append(f"MISSING-SHA [{uid}]: unidade de arquivo existente exige 'sha256'")
 
         if status == "pending":
             errors.append(f"PENDING-UNIT [{uid}]: unidade '{rel}' permaneceu 'pending'")
@@ -233,6 +267,10 @@ def verify_ledger(
             if not isinstance(checks, list) or not checks:
                 errors.append(f"EMPTY-CHECKS [{uid}]: unidade 'covered' exige pelo menos 1 check em 'checks[]'")
             for chk in checks if isinstance(checks, list) else []:
+                if not isinstance(chk, dict):
+                    # A13 (banca v12): chk não-dict explodia com traceback.
+                    errors.append(f"INVALID-CHECK [{uid}]: check não-objeto")
+                    continue
                 if not chk.get("agent_id") or not chk.get("invariant") or not chk.get("result"):
                     errors.append(f"INCOMPLETE-CHECK [{uid}]: check exige 'agent_id', 'invariant' e 'result'")
                 if chk.get("method") not in ("source", "local"):
@@ -246,12 +284,24 @@ def verify_ledger(
                             errors.append(f"INVALID-ASSUMPTION [{uid}]: cada assumption exige 'text' e status in {VALID_ASSUMPTION_STATUS}")
                         elif a.get("status") == "unenforced":
                             unenforced_assumptions += 1
+        elif status in ("finding_confirmed", "needs_validation"):
+            # F5 (banca v11): status que contam como "auditados" não podem
+            # ser inventados sem evidência — exigem checks[] como 'covered'.
+            checks = u.get("checks", [])
+            if not isinstance(checks, list) or not checks:
+                errors.append(
+                    f"EMPTY-CHECKS [{uid}]: unidade '{status}' exige pelo menos "
+                    "1 check em 'checks[]' — status auditado sem evidência é "
+                    "verde fabricado")
 
     for disk_rel in sorted(set(disk_files.keys()) - mapped_paths):
         errors.append(f"UNMAPPED-FILE: arquivo in-scope '{disk_rel}' não pertence a nenhuma unidade do ledger")
 
     # 2. Validação dos findings (fp-check gates + checagem física de file:line)
     for idx, f in enumerate(data.get("findings", [])):
+        if not isinstance(f, dict):
+            errors.append(f"INVALID-FINDING: finding #{idx} não-objeto")
+            continue
         fid = f.get("id", f"finding-{idx}")
         fstatus = f.get("status")
         if fstatus == "finding_confirmed":
@@ -265,10 +315,21 @@ def verify_ledger(
                 errors.append(f"FINDING-NO-TRACE [{fid}]: finding_confirmed exige 'trace[]' (source -> sink)")
             else:
                 for step in trace:
+                    # H3 (banca v15): step não-dict/file não-str explodia.
+                    if not isinstance(step, dict):
+                        errors.append(f"INVALID-TRACE [{fid}]: step não-objeto")
+                        continue
                     tf = step.get("file", "")
+                    if not isinstance(tf, str):
+                        errors.append(f"INVALID-TRACE [{fid}]: file não-string")
+                        continue
                     tline = step.get("line", 0)
                     tpath = (root / tf).resolve()
-                    if not tpath.is_file():
+                    root_res = root.resolve()
+                    if root_res not in (tpath, *tpath.parents):
+                        errors.append(
+                            f"FABRICATED-FILE [{fid}]: arquivo '{tf}' do trace escapa a raiz do repo")
+                    elif not tpath.is_file():
                         errors.append(f"FABRICATED-FILE [{fid}]: arquivo '{tf}' citado no trace não existe")
                     else:
                         _, max_ln = _file_sha256_and_lines(tpath)
@@ -295,34 +356,74 @@ def verify_ledger(
     # 3b. Anti-diluição por diretório: teto de out_of_scope avaliado por pasta-pai
     # (impede concentrar código perigoso no core/ diluindo com DTOs auditáveis na ui/).
     # Diretórios com menos de `min_dir_units` unidades são isentos.
-    dir_totals: dict[str, int] = {}
-    dir_oos: dict[str, int] = {}
+    # A12 (banca v12): unidades duplicadas do mesmo path diluíam o teto
+    # out_of_scope — conta caminhos distintos, não unidades.
+    dir_totals: dict[str, set] = {}
+    dir_oos: dict[str, set] = {}
     for u in units:
         if u.get("status") not in VALID_UNIT_STATUS:
             continue
         parent = u.get("path", "").replace("\\", "/").rsplit("/", 1)[0] or "."
-        dir_totals[parent] = dir_totals.get(parent, 0) + 1
+        dir_totals.setdefault(parent, set()).add(u.get("path", ""))
         if u.get("status") == "out_of_scope":
-            dir_oos[parent] = dir_oos.get(parent, 0) + 1
+            dir_oos.setdefault(parent, set()).add(u.get("path", ""))
     for d in sorted(dir_totals):
-        if dir_totals[d] >= min_dir_units:
-            d_pct = 100.0 * dir_oos.get(d, 0) / dir_totals[d]
+        if len(dir_totals[d]) >= min_dir_units:
+            d_pct = 100.0 * len(dir_oos.get(d, set())) / len(dir_totals[d])
             if d_pct > max_oos_per_dir_pct:
                 errors.append(
                     f"DILUTED-OUT-OF-SCOPE: diretório '{d}/' tem {d_pct:.1f}% de unidades fora de escopo "
-                    f"({dir_oos.get(d, 0)}/{dir_totals[d]}) excedendo o teto por-diretório de {max_oos_per_dir_pct:.1f}%")
+                    f"({len(dir_oos.get(d, set()))}/{len(dir_totals[d])}) excedendo o teto por-diretório de {max_oos_per_dir_pct:.1f}%")
 
     # 3c. Arquivo criado na própria PR não pode ser out_of_scope (diluição por nascença).
     if against:
+        # F7: --against precisa resolver pra um commit — sem validação, uma ref
+        # inválida/`--opt` falha o diff silenciosamente e o NEW-FILE-OUT-OF-SCOPE
+        # nunca dispara (bypass do portão).
+        if against.startswith("-") or not against.strip():
+            errors.append(f"INVALID-AGAINST: ref '--against' inválida: {against!r}")
+        else:
+            _rc = subprocess.run(
+                ["git", "rev-parse", "--verify", f"{against}^{{commit}}"],
+                cwd=str(root), capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                env=_GIT_ENV,
+            )
+            if _rc.returncode != 0:
+                errors.append(f"INVALID-AGAINST: ref '{against}' não resolve para commit")
         res_added = subprocess.run(
-            ["git", "-c", "core.quotePath=false", "diff", "--name-status", against, "--"],
+            ["git", "-c", "core.quotePath=false",
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "diff", "--name-status", "-z", against, "--"],
             cwd=str(root), capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=_GIT_ENV,
         )
-        if res_added.returncode == 0:
-            added_files = {
-                ln.split("\t")[-1].strip().replace("\\", "/")
-                for ln in res_added.stdout.splitlines() if ln.startswith("A\t")
-            }
+        # A14 (banca v12): diff falho caía silencioso — NEW-FILE-OUT-OF-SCOPE
+        # nunca avaliado. Falha de enumeração é erro validado (fail-closed).
+        if res_added.returncode != 0:
+            errors.append(
+                f"DIFF-FAILED: 'git diff --name-status {against}' retornou "
+                f"rc={res_added.returncode} — checagem de arquivos novos "
+                "indisponível")
+        else:
+            # F28 (banca v11): -z — nomes com tab/newline não quebram o parse.
+            # A11 (banca v12): arquivo literalmente chamado 'A'/'R'/'C' era
+            # confundido com status e dessincronizava o stream — status tem
+            # forma ^[A-Z]\d{0,3}$, paths são consumidos por contagem fixa.
+            toks = res_added.stdout.split("\0")
+            added_files: set[str] = set()
+            i_tok = 0
+            while i_tok < len(toks) - 1:
+                st = toks[i_tok]
+                if not re.fullmatch(r"[A-Z]\d{0,3}", st or ""):
+                    break  # dessincronizado — não inventa
+                code = st[:1]
+                if code in ("R", "C"):
+                    i_tok += 3
+                else:
+                    if code == "A":
+                        added_files.add(toks[i_tok + 1].strip().replace("\\", "/"))
+                    i_tok += 2
             for u in units:
                 rel_u = u.get("path", "").replace("\\", "/")
                 if u.get("status") == "out_of_scope" and rel_u in added_files:
@@ -345,8 +446,9 @@ def verify_ledger(
     outcome = "verified" if not errors else "failed"
     if not errors and (profile == "deep" or require_critic) and not has_critic:
         outcome = "partial"
-        if require_critic:
-            errors.append("MISSING-CRITIC: profile/flag exige pelo menos 1 passagem em 'critic_passes[]'")
+        # profile=deep SEM critic completo é veredito incompleto — 'partial' não
+        # pode vestir exit 0 como se fosse verde (M52-banca).
+        errors.append("MISSING-CRITIC: profile/flag exige pelo menos 1 passagem em 'critic_passes[]'")
 
     summary = {
         "outcome": outcome,
@@ -372,7 +474,7 @@ def render_gaps_markdown(ledger_path: Path) -> str:
     gaps: list[str] = []
     for u in data.get("units", []):
         st = u.get("status")
-        if st in ("deferred", "out_of_scope", "pending"):
+        if st in ("deferred", "out_of_scope", "pending", "needs_validation"):
             rsn = (u.get("reason") or "sem justificativa registrada").strip()
             gaps.append(f"- `{u.get('path')}` (`{st}`): {rsn}")
     for f in data.get("findings", []):
@@ -409,7 +511,11 @@ def main() -> None:
     p_ren = sub.add_parser("render-gaps", help="Gera a seção Markdown 'O que NÃO foi verificado'")
     p_ren.add_argument("ledger", help="Caminho do arquivo ledger.json")
 
-    args = ap.parse_args()
+    try:
+        args = ap.parse_args()
+    except SystemExit:
+        # --help sai 0 no argparse — um portão sem veredito nunca é verde.
+        sys.exit(2)
     try:
         if args.cmd == "init":
             root = Path(args.root)
@@ -426,6 +532,18 @@ def main() -> None:
             if not lpath.is_file():
                 print(f"ERRO: ledger não encontrado: {lpath}", file=sys.stderr)
                 sys.exit(2)
+            import math
+            # nan/inf desligam comparações (`pct < nan` é sempre False) — flag
+            # numérica não-finita é configuração malformada, não threshold
+            # válido: erro de uso → exit 2, nunca passa despercebida (A14-banca).
+            for _flag_name, _flag_val in (
+                ("--min-pct", args.min_pct),
+                ("--max-out-of-scope-pct", args.max_out_of_scope_pct),
+                ("--max-out-of-scope-per-dir-pct", args.max_oos_per_dir_pct),
+            ):
+                if not math.isfinite(_flag_val) or _flag_val < 0:
+                    print(f"ERRO: {_flag_name}={_flag_val} não é percentual finito >= 0.", file=sys.stderr)
+                    sys.exit(2)
             r_over = Path(args.root) if args.root else None
             ok, errors, summary = verify_ledger(
                 lpath, root_override=r_over, min_pct=args.min_pct, require_critic=args.require_critic,

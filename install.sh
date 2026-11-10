@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Instalador da Suíte Henke (Linux / macOS) - PROTOCOLO v3.4
+# Instalador da Suíte Henke (Linux / macOS) - PROTOCOLO v4.0
 # Valida o pacote, prepara cópias e restaura arquivos se houver erro de escrita.
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,0 +1,12 @@
+{
+  "policy": "balanced",
+  "always_ask": [
+    "publish",
+    "destructive",
+    "metaconfig"
+  ],
+  "auto_approve": [
+    "non-publish"
+  ],
+  "allowed_cmds": []
+}

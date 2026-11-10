@@ -24,10 +24,17 @@ Exit: 0 ok · 2 uso/IO/entrada malformada (fail closed; nunca fabrica sinal).
 import argparse
 import ast
 import json
+import math
 import os
+os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisoning (banca v10 A2)
 import subprocess
 import sys
 from pathlib import Path
+
+_SUITE_ROOT = Path(__file__).resolve().parents[1]
+if str(_SUITE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SUITE_ROOT))
+from scripts.state_paths import sanitized_child_env  # noqa: E402
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -82,7 +89,8 @@ def funcs_in_py(path: Path):
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError, UnicodeDecodeError) as e:
-        print(f"WARN: {path}: {e} (pulado)", file=sys.stderr)
+        # SKIP-PARSE: marker que o gate_pipeline traduz em falha (grafo incompleto)
+        print(f"SKIP-PARSE: {path}: {e} (pulado)", file=sys.stderr)
         return
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -93,26 +101,58 @@ def iter_functions(path: Path):
     """yield (nome, lineno, complexidade) em qualquer linguagem suportada."""
     ext = path.suffix.lower()
     if ext == ".py":
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError) as e:
+            print(f"SKIP-PARSE: {path}: {e} (pulado)", file=sys.stderr)
+            return
         for fn in funcs_in_py(path):
             yield fn.name, fn.lineno, complexity_py(fn)
+        # A5 (banca v9): decisões FORA de função (top-level do módulo ou corpo
+        # de classe) contam — inlining do corpo de uma função no módulo não
+        # pode zerar a métrica para enganar o ratchet.
+        for stmt in tree.body:
+            subs = stmt.body if isinstance(stmt, ast.ClassDef) else [stmt]
+            for sub in subs:
+                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                c = complexity_py(sub)
+                if c > 1:
+                    yield "<top-level>", sub.lineno, c
     elif ext in pg.C_EXTS:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
-            print(f"WARN: {path}: {e} (pulado)", file=sys.stderr)
+            print(f"SKIP-PARSE: {path}: {e} (pulado)", file=sys.stderr)
             return
         lang = ".rs" if ext == ".rs" else ".go" if ext == ".go" else ext
-        for name, sl, el, body in pg.find_functions(text, ext):
-            yield name, sl, pg.complexity_masked(body, ext)
+        func_rows = list(pg.find_functions(text, ext))
+        fsum = 0
+        for name, sl, el, body in func_rows:
+            c = pg.complexity_masked(body, ext)
+            fsum += c - 1
+            yield name, sl, c
+        # Mesmo princípio: decisões fora de função em C-like não podem ser
+        # invisíveis (aproximação: decisões totais − decisões das funções).
+        top_dec = max(0, (pg.complexity_masked(text, ext) - 1) - fsum)
+        if top_dec > 0:
+            yield "<top-level>", 1, top_dec + 1
 
 
 def cmd_churn(args):
-    cmd = ["git", "-C", args.repo, "log", "--no-merges", "--numstat",
+    cmd = ["git", "-C", args.repo,
+           "-c", "core.fsmonitor=false", "-c", "diff.external=",
+           "log", "--no-merges", "--numstat",
            "--format=__C__%H"]
     if args.order == "oldest-first":
         cmd.append("--reverse")
     res = subprocess.run(cmd, capture_output=True, text=True,
-                         encoding="utf-8", errors="replace")
+                         encoding="utf-8", errors="replace", timeout=60,
+                         # A19 (banca v12): GIT_* herdado lia outro repo.
+                         # Delta-F6: âncora = args.repo, não o CWD — se o
+                         # processo roda fora do repo, PATH entries dentro
+                         # do repo sobreviviam e mintavam o churn.
+                         env=sanitized_child_env(Path(args.repo).resolve()))
     if res.returncode != 0:
         _fail(f"git log falhou: {res.stderr.strip()[:200]}")
     sha, count = None, 0
@@ -151,11 +191,17 @@ def load_coverage(path):
             if line.startswith("SF:"):
                 cur = line[3:].strip()
             elif line.startswith("LF:") and cur:
-                lf = int(line[3:].strip() or 0)
+                try:
+                    lf = int(line[3:].strip() or 0)
+                except ValueError:
+                    lf = 0
             elif line.startswith("LH:") and cur:
-                lh = int(line[3:].strip() or 0)
-                if lf:
-                    out[Path(cur).as_posix()] = round(100 * lh / lf, 2)
+                try:
+                    lh = int(line[3:].strip() or 0)
+                except ValueError:
+                    lh = 0
+                if lf > 0:
+                    out[Path(cur).as_posix()] = max(0.0, min(100.0, round(100 * lh / lf, 2)))
                 cur = None
         return out
     try:
@@ -179,11 +225,17 @@ def load_coverage(path):
         if pct is None:
             # coverage-summary.json: lines.pct / statements.pct
             pct = (fdata.get("lines") or fdata.get("statements") or {}).get("pct")
+        if isinstance(pct, bool):
+            continue
         if isinstance(pct, (int, float)):
+            # NaN/Infinity (aceitos por json.loads) envenenariam todo cálculo
+            # downstream de cobertura — rejeita e clampa a faixa válida.
+            if not math.isfinite(pct):
+                continue
             key = Path(fpath).as_posix()
             if fpath == "total":
                 continue
-            out[key] = float(pct)
+            out[key] = max(0.0, min(100.0, float(pct)))
     return out
 
 
@@ -198,7 +250,9 @@ def _cov_lookup(cov: dict, rel: str, py: Path) -> float:
     if ap in cov:
         return cov[ap]
     hits = [v for k, v in cov.items() if k.endswith("/" + rel)]
-    if hits:
+    # A10 (banca v10): sufixo ambíguo (2+ hits) creditava o hits[0]
+    # arbitrário — sem match único não há crédito.
+    if len(hits) == 1:
         return hits[0]
     by_name = [v for k, v in cov.items()
                if k == py.name or k.endswith("/" + py.name)]
@@ -247,7 +301,33 @@ def resolve_py(mod_parts, base_dir: Path, level: int):
     return None
 
 
-def py_edges(py: Path, tree, root: Path, edges):
+def _py_dynamic_imports(tree) -> list[str]:
+    """Detecta `__import__(...)` e `*.import_module(...)` — grafo estático não cobre."""
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        name = ""
+        if isinstance(f, ast.Name):
+            name = f.id
+        elif isinstance(f, ast.Attribute):
+            name = f.attr
+        if name in ("__import__", "import_module"):
+            hits.append(name)
+    return hits
+
+
+def _abs_looks_internal(root: Path, first: str) -> bool:
+    """True se o 1º componente de um import absoluto existe no repo."""
+    return (root / first).is_dir() or (root / f"{first}.py").is_file()
+
+
+def py_edges(py: Path, tree, root: Path, edges, problems=None):
+    rel = relposix(py, root)
+    if problems is not None:
+        for dyn in _py_dynamic_imports(tree):
+            problems.append((rel, f"dynamic_import:{dyn}"))
     for node in ast.walk(tree):
         targets = []
         if isinstance(node, ast.Import):
@@ -258,6 +338,7 @@ def py_edges(py: Path, tree, root: Path, edges):
             elif node.level:
                 targets = [(n.name.split("."), node.level) for n in node.names]
         for parts, level in targets:
+            resolved = None
             for base in (py.parent, root):
                 lv = max(level, base != py.parent)
                 hit = resolve_py(list(parts), base, lv)
@@ -271,36 +352,56 @@ def py_edges(py: Path, tree, root: Path, edges):
                             hit = sub
                             break
                 if hit and root in hit.parents:
-                    edges.append((relposix(py, root), relposix(hit, root)))
+                    resolved = hit
                     break
+            if resolved is not None:
+                edges.append((rel, relposix(resolved, root)))
+            elif problems is not None and level > 0:
+                problems.append((rel, f"unresolved_relative:{'.' * level}{'.'.join(parts)}"))
+            elif problems is not None and parts and _abs_looks_internal(root, parts[0]):
+                problems.append((rel, f"unresolved_internal:{'.'.join(parts)}"))
 
 
-def cmd_edges(args):
-    root = Path(args.root).resolve()
+def build_dependency_edges(root: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Extrai arestas internas de dependência + problemas por arquivo.
+
+    Retorna `(edges, problems)`:
+    - `edges`: lista deduplicada de `(from_rel, to_rel)` POSIX relativos a root.
+    - `problems`: lista de `(rel, reason)` — import interno/relativo não
+      resolvido, import dinâmico, erro de leitura ou de parse. Consumidores
+      conservadores tratam qualquer entrada como incerteza total.
+    """
+    root = Path(root).resolve()
     pkgmap = pg.build_pkgmap(root)
     gomod = pg.go_module_path(root)
-    seen, out = set(), []
+    seen, edges, problems = set(), [], []
     for f in iter_files(root):
         ext = f.suffix.lower()
+        rel = relposix(f, root)
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        except OSError as e:
+            problems.append((rel, f"read_error:{type(e).__name__}"))
             continue
         raw_edges = []
         if ext == ".py":
             try:
                 tree = ast.parse(text, filename=str(f))
-            except SyntaxError:
+            except SyntaxError as e:
+                problems.append((rel, f"syntax_error:{e.lineno or 0}"))
                 continue
-            py_edges(f, tree, root, raw_edges)
+            py_edges(f, tree, root, raw_edges, problems)
         elif ext in pg.JS_EXTS:
             for spec in pg.find_imports(text, ext):
                 hit = pg.resolve_js(spec, f.parent, root, pkgmap)
                 if hit and root in hit.parents:
-                    raw_edges.append((relposix(f, root), relposix(hit, root)))
+                    raw_edges.append((rel, relposix(hit, root)))
+                elif spec.startswith(("./", "../")):
+                    problems.append((rel, f"unresolved_relative:{spec}"))
         elif ext == ".rs":
             crate = pg.cargo_root(f, root)
             for spec in pg.find_imports(text, ext):
+                internal = spec.startswith(("mod::", "crate::", "self::", "super::"))
                 if spec.startswith("mod::"):
                     name = spec[5:]
                     cands = [f.parent / f"{name}.rs", f.parent / name / "mod.rs"]
@@ -314,26 +415,45 @@ def cmd_edges(args):
                         cands += [crate.joinpath(*parts[:-1]).with_suffix(".rs"),
                                   crate.joinpath(*parts[:-1], "mod.rs"),
                                   crate.joinpath("src", *parts[:-1]).with_suffix(".rs")]
+                hit = None
                 for c in cands:
                     if c.is_file():
-                        raw_edges.append((relposix(f, root), relposix(c.resolve(), root)))
+                        hit = c.resolve()
                         break
+                if hit is not None and root in hit.parents:
+                    raw_edges.append((rel, relposix(hit, root)))
+                elif internal:
+                    problems.append((rel, f"unresolved_internal:{spec}"))
         elif ext == ".go":
             for spec in pg.find_imports(text, ext):
-                rel = spec[len(gomod):].lstrip("/") if gomod and spec.startswith(gomod) else \
+                rel_spec = spec[len(gomod):].lstrip("/") if gomod and spec.startswith(gomod) else \
                     spec.lstrip("./") if spec.startswith("./") else None
-                if rel:
-                    d = (root / rel) if not spec.startswith("./") else (f.parent / rel)
+                if rel_spec:
+                    d = (root / rel_spec) if not spec.startswith("./") else (f.parent / rel_spec)
                     if d.is_dir():
+                        found = False
                         for g in sorted(d.glob("*.go")):
                             if not g.name.endswith("_test.go"):
-                                raw_edges.append((relposix(f, root), relposix(g.resolve(), root)))
+                                raw_edges.append((rel, relposix(g.resolve(), root)))
+                                found = True
                                 break
+                        if not found:
+                            problems.append((rel, f"unresolved_internal:{spec}"))
+                    elif spec.startswith(("./", gomod)):
+                        problems.append((rel, f"unresolved_internal:{spec}"))
         for e in raw_edges:
             if e not in seen and e[0] != e[1]:
                 seen.add(e)
-                out.append({"from": e[0], "to": e[1]})
-    print(json.dumps(out, indent=1))
+                edges.append(e)
+    return edges, problems
+
+
+def cmd_edges(args):
+    root = Path(args.root).resolve()
+    edges, problems = build_dependency_edges(root)
+    # problems seguem só no canal Python (build_dependency_edges) — stdout é
+    # JSON puro de edges para coletores (gate_pipeline/canários) parsearem.
+    print(json.dumps([{"from": a, "to": b} for a, b in edges], indent=1))
     return 0
 
 
