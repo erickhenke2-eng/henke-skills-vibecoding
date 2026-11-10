@@ -121,30 +121,16 @@ def inventory(repo):
     # — num wheel `repo` é henke_data/ e não tem scripts/, então o instalador
     # distribuído instalava wrappers sem nenhum script funcional.
     _scripts_dir = Path(__file__).resolve().parent
-    root_gate_names = [
-        "_paths.py",          # importado por vários scripts — sem ele o CLI morre
-        "gate_pipeline.py",   # invocado por henke_gates (ratchet/fence)
-        "validate_skills.py", # chamado por install_skills e doctor
-        "repo_signals.py",
-        "henke_router.py",
-        "spec_drift.py",
-        "audit_ledger.py",
-        "henke_gate.py",
-        "henke_cli.py",
-        "run_state.py",
-        "henke_auto.py",
-        "henke_detect.py",
-        "henke_gates.py",
-        "henke_report.py",
-        "henke_driver_opencode.py",
-        "henke_driver_agent.py",
-    ]
+    # Whitelist anterior apodreceu: state_paths/winpath/gate_cache/etc.
+    # ficaram de fora e o `henke` instalado morria no primeiro subprocess.
+    # Glob completo — a fonte é a própria suíte e a contenção abaixo já
+    # valida cada entrada; módulo novo nunca mais fica de fora.
+    for rel in sorted(_scripts_dir.glob("*.py")):
+        if rel.is_file():
+            files.append(Path("scripts") / rel.name)
     for rel in sorted(_scripts_dir.glob("metricas/*.py")):
         if rel.is_file():
             files.append(Path("scripts") / "metricas" / rel.name)
-    for name in root_gate_names:
-        if (_scripts_dir / name).is_file():
-            files.append(Path("scripts") / name)
     # Wrappers da CLI global `henke`: instalados em <dest>/bin/ e resolvem
     # <dest>/scripts/henke_cli.py automaticamente (caminho relativo ao bin/).
     for wrapper in (repo / "bin" / "henke", repo / "bin" / "henke.cmd"):
