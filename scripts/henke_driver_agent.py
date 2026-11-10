@@ -87,6 +87,19 @@ def _last_result_json(text: str) -> dict | None:
     return None
 
 
+def _strip_untrusted_memory(envelope: dict) -> None:
+    """Item6/P1-02: strip de campos de memória não confiável antes do
+    envelope chegar a CLI full-auto. O contrato (_build_envelope) já não
+    emite `memory` p/ driver não supervisionado, mas envelope montado à
+    mão/outra versão podia contrabandeá-la — strip incondicional aqui é
+    defesa em profundidade (in-place, idempotente)."""
+    stripped = envelope.pop("memory", None)
+    had_policy = "memory_policy" in envelope
+    envelope.pop("memory_policy", None)
+    if stripped is not None or had_policy:
+        envelope.setdefault("_sanitized", {})["memory_stripped"] = True
+
+
 def _safe_env() -> dict:
     """A4 (banca v14): adapters herdavam env cru (GIT_*/PYTHONPATH subvertem
     o CLI do agente)."""
@@ -123,6 +136,11 @@ def main() -> int:
     if not Path(repo).is_dir():
         print(json.dumps({"files_changed": [], "notes": f"repo_root inexistente: {repo!r}"}))
         return 2
+    # Item6 (driver sandbox — defesa em profundidade): TODA CLI preset é
+    # full-auto (--trust-all-tools/--full-auto/-y/accept-edits — sem humano
+    # no loop). Memória de repo é conteúdo NÃO CONFIÁVEL com potencial de
+    # prompt-injection — o adapter STRIPA antes do env_file.
+    _strip_untrusted_memory(envelope)
     # Envelope no TEMP do sistema — dentro do repo ele aparecia no git status
     # da própria run e sobrevivia a SIGKILL com o prompt inteiro (banca v9 M7).
     env_file = tempfile.NamedTemporaryFile(
