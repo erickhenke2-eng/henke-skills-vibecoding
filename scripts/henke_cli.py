@@ -776,6 +776,16 @@ def _cmd_exec(
                 # canônico ancora (B9).
                 if _is_canonical:
                     _rs.record_exec_tip(repo_root, entry_hash)
+                # P1-03: espelha no event store v2 unificado (best-effort —
+                # a custódia primária é o exec_log; falha de espelho avisa,
+                # não reprova — verify() pega divergência depois).
+                try:
+                    from scripts.event_store import append_event as _ev_app
+                    _ev_app(repo_root, "exec", {"origin": "exec_log",
+                                                "entry": log_entry})
+                except Exception as _exc_ev:
+                    print(f"AVISO: event_store mirror falhou: {_exc_ev}",
+                          file=sys.stderr)
             except (OSError, ValueError) as exc:
                 # A5 (banca v10): falha pós-append deixava rabo não-ancorado e
                 # wedgiava o log para sempre — rollback trunca a linha nova
@@ -1136,6 +1146,18 @@ def _cmd_check(
                 passed = res.exit_code in (0, 3)
                 if not passed:
                     overall_ok = False
+                # P1-03: espelha o resultado incremental no event store v2.
+                try:
+                    from scripts.event_store import append_event as _ev_app
+                    _ev_app(repo_root, "scan_result", {
+                        "scanner": scanner_id,
+                        "exit_code": res.exit_code,
+                        "full_scan": res.full_scan,
+                        "scanned": list(res.scanned_files)[:200],
+                    })
+                except Exception as _exc_ev:
+                    print(f"AVISO: event_store mirror falhou: {_exc_ev}",
+                          file=sys.stderr)
                 manifest_results[name] = {
                     "gate": name,
                     "exit_code": res.exit_code,
@@ -1207,6 +1229,17 @@ def _cmd_check(
                         repo_root=repo_root,
                     )
                     enforce_ram_limit(500.0, repo_root=repo_root)
+                    # P1-03: espelha veredito no event store v2 (best-effort).
+                    try:
+                        from scripts.event_store import append_event as _ev_app
+                        _ev_app(repo_root, "gate_result", {
+                            "key": compute_cache_key(
+                                name, script_path, gate_args, repo_root),
+                            "gate": name, "exit_code": gres.exit_code,
+                            "passed": passed})
+                    except Exception as _exc_ev:
+                        print(f"AVISO: event_store mirror falhou: {_exc_ev}",
+                              file=sys.stderr)
                 cached_results[idx] = {
                     "gate": name,
                     "exit_code": gres.exit_code,
