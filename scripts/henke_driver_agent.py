@@ -158,7 +158,9 @@ def main() -> int:
             pass
         argv[0] = exe
         if os.name == "nt" and exe.lower().endswith((".cmd", ".bat")):
-            argv = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", *argv]
+            # A7 (banca v16): COMSPEC envenenado executava binário arbitrário
+            # no wrap .cmd/.bat — literal igual ao henke_cli.
+            argv = ["cmd.exe", "/d", "/s", "/c", *argv]
         try:
             res = subprocess.run(
                 argv, cwd=repo, capture_output=True, text=True,

@@ -77,6 +77,10 @@ _HOMOGLYPHS = str.maketrans({
     "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ǫ": "q", "ʀ": "r",
     "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v", "ᴡ": "w", "ʏ": "y",
     "ᴢ": "z",
+    # banca v16 — A6: Cherokee/Lisu que sobrevivem ao NFKD.
+    "Ꮯ": "c", "Ꮇ": "m", "Ꮐ": "g", "Ꭲ": "i", "Ꮤ": "t", "Ꮪ": "d",
+    "Ꮠ": "s", "Ꭴ": "u", "Ᏻ": "y", "Ꮎ": "n", "Ꮢ": "r", "Ꮓ": "z",
+    "ꓯ": "l", "ꓪ": "o", "ꓫ": "o",
 })
 
 
@@ -84,8 +88,10 @@ _HOMOGLYPHS = str.maketrans({
 _PUNCT_FOLDS = str.maketrans({
     "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
     "−": "-", "﹘": "-", "﹣": "-",
+    # banca v16 — A6: hífen bala/maqaf/modifier/heavy-minus sobreviviam.
+    "⁃": "-", "־": "-", "˗": "-", "➖": "-",
     "∕": "/", "⁄": "/",
-    "꞉": ":", "˸": ":", "։": ":",
+    "꞉": ":", "˸": ":", "։": ":", "∶": ":",
     "․": ".", "‥": "..",
     "＼": "\\",
 })
@@ -292,6 +298,22 @@ DESTRUCTIVE_SIGNALS = (
     "format o:", "format p:", "format q:", "format r:", "format s:",
     "format t:", "format u:", "format v:", "format w:", "format x:",
     "format y:", "format z:",
+    # banca v16 — A1: mesma lacuna lexical do auto (listas precisam espelhar).
+    "formata", "formatar", "formato", "formatando", "formatem",
+    "detona", "detonar", "detonei", "detonando", "estoura", "arregaça",
+    "reformat", "reformatar", "deleter",
+    "format a drive", "format the drive", "format the disk",
+    "format drive", "format disk", "format usb", "format pendrive",
+    "formata o disco", "formata o hd", "formatar o disco", "formatar o pendrive",
+    "format /", "diskpart", "fdisk", "newfs", "mke2fs", "blkdiscard",
+    "wipefs", "srm", "secure erase", "hdparm --security-erase",
+    "dd if", "dd bs", "dd count", "dd conv",
+    "switch -f", "switch --force", "stash clear", "reflog expire",
+    "update-ref -d", "filter-branch", "filter-repo",
+    "clear-content", "clear-disk", "remove-partition", "remove-volume",
+    "remove-physicaldisk", "robocopy /mir", "robocopy /purge",
+    "torch the", "gut the", "axe the", "scrap the", "annihilate",
+    "decimate", "vaporize", "torch o", "destrói",
 )
 _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 

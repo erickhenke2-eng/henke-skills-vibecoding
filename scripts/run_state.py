@@ -217,7 +217,15 @@ def _config_dir() -> Path:
             _cfg2 = cfg.resolve()
             if _repo is not None and (_cfg2 == _repo or _repo in _cfg2.parents):
                 # fail-closed: usa tempdir do sistema, nunca dentro do repo
-                cfg = Path(tempfile.gettempdir()) / f"henke-{os.getlogin() if os.name != 'nt' else 'u'}"
+                # A2b (banca v16): getlogin() lança OSError sem TTY (CI/
+                # container) — uid/env como fallback, nunca o cfg envenenado.
+                try:
+                    _who = os.getlogin()
+                except OSError:
+                    _who = (os.environ.get("USER") or os.environ.get("USERNAME")
+                            or (str(os.getuid()) if hasattr(os, "getuid")
+                                else str(os.getpid())))
+                cfg = Path(tempfile.gettempdir()) / f"henke-{_who}"
     except OSError:
         pass
     return cfg
@@ -445,6 +453,7 @@ def _load_evidence_manifest(run_id: str, run_path: Path | None = None) -> dict |
 # de nascimento e verify_run_file re-ancora antes de confiar.
 _ANCHORED_FIELDS = ("mode", "mandatory_gates", "requires_human_auth",
                     "gates_required", "driver", "spec_path", "ignored_start",
+                    "untracked_start",
                     "prompt", "route_snapshot")
 # `approval_binding` fica de fora de propósito: approve_run o muta
 # legitimamente (re-ancora head). O que o binding cobre (prompt/route/driver
@@ -574,6 +583,30 @@ _GIT_ENV = {k: v for k, v in os.environ.items()
                              "DOTNET_STARTUP_HOOKS"))}
 
 
+def _git_env_for(repo_root: Path) -> dict:
+    """_GIT_ENV + PATH filtrado: entradas relativas ou dentro do repo
+    resolveriam `git` PLANTADO — binário hostil rodava dentro do custodiante
+    (A4 banca v15/v16)."""
+    env = dict(_GIT_ENV)
+    try:
+        rr = Path(repo_root).resolve()
+    except OSError:
+        rr = Path(repo_root)
+    parts = []
+    for d in env.get("PATH", "").split(os.pathsep):
+        if not d or not os.path.isabs(d):
+            continue
+        try:
+            dr = Path(d).resolve()
+        except OSError:
+            continue
+        if dr == rr or rr in dr.parents:
+            continue
+        parts.append(d)
+    env["PATH"] = os.pathsep.join(parts)
+    return env
+
+
 def _git_head(repo_root: Path) -> str | None:
     """HEAD atual do repo (None se git indisponível/sem commits — nunca inventa)."""
     try:
@@ -582,7 +615,7 @@ def _git_head(repo_root: Path) -> str | None:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "rev-parse", "HEAD"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=10, env=_GIT_ENV,
+            timeout=10, env=_git_env_for(repo_root),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -601,7 +634,7 @@ def _git_ignored(repo_root: Path) -> list[str] | None:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              "status", "--porcelain", "-uall", "--ignored", "-z"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=30, env=_GIT_ENV,
+            timeout=30, env=_git_env_for(repo_root),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -610,6 +643,29 @@ def _git_ignored(repo_root: Path) -> list[str] | None:
     return sorted(
         ent[3:].strip() for ent in (res.stdout or "").split("\0")
         if ent.startswith("!! ") and ent[3:].strip()
+    )
+
+
+def _git_untracked(repo_root: Path) -> list[str] | None:
+    """Arquivos untracked não-ignorados (status -uall → '??').
+    A2 (banca v16): baseline cobria só ignorados — deletar `??` era invisível
+    a todo portão de diff (nunca foi tracked, some do conjunto). None = git
+    indisponível."""
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "status", "--porcelain", "-uall", "-z"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, env=_git_env_for(repo_root),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if res.returncode != 0:
+        return None
+    return sorted(
+        ent[3:].strip() for ent in (res.stdout or "").split("\0")
+        if ent.startswith("?? ") and ent[3:].strip()
     )
 
 
@@ -910,7 +966,10 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     # e a evidência vivia fora da custódia.
     try:
         _ev_parent = (p.parent.parent / "evidence")
-        if _ev_parent.is_symlink() or evidence_root.parent.parent != p.parent.parent:
+        # A14 (banca v16): junction Windows não é symlink — is_junction.
+        _linked = _ev_parent.is_symlink() or (
+            getattr(_ev_parent, "is_junction", lambda: False)())
+        if _linked or evidence_root.parent.parent != p.parent.parent:
             tampered.append(
                 "EVIDENCE-UNANCHORED: '.henke/evidence' é symlink/junction "
                 "ou resolve fora do repo — custódia inválida")
@@ -1111,6 +1170,7 @@ def init_run(
         "spec_sha256": spec_sha256,
         "head_start": head_start,
         "ignored_start": _git_ignored(repo_root),
+        "untracked_start": _git_untracked(repo_root),
         "created_at": now,
         "updated_at": now,
         "requires_human_auth": bool(requires_human_auth),
@@ -1185,7 +1245,10 @@ def record_gate(
         evidence_path = Path(str(evidence_file))
         if not evidence_path.is_file():
             raise FileNotFoundError(f"evidence-file inexistente: {evidence_path}")
-        evidence_sha = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+        # A12 (banca v16): hash aqui + read_bytes() na cópia = DUAS leituras
+        # (wedge EVIDENCE-TAMPERED por TOCTOU). O sha sai do MESMO buffer
+        # confinado — computado dentro do lock.
+        evidence_sha = None
 
     with _file_lock(run_path):
         data = _load_run(run_path)
@@ -1219,6 +1282,7 @@ def record_gate(
                     # bytes confinados (wedge EVIDENCE-TAMPERED permanente).
                     ev_bytes = resolved.read_bytes()
                     confined.write_bytes(ev_bytes)
+                    evidence_sha = hashlib.sha256(ev_bytes).hexdigest()
                 except OSError as exc:
                     raise ValueError(f"falha ao confinar evidência: {exc}") from exc
                 evidence_path = confined
@@ -1234,6 +1298,10 @@ def record_gate(
                     raise ValueError(
                         f"mesmo arquivo-fonte já registrado pelo portão '{other}'"
                     )
+            if evidence_sha is None:
+                # Já confinada (sem cópia): hash dos bytes atuais, uma leitura.
+                evidence_sha = hashlib.sha256(
+                    evidence_path.read_bytes()).hexdigest()
         entry: dict = {
             "exit_code": int(exit_code),
             "summary": summary,

@@ -792,6 +792,19 @@ def classify(fn, helpers, b, module_consts, class_consts):
             if not swallow and is_broad(node.type, b) and not can_propagate(node.body, helpers, b, scope, node.name):
                 swallow = "broad except whose body cannot propagate — the test cannot go red"
         elif isinstance(node, (ast.With, ast.AsyncWith)):
+            # A17 (banca v16): `with pytest.raises(E):`/`assertRaises`/`fail()`
+            # é a forma canônica de asserção negativa — conta como asserção.
+            for _i in node.items:
+                _ce = _i.context_expr
+                _f = _ce.func if isinstance(_ce, ast.Call) else None
+                _attr = (_f.attr if isinstance(_f, ast.Attribute)
+                         else (_f.id if isinstance(_f, ast.Name) else ""))
+                _base = (_f.value.id if isinstance(_f, ast.Attribute)
+                         and isinstance(_f.value, ast.Name) else None)
+                if (_attr in ("raises", "assertRaises", "assertWarns",
+                              "assertLogs", "warns")
+                        or (_attr == "fail" and _base in b.pytest_mods)):
+                    real += 1
             if not swallow and any(suppresses_broadly(i.context_expr, b) for i in node.items):
                 swallow = "suppress() of a broad exception — the test cannot go red"
         elif isinstance(node, ast.Call):

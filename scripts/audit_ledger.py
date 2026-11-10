@@ -34,8 +34,17 @@ HAZARDOUS_PATTERNS = [
      r"\brobocopy\b[^|;&]*/mir\b|\bcipher\b[^|;&]*/w\b",
      "Comando destrutivo de disco/arquivos proibido"),
     (r"\b(?:certutil|bitsadmin|msbuild|msiexec|installutil|regsvcs)\b[^|;&]*"
-     r"(?:-urlcache|/transfer|/i\b[^|;&]*http|http)",
+     r"(?:-urlcache|/transfer|/i\b[^|;&]*http|http|-decode|-encode)",
      "LOLBin de download/execução proibido"),
+    # A11 (banca v16): powershell -c/-Command/-File/-i não são '-e*';
+    # rm isolado com -r OU -f; install/exec de pacote remoto = code-exec.
+    (r"\b(?:powershell|pwsh)\b[^|;&]*-(?:c|co|com|comm|command|f|fi|fil|file|i|inputformat)\b",
+     "powershell com comando/arquivo (-c/-f) proibido"),
+    (r"\brm\b[^|;&]*(?:-\w*r\b|--recursive\b|-\w*f\b|--force\b)",
+     "rm com flag destrutiva (-r/-f isolado) proibido"),
+    (r"\bnpx\b|\b(?:npm|pnpm|yarn)\s+(?:i|install|add|ci|dlx|exec)\b|"
+     r"\bpip[\d.]*\s+install\b|\bcargo\s+install\b|\bgem\s+install\b",
+     "Instalação/execução de pacote remoto (postinstall/dlx) proibida"),
     (r"\b(?:npm|pnpm|yarn)\s+publish\b", "Comando de publicação (publish) proibido em ledger"),
     (r"\b(?:pip|twine)\s+upload\b", "Comando de upload de pacote proibido em ledger"),
     (r"\bchmod\s+(?:-R\s+)?777\b", "Permissão insegura 777 detectada"),
@@ -93,6 +102,16 @@ def _npm_script_name(cmd: str) -> str | None:
     """Extrai o nome do script npm via tokenizer — pula runner, flags e os
     argumentos das flags que tomam valor separado."""
     toks = cmd.strip().split()
+    # A5 (banca v16): wrappers escondiam o runner — `env npm test`,
+    # `sudo npm install`, `nice -n5 npm t`, `timeout 10 npm run x`,
+    # `cmd /c npm t` devolviam None e os hooks ficavam invisíveis.
+    _WRAPPERS = {"env", "sudo", "doas", "nice", "nohup", "timeout", "time"}
+    while toks and toks[0].lower() in _WRAPPERS:
+        toks.pop(0)
+        while toks and (toks[0].startswith("-") or "=" in toks[0]):
+            toks.pop(0)  # flags e VAR=val do wrapper
+    if len(toks) >= 2 and toks[0].lower() in ("cmd", "cmd.exe") and toks[1] == "/c":
+        toks = toks[2:]
     if not toks or not re.fullmatch(
             r"(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?",
             toks[0], re.IGNORECASE):
@@ -104,11 +123,22 @@ def _npm_script_name(cmd: str) -> str | None:
             if flag in _NPM_FLAGS_TAKING_ARG and t:
                 t.pop(0)  # argumento separado da flag
     _skip_flags(toks)
-    if toks and toks[0] == "run":
+    if toks and toks[0] in ("run", "run-script", "rum"):
         toks.pop(0)
         # M2 (banca v15): `npm run -s build` — flags também depois de 'run'.
         _skip_flags(toks)
-    return toks[0] if toks else None
+    script = toks[0] if toks else None
+    # A5 (banca v16): aliases executam o lifecycle do nome REAL —
+    # `npm t` roda pretest/test/posttest, `npm i`/`npm ci`/`npm add` rodam
+    # preinstall/install/postinstall. Devolve o nome canônico.
+    _ALIAS = {"t": "test", "tst": "test",
+              "i": "install", "add": "install", "in": "install",
+              "ins": "install", "inst": "install", "insta": "install",
+              "instal": "install", "isntall": "install", "ci": "install",
+              "cit": "install", "it": "install"}
+    if script is not None:
+        script = _ALIAS.get(script.lower(), script)
+    return script
 # M8 (banca v13): shapes de teste fora do regex declaravam testes sem nenhum
 # registro exigido — cobre `npm run test`, runners via npx/deno/dotnet/ctest.
 _TEST_CMD_RE = re.compile(
@@ -355,6 +385,17 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
         return [f"UNVERIFIED_EXECUTION_EVIDENCE: '{log_p}' está vazio."]
     errors, _last, verified_records = _verify_log_chain_core(raw_lines, log_p)
 
+    # A9 (banca v16): denylist nunca tocava os records do exec_log —
+    # `henke exec -- cmd /c "del /s /q x"` ficava custodiado e nunca sinalizado.
+    for j, vrec in enumerate(verified_records, 1):
+        vcmd = str(vrec.get("cmd", ""))
+        for pattern, reason in HAZARDOUS_PATTERNS:
+            if re.search(pattern, vcmd, flags=re.IGNORECASE):
+                errors.append(
+                    f"EXEC-LOG-HAZARDOUS: comando #{j} no exec_log viola "
+                    f"denylist: '{vcmd[:120]}' ({reason})")
+                break
+
     for i, entry in enumerate(entries, 1):
         if not isinstance(entry, dict):
             continue
@@ -417,6 +458,13 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
         cmd = entry.get("cmd", "")
         if not cmd:
             errors.append(f"Entrada #{i} sem comando ('cmd') especificado.")
+            continue
+        # A10 (banca v16): cmd lista/dict virava repr ("['rm', '-rf']") que
+        # nenhum padrão casava — schema exige string, fail-closed.
+        if not isinstance(cmd, str):
+            errors.append(
+                f"Entrada #{i} com 'cmd' não-string ({type(cmd).__name__}) "
+                "— formato inválido, recusado.")
             continue
 
         full_cmd = _full_command_str(entry)

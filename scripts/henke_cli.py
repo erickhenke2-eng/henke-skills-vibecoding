@@ -187,7 +187,7 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
     git_res = subprocess.run(
         ["git", "--version"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
+    env=_scrub_env())
     git_ok = git_res.returncode == 0
     missing_scripts = [name for name, p in sorted(GATE_MAP.items()) if not p.is_file()]
     expected_skills = 58
@@ -215,6 +215,21 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
     return 0 if report["status"] == "ok" else 1
 
 
+def _scrub_env() -> dict:
+    """Env sanitizado para subprocessos de custódia (A6 banca v16):
+    _cmd_check/_cmd_init/_derive_outcome/doctor herdavam PYTHONPATH/GIT_*/
+    PATH integral — sitecustomize plantado fabricava vereditos."""
+    e = {k: v for k, v in os.environ.items()
+         if not (k.upper().startswith(("PYTHON", "LD_", "DYLD_", "GIT_",
+                                       "NODE_", "BASH_ENV", "ZDOTDIR",
+                                       "NPM_CONFIG_"))
+                 or k in ("VIRTUAL_ENV", "ENV", "PATHEXT", "ComSpec",
+                          "PSModulePath", "CDPATH"))}
+    e["PYTHONUTF8"] = "1"
+    e["PYTHONIOENCODING"] = "utf-8"
+    return e
+
+
 def _cmd_init(repo_root: Path) -> int:
     henke_dir = repo_root / ".henke"
     (henke_dir / "runs").mkdir(parents=True, exist_ok=True)
@@ -233,7 +248,7 @@ def _cmd_init(repo_root: Path) -> int:
             text=True,
             encoding="utf-8",
             errors="replace",
-        )
+        env=_scrub_env())
 
     print(f"OK: Suíte Henke inicializada em {repo_root} (.henke/ e docs/designs/ prontos).")
     return 0
@@ -274,7 +289,33 @@ _NON_TEST_CMDS = {
 }
 
 
+_AL_MOD_CACHE = None
+
+
+def _audit_ledger_mod():
+    """audit_ledger por path explícito (fonte única de is_test_cmd — A13 v16)."""
+    global _AL_MOD_CACHE
+    if _AL_MOD_CACHE is not None:
+        return _AL_MOD_CACHE
+    try:
+        import importlib.util as _ilu
+        _p = Path(__file__).resolve().with_name("audit_ledger.py")
+        _sp = _ilu.spec_from_file_location("henke_audit_ledger2", str(_p))
+        _m = _ilu.module_from_spec(_sp) if _sp else None
+        if _m is not None:
+            _sp.loader.exec_module(_m)  # type: ignore[union-attr]
+        _AL_MOD_CACHE = _m
+    except Exception:
+        _AL_MOD_CACHE = None
+    return _AL_MOD_CACHE
+
+
 def is_test_command(cmd_tokens: list[str], cmd_str: str) -> bool:
+    # A13 (banca v16): mint×audit divergentes wedgiavam o LEDGER —
+    # audit_ledger.is_test_cmd é a fonte única de verdade.
+    _al = _audit_ledger_mod()
+    if _al is not None and hasattr(_al, "is_test_cmd"):
+        return bool(_al.is_test_cmd(cmd_str))
     """Verifica se o comando executado é de fato um runner de testes legítimo."""
     tokens = list(cmd_tokens)
     # Desenrola wrappers comuns de shell como cmd.exe /c ou bash -c
@@ -451,7 +492,7 @@ def _cmd_exec(
                 pass
             exec_tokens[0] = resolved
         elif (os.name == "nt" and not resolved
-              and exec_tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls")):
+              and exec_tokens[0].lower() in ("echo", "dir", "type", "cls")):
             # A6 (banca v14): `cmd /c` re-parseia o rabo — `echo ok & calc`
             # executava o segundo comando mesmo com builtin "inocente".
             if any(re.search(r"[&|<>^%\"]", str(t)) for t in exec_tokens):
@@ -515,6 +556,17 @@ def _cmd_exec(
         with _rs._file_lock(exec_log_path):
             prev_hash = "0" * 64
             _last = None
+            # A3 (banca v16): log DELETADO regenerava gênese e re-ancorava a
+            # ponta — história inteira apagada sem vestígio. Se a âncora
+            # diz que já existiu execução, gênese nova é forja.
+            if _is_canonical and not (
+                    exec_log_path.is_file() and exec_log_path.stat().st_size):
+                _tip = _rs.load_exec_tip(repo_root)
+                if _tip is not None:
+                    print("ERRO: exec_log ausente/vazio mas âncora de ponta "
+                          "existe — log foi apagado/truncado. Recusado; "
+                          "restaure o log ou reset explícito.", file=sys.stderr)
+                    return 2
             if exec_log_path.is_file():
                 # A1 (banca v9): ANTES de encadear, a cadeia existente tem que
                 # verificar — append sobre um log plantado lavaria a âncora da
@@ -808,7 +860,7 @@ def _cmd_check(
             encoding="utf-8",
             errors="replace",
             timeout=300,
-        )
+        env=_scrub_env())
         # exit 3 = n/a honesto (portão rodou, nada a verificar) — não é falha,
         # mesma semântica de run_state/henke_gates; nunca conta como verde.
         passed = res.returncode in (0, 3)
@@ -874,7 +926,7 @@ def _derive_outcome_safe(run_path: Path, run_data: dict) -> str:
         res = subprocess.run(
             [sys.executable, str(SCRIPTS_DIR / "run_state.py"), "verify", "--json", str(run_path)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
+        env=_scrub_env())
         payload = json.loads(res.stdout or "{}")
         derived = payload.get("derived_outcome")
         if derived:
@@ -960,7 +1012,7 @@ def _cmd_run(argv_list: list[str]) -> int:
         run_state_main = None
     if run_state_main is not None:
         return run_state_main(argv_list)
-    res = subprocess.run([sys.executable, str(SCRIPTS_DIR / "run_state.py"), *argv_list])
+    res = subprocess.run([sys.executable, str(SCRIPTS_DIR / "run_state.py"), *argv_list], env=_scrub_env())
     return res.returncode
 
 

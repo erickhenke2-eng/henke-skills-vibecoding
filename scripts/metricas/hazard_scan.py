@@ -125,7 +125,9 @@ _URL_CRED_RE = re.compile(
     r"amqps?|ldaps?|ssh|git\+https?|ftps?)://"
     r"([A-Za-z0-9._%-]+):([^/\s'\"@]{3,})@([A-Za-z0-9.-]+)")
 _SQL_INTERP_PY_RE = re.compile(
-    r"""(?ix)\b(?:f['"]{1,3}|['"]{1,3}[^'"]*%s)[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*(?:\{[^}]+\}|['"]\s*%\s*\w)"""
+    # A1 (banca v16): SQL canônica tem `'` dentro da f-string —
+    # `WHERE n='{x}'` quebrava o [^'"]*; tail tolera ' e cobre .format/%(
+    r"""(?ix)\b(?:f['"]{1,3}|['"]{1,3}[^'"]*%s)[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^"{]*(?:\{[^}]+\}|\{\}\s*['"]?\s*\.format\s*\(|['"]\s*%\s*[\w(])"""
 )
 _SQL_INTERP_JS_RE = re.compile(
     r"""(?ix)`[^`]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^`]*\$\{[^}]+\}[^`]*`"""
@@ -183,7 +185,11 @@ _JS_CP_ALIAS_RE = re.compile(
     r"|\b(?:import\s+\{[^}]*\b(?:exec|execSync|spawn|fork|execFile)\s+as\s+(\w+)"
     r"[^}]*\}\s*from\s*['\"](?:node:)?child_process['\"]"
     r"|(?:const|let|var)\s*\{[^}]*\b(?:exec|execSync|spawn|fork|execFile)"
-    r"\s*:\s*(\w+)[^}]*\}\s*=\s*require\s*\()")
+    r"\s*:\s*(\w+)[^}]*\}\s*=\s*require\s*\()"
+    # A2 (banca v16): `const mycp = require('child_process')` — módulo
+    # inteiro num alias qualquer → usado como receptor `mycp.exec(u)`.
+    r"|(?:const|let|var)\s+(\w+)\s*=\s*require\s*\(\s*['\"](?:node:)?"
+    r"child_process['\"]\s*\)")
 _JS_SHELL_ARGV0_RE = re.compile(
     r"\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*['\"]"
     r"(?:[^'\"]*[\\/])?(?:sh|bash|zsh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?)['\"]")
@@ -777,7 +783,7 @@ def _scan_excluded_json(path: Path, max_bytes: int
     try:
         if path.stat().st_size > max_bytes:
             return 0, [], True
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8-sig")  # A7 v16: BOM → wedge
     except (OSError, UnicodeDecodeError):
         return 0, [], True
     out: list[tuple[str, str, str, str]] = []
@@ -824,7 +830,7 @@ def scan_file(path: Path, extra_exts: set | None = None,
     if size > max_bytes:
         return 0, [], True
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8-sig")  # A7 v16: BOM → wedge
     except UnicodeDecodeError:
         try:
             _b = path.read_bytes()
@@ -968,7 +974,7 @@ def scan_file(path: Path, extra_exts: set | None = None,
             add("SHELL-INJECTION", lineno, f"line:{lineno}",
                 "spawn/execFile com argv0 de shell literal")
         for _am in _JS_CP_ALIAS_RE.finditer(no_comments):
-            _al = _am.group(1) or _am.group(2)
+            _al = _am.group(1) or _am.group(2) or _am.group(5)
             if _al:
                 _al_re = re.compile(
                     r"\b" + re.escape(_al)

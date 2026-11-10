@@ -378,6 +378,24 @@ def run_gates(repo_root: str, gates: list[str], run_id: str | None = None,
     # pai primeiro — um `python.exe` plantado no worktree hostil sequestraria
     # o subprocesso do portão (F-06 banca v7).
     child_env["NoDefaultCurrentDirectoryInExePath"] = "1"
+    # A4 (banca v16): PATH com entrada relativa ou dentro do repo resolvia
+    # `git` plantado → portões liam stdout forjado (diff vazio/status limpo).
+    try:
+        _rr = Path.cwd().resolve()
+        _parts = []
+        for _d in child_env.get("PATH", "").split(os.pathsep):
+            if not _d or not os.path.isabs(_d):
+                continue
+            try:
+                _dr = Path(_d).resolve()
+            except OSError:
+                continue
+            if _dr == _rr or _rr in _dr.parents:
+                continue
+            _parts.append(_d)
+        child_env["PATH"] = os.pathsep.join(_parts)
+    except OSError:
+        pass
 
     spec_path: Path | None = None
     spec_hash: str | None = None

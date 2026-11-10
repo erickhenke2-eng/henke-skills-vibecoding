@@ -166,6 +166,23 @@ DESTRUCTIVE_VERBS = (
     "format o:", "format p:", "format q:", "format r:", "format s:",
     "format t:", "format u:", "format v:", "format w:", "format x:",
     "format y:", "format z:", "format d:",
+    # banca v16 — A1: lacuna lexical (gírias PT, format bare, ferramentas de
+    # disco, git destrutivo, PS, verbos EN qualificados p/ evitar FP).
+    "formata", "formatar", "formato", "formatando", "formatem",
+    "detona", "detonar", "detonei", "detonando", "estoura", "arregaça",
+    "reformat", "reformatar", "deleter",
+    "format a drive", "format the drive", "format the disk",
+    "format drive", "format disk", "format usb", "format pendrive",
+    "formata o disco", "formata o hd", "formatar o disco", "formatar o pendrive",
+    "format /", "diskpart", "fdisk", "newfs", "mke2fs", "blkdiscard",
+    "wipefs", "srm", "secure erase", "hdparm --security-erase",
+    "dd if", "dd bs", "dd count", "dd conv",
+    "switch -f", "switch --force", "stash clear", "reflog expire",
+    "update-ref -d", "filter-branch", "filter-repo",
+    "clear-content", "clear-disk", "remove-partition", "remove-volume",
+    "remove-physicaldisk", "robocopy /mir", "robocopy /purge",
+    "torch the", "gut the", "axe the", "scrap the", "annihilate",
+    "decimate", "vaporize", "torch o", "destrói",
 )
 METACONFIG_SIGNALS = (
     "package.json", "package-lock", "lockfile", "requirements", "pyproject",
@@ -215,6 +232,10 @@ _HOMOGLYPHS = str.maketrans({
     "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ǫ": "q", "ʀ": "r",
     "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v", "ᴡ": "w", "ʏ": "y",
     "ᴢ": "z",
+    # banca v16 — A6: Cherokee/Lisu que sobrevivem ao NFKD (espelhar router).
+    "Ꮯ": "c", "Ꮇ": "m", "Ꮐ": "g", "Ꭲ": "i", "Ꮤ": "t", "Ꮪ": "d",
+    "Ꮠ": "s", "Ꭴ": "u", "Ᏻ": "y", "Ꮎ": "n", "Ꮢ": "r", "Ꮓ": "z",
+    "ꓯ": "l", "ꓪ": "o", "ꓫ": "o",
 })
 
 
@@ -223,8 +244,10 @@ _HOMOGLYPHS = str.maketrans({
 _PUNCT_FOLDS = str.maketrans({
     "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
     "−": "-", "﹘": "-", "﹣": "-",
+    # banca v16 — A6: hífen bala/maqaf/modifier/heavy-minus (espelhar router).
+    "⁃": "-", "־": "-", "˗": "-", "➖": "-",
     "∕": "/", "⁄": "/",
-    "꞉": ":", "˸": ":", "։": ":",
+    "꞉": ":", "˸": ":", "։": ":", "∶": ":",
     "․": ".", "‥": "..",
     "＼": "\\",
 })
@@ -325,6 +348,22 @@ def _child_env() -> dict:
     # Windows — um `git.exe`/`npm.cmd` plantado no repo seria executado por
     # driver `cmd:`/agent:/test_cmd/git interno. Remove o CWD do path de busca.
     env["NoDefaultCurrentDirectoryInExePath"] = "1"
+    # A4 (banca v16): PATH com entrada relativa ou dentro do repo resolvia
+    # `git`/`npm` plantado → portões e auditoria liam stdout forjado. Mesma
+    # regra do `henke exec`: remove CWD e dirs que resolvem no repo.
+    _rr = Path.cwd().resolve()
+    _parts = []
+    for _d in env.get("PATH", "").split(os.pathsep):
+        if not _d or not os.path.isabs(_d):
+            continue
+        try:
+            _dr = Path(_d).resolve()
+        except OSError:
+            continue
+        if _dr == _rr or _rr in _dr.parents:
+            continue
+        _parts.append(_d)
+    env["PATH"] = os.pathsep.join(_parts)
     return env
 
 
@@ -1733,6 +1772,26 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                             e[3:].strip() for e in _si.stdout.split("\0")
                             if e.startswith("!! ") and e[3:].strip()
                         }
+                        # A2 (banca v16): untracked `??` deletado também é
+                        # invisível — mesmo output já traz os '??'. (append
+                        # DEPOIS do sorted() pra não ser sobrescrito)
+                        _gone_ut: list[str] = []
+                        _ut_start = None
+                        if isinstance(_sc, dict):
+                            _ut_start = (_sc.get("fields") or {}).get("untracked_start")
+                        if _ut_start is None and isinstance(_rd, dict):
+                            _ut_start = _rd.get("untracked_start")
+                        if _ut_start is not None:
+                            cur_ut = {
+                                e[3:].strip() for e in _si.stdout.split("\0")
+                                if e.startswith("?? ") and e[3:].strip()
+                            }
+                            _gone_ut = [
+                                f"{p} (untracked deletado)"
+                                for p in set(_ut_start) - cur_ut
+                                if (not p.startswith(".henke/")
+                                    or p.lower() in _never_declared)
+                                and p not in declared]
                         # F-4 (banca v12): '.henke/' gitignored isentava TUDO —
                         # driver regravava fence/coverage/policy invisível.
                         # Os never-declared vazam do filtro e viram undeclared.
@@ -1752,6 +1811,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                             and p not in declared
                         )
                         new_ignored += [f"{p} (deletado)" for p in gone_ignored]
+                        new_ignored += _gone_ut
                     elif _si.returncode != 0:
                         # A8 (banca v14): git rc!=0 = enumeração indisponível,
                         # não "nada ignorado" — a auditoria NÃO rodou.
@@ -1858,9 +1918,13 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
     if isinstance(_allowed, str):
         _allowed = [_allowed]  # string solta não vira prefixo-por-caractere
     _allowed_set = {" ".join(str(p).split()) for p in _allowed if str(p).strip()}
+    _norm_cmd = " ".join(str(test_cmd).split()) if test_cmd else None
+    # A3 (banca v16): ANALISAR apresenta a run como read-only mas rodava
+    # test_cmd com allowlist vazia (default-allow) — comando arbitrário do
+    # PROJECT.json executava sem cerimônia. Em ANALISAR, só roda se listado.
     _test_cmd_rejected = bool(
-        _allowed_set and test_cmd
-        and " ".join(str(test_cmd).split()) not in _allowed_set)
+        _norm_cmd and _norm_cmd not in _allowed_set
+        and (_allowed_set or is_analisar))
     _gate_test_cmd = None if _test_cmd_rejected else test_cmd
     gates_timeout = float(timeout_opt) if timeout_opt else 300.0
     if not math.isfinite(gates_timeout):
