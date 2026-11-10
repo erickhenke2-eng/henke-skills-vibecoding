@@ -47,313 +47,25 @@ for _s in (sys.stdout, sys.stderr, sys.stdin):
             pass
 
 
-# Homoglifos cross-script que sobrevivem ao NFKD como Ll — "dеlеta" com
-# е cirílico (U+0435) não casa \bdeleta\b (banca v9 — A2). Dobramos os
-# confusáveis comuns para Latin ANTES do NFKD; a direção é fail-safe
-# (só aumenta matching, nunca reduz).
-_HOMOGLYPHS = str.maketrans({
-    "а": "a", "е": "e", "ё": "e", "о": "o", "р": "p", "с": "c", "х": "x",
-    "у": "y", "і": "i", "ї": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ԛ": "q",
-    "һ": "h", "к": "k", "м": "m", "н": "n", "т": "t", "в": "b", "г": "r",
-    "п": "n", "э": "e", "з": "3", "ҝ": "k", "օ": "o", "ո": "n", "ս": "u",
-    "ɡ": "g", "ɩ": "i", "ο": "o", "α": "a", "β": "b", "γ": "y", "δ": "d",
-    "ε": "e", "ζ": "z", "η": "n", "ι": "i", "κ": "k", "μ": "u", "ν": "v",
-    "ρ": "p", "τ": "t", "υ": "u", "χ": "x", "ω": "w", "ϲ": "c", "ϳ": "j",
-    "А": "a", "В": "b", "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
-    "Р": "p", "С": "c", "Т": "t", "Х": "x", "І": "i",
-    # Latim estendido/armênio/IPA que a tabela não cobria (banca v10 — A5):
-    "ɑ": "a", "ɛ": "e", "ı": "i", "ե": "e", "ռ": "r", "ʀ": "r",
-    "ɢ": "g", "ʟ": "l", "ɴ": "n", "ɵ": "o", "ɸ": "o", "χ": "x",
-    # Leetspeak/dígitos-homoglifos (banca v11 — A3): 'd3l3t3', 'w1p3'
-    # dobram para a letra óbvia antes da comparação de termos.
-    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
-    "@": "a", "$": "s", "!": "i",
-    # A2 v14 + ALTO-1 v15 (idêntico ao henke_auto): ϵ/є, leet 2/6/8/9,
-    # small-caps. '|'→espaço (não letra — fundia sinal ao vizinho).
-    "ϵ": "e", "є": "e", "ε": "e", "2": "z", "6": "b", "8": "b", "9": "g",
-    "|": " ", "Ꭰ": "a",
-    "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f",
-    "ɢ": "g", "ʜ": "h", "ɪ": "i", "ᴊ": "j", "ᴋ": "k", "ʟ": "l",
-    "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ǫ": "q", "ʀ": "r",
-    "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v", "ᴡ": "w", "ʏ": "y",
-    "ᴢ": "z",
-    # banca v16 — A6: Cherokee/Lisu que sobrevivem ao NFKD.
-    "Ꮯ": "c", "Ꮇ": "m", "Ꮐ": "g", "Ꭲ": "i", "Ꮤ": "t", "Ꮪ": "d",
-    "Ꮠ": "s", "Ꭴ": "u", "Ᏻ": "y", "Ꮎ": "n", "Ꮢ": "r", "Ꮓ": "z",
-    "ꓯ": "l", "ꓪ": "o", "ꓫ": "o",
-})
-
-
-# ALTO-3 (banca v13): variantes Unicode de pontuação — ver henke_auto._norm.
-_PUNCT_FOLDS = str.maketrans({
-    "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
-    "−": "-", "﹘": "-", "﹣": "-",
-    # banca v16 — A6: hífen bala/maqaf/modifier/heavy-minus sobreviviam.
-    "⁃": "-", "־": "-", "˗": "-", "➖": "-",
-    "∕": "/", "⁄": "/",
-    "꞉": ":", "˸": ":", "։": ":", "∶": ":",
-    "․": ".", "‥": "..",
-    "＼": "\\",
-})
-
-
-def _norm(text: str) -> str:
-    # Whitespace exótico (NBSP U+00A0, U+2000–U+200A, U+202F, U+3000, tab,
-    # espaço duplo) quebra sinais multi-palavra ("git\u00A0push --force" evade
-    # "git push" — banca v9 A3): todo Zs vira espaço e \s+ colapsa para um.
-    folded = text.translate(_HOMOGLYPHS).translate(_PUNCT_FOLDS)
-    nfkd = unicodedata.normalize("NFKD", folded.lower())
-    # Além de marcas combinantes: caracteres de FORMATO/controle invisíveis
-    # (Cf/Cc/Cs/Co/Cn — ZWSP U+200B, ZWJ, WJ, BOM, soft-hyphen) quebram o \b
-    # do _has_signal sem mudar a aparência para o humano — "dele​ta" evade
-    # DESTRUCTIVE_VERBS (banca v7 — F-04).
-    stripped = "".join(
-        " " if c.isspace() or unicodedata.category(c) == "Zs" else c
-        for c in nfkd
-        if c.isspace()
-        or (not unicodedata.combining(c)
-            and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn",
-                                               "Mn", "Mc", "Me"))
+# Vocabulário destrutivo/PUBLISH + normalização/matchers — FONTE ÚNICA em
+# scripts/security_signals.py (P1-04): antes eram duas cópias divergentes
+# (router 343 sinais destrutivos vs auto 277, cada fix exigia espelhamento).
+# União estritamente mais forte — sinal novo entra em security_signals.
+try:
+    from scripts.security_signals import (  # noqa: F401
+        _HOMOGLYPHS, _PUNCT_FOLDS, _norm, _has_signal,
+        _FLEX_ARTICLES, _FLEX_ARTICLE_RE, _FLEX_GENDER_SUF,
+        _flex_word, _flex_pattern, _has_flex_signal,
+        DESTRUCTIVE_SIGNALS, PUBLISH_ONLY_SIGNALS, PUBLISH_SIGNALS,
     )
-    return re.sub(r"\s+", " ", stripped)
-
-
-def _has_signal(text: str, sig: str) -> bool:
-    """Verifica sinal com word-boundary para palavras simples, evitando colisões (check vs checklist)."""
-    sig_clean = sig.strip()
-    if not sig_clean:
-        return False
-    if re.fullmatch(r"[\w-]+", sig_clean):
-        if re.search(r"\b" + re.escape(sig_clean) + r"\b", text):
-            return True
-    else:
-        prefix = r"\b" if sig_clean[0].isalnum() else ""
-        suffix = r"\b" if sig_clean[-1].isalnum() else ""
-        if re.search(prefix + re.escape(sig_clean) + suffix, text):
-            return True
-    # F-1 (banca v12): idêntico ao henke_auto — fragmentação intra-palavra
-    # ("de-lete", "de\nlete", "dropTable") evade \b; sinal compactado casa
-    # por igualdade exata contra tokens e pares adjacentes compactados.
-    # A1 (banca v14): idêntico ao henke_auto — alfabeto por-sinal mantém a
-    # pontuação do sinal no compacto ("checkout--" só casa com '-' no texto).
-    _allowed = set("abcdefghijklmnopqrstuvwxyz0123456789") | {
-        ch for ch in sig_clean if not ch.isalnum() and ch != " "}
-    sig_compact = "".join(ch for ch in sig_clean if ch in _allowed)
-    # ALTO-2/MÉDIO-5 (banca v13) + A3 (v14): >=3 fragmentos, tokens vazios,
-    # [_./\\] em identificadores; range em vez de fatia (era O(n²)).
-    if len(sig_compact) >= 2:
-        toks: list[str] = []
-        for _t in re.split(r"\s+", text):
-            for _seg in re.split(r"[_./\\]+", _t):
-                _seg = "".join(ch for ch in _seg if ch in _allowed)
-                if _seg:
-                    toks.append(_seg)
-        for i in range(len(toks)):
-            acc = toks[i]
-            if acc == sig_compact:
-                return True
-            for j in range(i + 1, len(toks)):
-                if len(acc) >= len(sig_compact):
-                    break
-                acc += toks[j]
-                if acc == sig_compact:
-                    return True
-    return False
-
-
-# Flexão morfológica PT para matching de gatilhos (sem libs externas).
-# Artigos viram uma única classe (cobre um/uma/o/a) e substantivos/adjetivos
-# ganham variantes de gênero e número por sufixo.
-_FLEX_ARTICLES = frozenset({
-    "o", "a", "os", "as", "um", "uma", "uns", "umas",
-    "do", "da", "dos", "das", "no", "na", "nos", "nas", "ao", "aos",
-})
-_FLEX_ARTICLE_RE = r"(?:os?|as?|um|uma|uns|umas|d[oa]s?|n[oa]s?|a[oa]s?)"
-
-# Finais que indicam adjetivo em PT — únicos onde o<->a é seguro flexionar.
-_FLEX_GENDER_SUF = (
-    "ivo", "iva", "oso", "osa", "ado", "ada", "ido", "ida", "ito", "ita",
-    "eiro", "eira", "orio", "oria", "ario", "aria", "ento", "enta",
-    "ovo", "ova", "ilo", "ila",
-)
-
-
-def _flex_word(tok: str) -> str:
-    if len(tok) < 3:
-        # "x"/"y" soltos são placeholders de gatilho ("integra com X",
-        # "depois de X dias") — casam qualquer valor nomeado.
-        if tok in ("x", "y"):
-            return r"[\w-]+"
-        return re.escape(tok)
-    if tok in _FLEX_ARTICLES:
-        return _FLEX_ARTICLE_RE
-    if tok.endswith(("oes", "aes")):
-        return re.escape(tok[:-3]) + r"(?:ao|oes|aes)"
-    if tok.endswith("ao"):
-        return re.escape(tok[:-2]) + r"(?:ao|oes|aes)"
-    if len(tok) >= 5 and tok.endswith("eis"):
-        return re.escape(tok[:-3]) + r"(?:el|eis)"
-    if len(tok) >= 5 and tok.endswith("ais"):
-        return re.escape(tok[:-3]) + r"(?:al|ais)"
-    # Troca de gênero o<->a só em final adjetival ('responsivo'->responsiv[oa]);
-    # nunca em substantivo ('bola' não pode casar 'bolo' — canário M45).
-    for suf in _FLEX_GENDER_SUF:
-        if tok.endswith(suf):
-            return re.escape(tok[: -len(suf)] + suf[:-1]) + r"[oa]s?"
-        if len(tok) > len(suf) + 1 and tok.endswith(suf + "s"):
-            return re.escape(tok[: -len(suf) - 1] + suf[:-1]) + r"[oa]s?"
-    if tok.endswith("es"):
-        # Cobre plural -e→-es ("chave"→"chaves") E radical nu ("país"→"países"):
-        # `(?:es?)?` é superconjunto do antigo `es?` — nunca perde casamento.
-        return re.escape(tok[:-2]) + r"(?:es?)?"
-    if tok.endswith("m"):
-        return re.escape(tok[:-1]) + r"(?:m|ns)"
-    if tok.endswith("l"):
-        return re.escape(tok[:-1]) + r"(?:l|is)"
-    # -r/-z + plural: `(?:es)?` torna o "es" todo opcional — o radical nu
-    # ("fazer", "subir", "luz") precisa casar a si mesmo (o antigo `es?`
-    # exigia a letra "e" e nunca casava a forma base).
-    if tok.endswith(("r", "z")):
-        return re.escape(tok) + r"(?:es)?"
-    if tok.endswith("s"):
-        return re.escape(tok[:-1]) + r"s?"
-    if tok.endswith("x"):
-        return re.escape(tok)
-    return re.escape(tok) + r"s?"
-
-
-@lru_cache(maxsize=1024)
-def _flex_pattern(sig: str) -> str:
-    parts = []
-    for chunk in re.findall(r"[a-z0-9_]+|[^a-z0-9_]+", sig):
-        if re.fullmatch(r"[a-z0-9_]+", chunk):
-            parts.append(_flex_word(chunk))
-        elif chunk.isspace():
-            parts.append(r"\s+")
-        else:
-            parts.append(re.escape(chunk))
-    pat = "".join(parts)
-    if not pat:
-        return ""
-    prefix = r"\b" if sig[0].isalnum() else ""
-    suffix = r"\b" if sig[-1].isalnum() else ""
-    return prefix + pat + suffix
-
-
-def _has_flex_signal(text: str, sig: str) -> bool:
-    """_has_signal com variantes flexivas PT — usado só no matching de gatilhos."""
-    pat = _flex_pattern(sig.strip())
-    return bool(pat) and bool(re.search(pat, text))
-
-
-# Vocabulário destrutivo e PUBLISH (PROTOCOLO §1) — exige autorização humana explícita
-DESTRUCTIVE_SIGNALS = (
-    "deleta", "deletar", "deleto", "deletamos", "delete", "exclui", "excluir",
-    "excluo", "excluimos", "apago", "apaga", "apagar", "apague", "apagamos",
-    "remove", "remover", "removo", "remova", "removendo", "erase", "erases",
-    "drop", "drop table", "truncate", "wipe", "wipe database",
-    "destroi", "destruo", "destruir", "destruimos", "destroy", "purge",
-    "force-push", "push --force", "force push", "push -f", "push -fu", "reset --hard",
-    "hard reset", "rm -rf", "rm -r", "git clean", "clean -fd", "clean -fdx",
-    "apaga o banco", "apagar o banco", "derruba", "zera", "zerar",
-    # Gerúndios/imperativos/plurais/passado — flexões que o \b não pega
-    # (banca v9 — A1): "estou deletando" e "deletem tudo" antes passavam.
-    "deletando", "deletem", "deletou", "apagando", "apaguem", "apagou",
-    "excluindo", "excluam", "excluiu", "removam", "removeu", "destruindo",
-    "destruam", "truncando", "limpando", "limpem", "zerando", "zerem",
-    "eliminando", "eliminem", "resetando", "resetem", "desinstalando",
-    "derrubando", "derrubem", "deleting", "deletes", "removing", "removes",
-    "wiping", "wipes", "dropping", "drops", "truncating", "truncates",
-    "erasing", "purging", "purges", "destroying", "destroys", "resetting",
-    # Comandos destrutivos nativos Windows/Unix ausentes (banca v9 — A4):
-    "del /", "del/", "del *", "del.", "rmdir", "rd /", "rd/", "erase /",
-    "format c:", "format d:", "formata o disco", "format disk", "mkfs",
-    "dd if", "shred", "sdelete", "cipher /w", "remove-item", "clear-item",
-    "format-volume", "dism /",
-    # Paráfrases indiretas PT (banca v9 — A6):
-    "esvazia", "esvaziar", "esvazie", "some com", "suma com", "varre",
-    "varrer", "limpa o banco", "limpa tudo", "tira tudo", "tirar tudo",
-    "esvazia o banco", "limpa o repo", "apaga tudo",
-    # Particípios EN + comandos bare/colados/drives (banca v10 — A5):
-    "deleted", "removed", "dropped", "wiped", "destroyed", "purged",
-    "erased", "truncated", "uninstall", "uninstalled", "desinstalou",
-    "rm", "rd", "del", "dd of=", "dropdb", "dropuser", "drop database",
-    "checkout --", "checkout -f", "git restore", "restore --", "branch -d", "branch -df", "format e:",
-    "format f:", "format a:", "format b:", "format g:", "sdelete64",
-    # Cobertura EN provada ausente (banca v11 — A3): paráfrases naturais que
-    # chegavam ao driver em EXECUTAR sem trava humana.
-    "nuke", "nuked", "nuking", "clean", "cleaned", "cleaning", "revert",
-    "reverted", "reverting", "prune", "pruned", "pruning", "undo", "undone",
-    # DS-10: flexões PT de revert/reset + "git reset"/"reset the <db>" — uma
-    # flexão mudava modo/auth (o auto já tinha "reverta"/"reseta"/"reset").
-    "reverta", "revertemos", "revertido", "revertida", "reverter",
-    "git reset", "reset the", "reseta", "resetar", "resete", "resetemos",
-    "resetou",
-    "checkout .", "docker system prune", "docker volume prune",
-    "kubectl delete", "terraform destroy", "helm uninstall", "systemctl stop",
-    "systemctl disable", "roll back", "rolled back", "obliterate",
-    # Multilíngue ES/FR/DE/IT + flexões PT restantes + EN nativos (banca v12 — F-2)
-    "apaguei", "removi", "destrui", "zerei", "limpei", "eliminei", "formatei",
-    "desfaz", "desfazer", "descarta", "sobrescreve", "desliga",
-    "borra", "borrar", "suprime", "suprimir", "quita", "quitar",
-    "supprime", "efface", "losche", "entferne", "cancella", "distruggi",
-    "trash", "scrub", "flush", "unlink", "discard", "dispose", "deltree",
-    "droptable", "forcepush", "shutdown", "format h:", "format i:",
-    "format j:", "format k:", "format l:", "format m:", "format n:",
-    "format o:", "format p:", "format q:", "format r:", "format s:",
-    "format t:", "format u:", "format v:", "format w:", "format x:",
-    "format y:", "format z:",
-    # banca v16 — A1: mesma lacuna lexical do auto (listas precisam espelhar).
-    # DS-12a: formas nuas de "format*" eram falso-positivo — "ajusta o formato
-    # da data"/"reformat the code" exigiam auth destrutiva. Destrutivo real já
-    # é coberto pelas frases completas e pelos literais de drive/flag abaixo.
-    "detona", "detonar", "detonei", "detonando", "estoura", "arregaça",
-    "deleter",
-    "format a drive", "format the drive", "format the disk",
-    "format drive", "format disk", "format usb", "format pendrive",
-    "formata o disco", "formata o hd", "formatar o disco", "formatar o pendrive",
-    "formata o pendrive", "formata o cartao", "formata o sd", "formatar o hd",
-    "formata a particao", "formatar o cartao", "formatar o sd", "formata o ssd",
-    "format /", "diskpart", "fdisk", "newfs", "mke2fs", "blkdiscard",
-    "wipefs", "srm", "secure erase", "hdparm --security-erase",
-    "dd if", "dd bs", "dd count", "dd conv",
-    "switch -f", "switch --force", "stash clear", "reflog expire",
-    "update-ref -d", "filter-branch", "filter-repo",
-    "clear-content", "clear-disk", "remove-partition", "remove-volume",
-    "remove-physicaldisk", "robocopy /mir", "robocopy /purge",
-    "torch the", "gut the", "axe the", "scrap the", "annihilate",
-    "decimate", "vaporize", "torch o", "destrói",
-    # PT-10 (pentest r2): paráfrases destrutivas que chegavam ao driver sem
-    # `henke approve` — "faz reset no main", "empurra com force", "checkout
-    # HEAD~1" passavam como ANALISAR/EXECUTAR sem trava.
-    "reset no", "reset na", "reset para", "reset pro", "reset pra",
-    "reset em", "reset to", "reset back", "reset --soft", "reset --mixed",
-    "com force", "force para", "force pro", "force pra", "com força",
-    "força para", "força pro", "empurra com força", "push force",
-    "checkout head", "checkout ~", "checkout main --", "switch -d",
-    "restore --source", "restore .", "restore --staged",
-    "rebase", "rebased", "rebasing", "rebase --onto", "cherry-pick --no-commit",
-    "merge --abort", "revert --no-commit", "amend --no-edit",
-    "stash drop", "stash pop", "clean -f", "branch -D",
-)
+except ImportError:  # execução standalone (python scripts/henke_router.py)
+    from security_signals import (  # type: ignore[no-redef]  # noqa: F401
+        _HOMOGLYPHS, _PUNCT_FOLDS, _norm, _has_signal,
+        _FLEX_ARTICLES, _FLEX_ARTICLE_RE, _FLEX_GENDER_SUF,
+        _flex_word, _flex_pattern, _has_flex_signal,
+        DESTRUCTIVE_SIGNALS, PUBLISH_ONLY_SIGNALS, PUBLISH_SIGNALS,
+    )
 _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
-
-PUBLISH_ONLY_SIGNALS = (
-    "deploy", "publica", "publicar", "producao", "production",
-    "sobe", "subir", "pro ar", "no ar", "em producao",
-    "publish", "npm publish", "pypi", "release", "lanca release", "git push",
-    "push na main", "push pra main", "push origin",
-    # bare push / prod (banca v10 — A5): "faz push", "mete em prod".
-    "push", "prod", "em prod", "sobe em prod",
-    "faxina", "limpa o repo", "apaga arquivos", "reversao", "reverte", "rollback",
-    # Publish/release EN (banca v11 — A3): 'ship it', 'go live'.
-    "ship", "shipped", "shipping", "go live", "goes live", "going live",
-    "push to prod", "push to production",
-    # Multilíngue publish (banca v12 — F-2): 'sube a producción' e cia.
-    "despliega", "produccion", "supprime", "publie", "deployer", "deploie",
-    "mets en ligne", "veroffentlicht", "bereitstellen", "pubblica",
-)
-PUBLISH_SIGNALS = PUBLISH_ONLY_SIGNALS + DESTRUCTIVE_SIGNALS
 _PUBLISH_SIGNALS = PUBLISH_SIGNALS
 
 # Sinais interrogativos / somente-inspeção -> travam teto em ANALISAR
@@ -934,10 +646,19 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # R3-PT-06: respawn isolado — sitecustomize via PYTHONPATH não pode
-    # patchar o roteamento/auth no processo pai; o filho -I sai isolado.
-    if not sys.flags.isolated:
-        sys.exit(subprocess.run(
-            [sys.executable, "-I",
-             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
+    # ISO-BOOT canônico (scripts/_isoboot.py) — sitecustomize/usercustomize/
+    # .pth hostis executam no startup e patcham verificadores no pai; o
+    # respawn -Es nasce sem esses canais (prova ESTRUTURAL: sys.flags
+    # autenticado + os.sys — nunca variável de ambiente). Texto sincronizado
+    # por tests/test_isoboot_guard.py — editar só alterando o canônico.
+    import importlib.util as _ilu
+    import os.path as _osp
+    _ib_p = _osp.join(_osp.dirname(_osp.abspath(__file__)), "_isoboot.py")
+    if not _osp.isfile(_ib_p):
+        _ib_p = _osp.join(_osp.dirname(_osp.dirname(_osp.abspath(__file__))),
+                          "_isoboot.py")
+    _ib_spec = _ilu.spec_from_file_location("henke_isoboot", _ib_p)
+    _ib_mod = _ilu.module_from_spec(_ib_spec)
+    _ib_spec.loader.exec_module(_ib_mod)
+    _ib_mod.ensure_isolated(__file__, sys.argv[1:])
     main()

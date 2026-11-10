@@ -80,6 +80,17 @@ if str(_PKG_ROOT) not in sys.path:
 
 from scripts._paths import suite_root as _suite_root  # noqa: E402
 
+try:
+    from scripts.security_signals import (  # noqa: F401
+        _norm, _has_signal, METACONFIG_SIGNALS,
+        DESTRUCTIVE_SIGNALS, PUBLISH_ONLY_SIGNALS,
+    )
+except ImportError:  # execução standalone (python scripts/henke_auto.py)
+    from security_signals import (  # type: ignore[no-redef]  # noqa: F401
+        _norm, _has_signal, METACONFIG_SIGNALS,
+        DESTRUCTIVE_SIGNALS, PUBLISH_ONLY_SIGNALS,
+    )
+
 SUITE_ROOT = _suite_root()  # checkout OU <prefix>/henke_data (wheel)
 
 # --- Contrato M3: limite real de auto-reparo (PROTOCOLO.md — "no máximo 2 iterações") ---
@@ -103,95 +114,11 @@ HARD_ALWAYS_ASK = frozenset({"publish", "destructive", "metaconfig"})
 
 # Heurística lexical de escopo sensível (M8 §3): complementa a classificação do
 # route (requires_human_auth) para o léxico real do vibecoder.
-PUBLISH_VERBS = (
-    "deploy", "publica", "publicar", "publico", "sobe", "subir", "coloca no ar",
-    "producao", "production", "rollback", "reverte", "reversao",
-    # paráfrases coloquiais de evasão (MÉDIO-10 banca v6)
-    "manda pra prod", "manda para prod", "bota no servidor", "coloca no servidor",
-    "sobe pra producao", "manda pro ar",
-    # Publish/release EN (banca v11 — A3): 'ship it', 'go live', 'push to prod'.
-    "ship", "shipped", "shipping", "go live", "goes live", "going live",
-    "push to prod", "push to production", "release", "released", "releases",
-    # Multilíngue publish (banca v12 — F-2): 'sube a producción' e cia.
-    "sube", "despliega", "produccion", "supprime", "publie", "deployer",
-    "deploie", "mets en ligne", "veroffentlicht", "bereitstellen",
-    "pubblica", "push", "prod",
-)
-DESTRUCTIVE_VERBS = (
-    "deleta", "deletar", "delete", "exclui", "excluir", "apaga", "apagar",
-    "drop", "wipe", "truncate", "destroy", "destroi", "destruir", "purge",
-    "force-push", "push --force", "force push", "push -f", "rm -rf", "derruba",
-    # formas imperativas do léxico do vibecoder (ALTO-2 da banca)
-    "apague", "exclua", "remova", "delete", "destrua", "reverta", "restaura",
-    "reseta", "reset", "limpa", "limpar", "wipe", "zera", "desinstala",
-    # paráfrases coloquiais de evasão (MÉDIO-10 banca v6)
-    "remove", "remover", "elimina", "eliminar", "eliminate", "joga fora",
-    "jogar fora", "tira do ar", "tirar do ar", "get rid of", "get rid",
-    # Gerúndios/imperativos/plurais/passado (banca v9 — A1)
-    "deletando", "deletem", "deletou", "apagando", "apaguem", "apagou",
-    "excluindo", "excluam", "excluiu", "removam", "removeu", "destruindo",
-    "destruam", "truncando", "limpando", "limpem", "zerando", "zerem",
-    "eliminando", "eliminem", "resetando", "desinstalando", "derrubando",
-    "derrubem", "deleting", "deletes", "removing", "removes", "wiping",
-    "dropping", "truncating", "erasing", "purging", "destroying",
-    # Comandos nativos Windows/Unix (banca v9 — A4)
-    "del /", "del/", "del *", "rmdir", "rd /", "rd/", "mkfs", "dd if",
-    "shred", "sdelete", "cipher /w", "remove-item", "format-volume",
-    "format c:", "dism /",
-    # Paráfrases indiretas PT (banca v9 — A6)
-    "esvazia", "esvaziar", "some com", "varre", "varrer", "tira tudo",
-    "tirar tudo", "limpa tudo", "apaga tudo",
-    # Particípios EN + comandos bare/colados/drives (banca v10 — A5)
-    "deleted", "removed", "dropped", "wiped", "destroyed", "purged",
-    "erased", "truncated", "uninstall", "uninstalled", "desinstalou",
-    "rm", "rd", "del", "dd of=", "dropdb", "dropuser", "drop database",
-    "checkout --", "git restore", "restore --", "branch -d", "branch -df",
-    "checkout -f", "push -fu", "format e:",
-    "format f:", "format a:", "format b:", "format g:", "sdelete64",
-    # Cobertura EN provada ausente (banca v11 — A3): paráfrases naturais que
-    # chegavam ao driver em EXECUTAR sem trava humana.
-    "nuke", "nuked", "nuking", "clean", "cleaned", "cleaning", "revert",
-    "reverted", "reverting", "prune", "pruned", "pruning", "undo", "undone",
-    "reset --hard", "checkout .", "docker system prune", "docker volume prune",
-    "kubectl delete", "terraform destroy", "helm uninstall", "systemctl stop",
-    "systemctl disable", "roll back", "rolled back", "obliterate",
-    # Multilíngue ES/FR/DE/IT + flexões PT restantes + EN nativos (banca v12 — F-2)
-    "apaguei", "removi", "destrui", "zerei", "limpei", "eliminei", "formatei",
-    "desfaz", "desfazer", "descarta", "sobrescreve", "desliga",
-    "borra", "borrar", "suprime", "suprimir", "quita", "quitar",
-    "supprime", "efface", "losche", "entferne", "cancella", "distruggi",
-    "trash", "scrub", "flush", "unlink", "discard", "dispose", "deltree",
-    "droptable", "forcepush", "shutdown", "format h:", "format i:",
-    "format j:", "format k:", "format l:", "format m:", "format n:",
-    "format o:", "format p:", "format q:", "format r:", "format s:",
-    "format t:", "format u:", "format v:", "format w:", "format x:",
-    "format y:", "format z:", "format d:",
-    # banca v16 — A1: lacuna lexical (gírias PT, format bare, ferramentas de
-    # disco, git destrutivo, PS, verbos EN qualificados p/ evitar FP).
-    # DS-12a: formas nuas de "format*" removidas — falso-positivo em
-    # "o formato da data"/"reformat the code"; frases completas cobrem.
-    "detona", "detonar", "detonei", "detonando", "estoura", "arregaça",
-    "deleter",
-    "format a drive", "format the drive", "format the disk",
-    "format drive", "format disk", "format usb", "format pendrive",
-    "formata o disco", "formata o hd", "formatar o disco", "formatar o pendrive",
-    "formata o pendrive", "formata o cartao", "formata o sd", "formatar o hd",
-    "formata a particao", "formatar o cartao", "formatar o sd", "formata o ssd",
-    "format /", "diskpart", "fdisk", "newfs", "mke2fs", "blkdiscard",
-    "wipefs", "srm", "secure erase", "hdparm --security-erase",
-    "dd if", "dd bs", "dd count", "dd conv",
-    "switch -f", "switch --force", "stash clear", "reflog expire",
-    "update-ref -d", "filter-branch", "filter-repo",
-    "clear-content", "clear-disk", "remove-partition", "remove-volume",
-    "remove-physicaldisk", "robocopy /mir", "robocopy /purge",
-    "torch the", "gut the", "axe the", "scrap the", "annihilate",
-    "decimate", "vaporize", "torch o", "destrói",
-)
-METACONFIG_SIGNALS = (
-    "package.json", "package-lock", "lockfile", "requirements", "pyproject",
-    "workflow", "workflows", "ci.yml", "metaconfig", "build.rs", "dockerfile",
-    "makefile", "lock.json",
-)
+# P1-04: vocabulário destrutivo/PUBLISH/metaconfig vem da FONTE ÚNICA
+# scripts/security_signals.py (união router+auto — direção mais forte).
+# Aliases mantidos p/ compat com corpus/testes existentes.
+PUBLISH_VERBS = PUBLISH_ONLY_SIGNALS
+DESTRUCTIVE_VERBS = DESTRUCTIVE_SIGNALS
 
 # Skills cujo despacho implica escopo sensível (classificação do route, por slug).
 SKILL_SCOPE_MAP = {
@@ -203,123 +130,6 @@ SKILL_SCOPE_MAP = {
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-# Homoglifos cross-script (cirílico/grego sobrevivem ao NFKD como Ll) —
-# mesma tabela do henke_router; manter as duas sincronizadas (banca v9 — A2).
-_HOMOGLYPHS = str.maketrans({
-    "а": "a", "е": "e", "ё": "e", "о": "o", "р": "p", "с": "c", "х": "x",
-    "у": "y", "і": "i", "ї": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "ԛ": "q",
-    "һ": "h", "к": "k", "м": "m", "н": "n", "т": "t", "в": "b", "г": "r",
-    "п": "n", "э": "e", "з": "3", "ҝ": "k", "օ": "o", "ո": "n", "ս": "u",
-    "ɡ": "g", "ɩ": "i", "ο": "o", "α": "a", "β": "b", "γ": "y", "δ": "d",
-    "ε": "e", "ζ": "z", "η": "n", "ι": "i", "κ": "k", "μ": "u", "ν": "v",
-    "ρ": "p", "τ": "t", "υ": "u", "χ": "x", "ω": "w", "ϲ": "c", "ϳ": "j",
-    "А": "a", "В": "b", "Е": "e", "К": "k", "М": "m", "Н": "h", "О": "o",
-    "Р": "p", "С": "c", "Т": "t", "Х": "x", "І": "i",
-    # Latim estendido/armênio/IPA que a tabela não cobria (banca v10 — A5):
-    "ɑ": "a", "ɛ": "e", "ı": "i", "ե": "e", "ռ": "r", "ʀ": "r",
-    "ɢ": "g", "ʟ": "l", "ɴ": "n", "ɵ": "o", "ɸ": "o", "χ": "x",
-    # Leetspeak/dígitos-homoglifos (banca v11 — A3): 'd3l3t3', 'w1p3',
-    # 'nu|<' → dobra para a letra óbvia antes da comparação de termos.
-    "0": "o", "3": "e", "4": "a", "5": "s", "7": "t",
-    "@": "a", "$": "s", "!": "i",
-    # A2 (banca v14): confusáveis que faltavam — lunate epsilon, YE cirílico,
-    # leet 2/6/8/9 e small-caps (ᴅᴇʟᴇᴛᴇ).
-    # ALTO-1 (banca v15): '|'→'l' FUNDA o sinal ao vizinho ('delete|x'→
-    # 'deletelx') — separador, não letra. '1'→'i' cobre 'w1pe'.
-    "ϵ": "e", "є": "e", "ε": "e", "2": "z", "6": "b", "8": "b", "9": "g",
-    "1": "i", "|": " ", "Ꭰ": "a",
-    "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f",
-    "ɢ": "g", "ʜ": "h", "ɪ": "i", "ᴊ": "j", "ᴋ": "k", "ʟ": "l",
-    "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ǫ": "q", "ʀ": "r",
-    "ꜱ": "s", "ᴛ": "t", "ᴜ": "u", "ᴠ": "v", "ᴡ": "w", "ʏ": "y",
-    "ᴢ": "z",
-    # banca v16 — A6: Cherokee/Lisu que sobrevivem ao NFKD (espelhar router).
-    "Ꮯ": "c", "Ꮇ": "m", "Ꮐ": "g", "Ꭲ": "i", "Ꮤ": "t", "Ꮪ": "d",
-    "Ꮠ": "s", "Ꭴ": "u", "Ᏻ": "y", "Ꮎ": "n", "Ꮢ": "r", "Ꮓ": "z",
-    "ꓯ": "l", "ꓪ": "o", "ꓫ": "o",
-})
-
-
-# ALTO-3 (banca v13): variantes Unicode de pontuação quebravam sinais com
-# '-'/'/'/':'/'.' — "checkout ‐‐" (U+2010) e "dd ‐if=" evadiam as duas listas.
-_PUNCT_FOLDS = str.maketrans({
-    "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
-    "−": "-", "﹘": "-", "﹣": "-",
-    # banca v16 — A6: hífen bala/maqaf/modifier/heavy-minus (espelhar router).
-    "⁃": "-", "־": "-", "˗": "-", "➖": "-",
-    "∕": "/", "⁄": "/",
-    "꞉": ":", "˸": ":", "։": ":", "∶": ":",
-    "․": ".", "‥": "..",
-    "＼": "\\",
-})
-
-
-def _norm(text: str) -> str:
-    """Normalização idêntica à do henke_router: NFKD, minúsculas, sem acentos,
-    sem formato/controle/marcas (ZWSP & cia — banca v7 F-04; Mn/Mc/Me —
-    banca v9 A5), homoglifos dobrados (A2) e whitespace exótico colapsado
-    (NBSP/tab/espaço duplo — A3). Manter as duas implementações iguais."""
-    folded = text.translate(_HOMOGLYPHS).translate(_PUNCT_FOLDS)
-    nfkd = unicodedata.normalize("NFKD", folded.lower())
-    stripped = "".join(
-        " " if c.isspace() or unicodedata.category(c) == "Zs" else c
-        for c in nfkd
-        if c.isspace()
-        or (not unicodedata.combining(c)
-            and unicodedata.category(c) not in ("Cf", "Cc", "Cs", "Co", "Cn",
-                                               "Mn", "Mc", "Me"))
-    )
-    return re.sub(r"\s+", " ", stripped)
-
-
-def _has_signal(text: str, sig: str) -> bool:
-    """Word-boundary para sinais simples (mesma regra do henke_router)."""
-    sig_clean = sig.strip()
-    if not sig_clean:
-        return False
-    if re.fullmatch(r"[\w-]+", sig_clean):
-        if re.search(r"\b" + re.escape(sig_clean) + r"\b", text):
-            return True
-    else:
-        prefix = r"\b" if sig_clean[0].isalnum() else ""
-        suffix = r"\b" if sig_clean[-1].isalnum() else ""
-        if re.search(prefix + re.escape(sig_clean) + suffix, text):
-            return True
-    # F-1 (banca v12): fragmentação intra-palavra — "de-lete", "ex/clui",
-    # "de\nlete", "dropTable" viram tokens que \b não casa. Compara o sinal
-    # compactado contra cada token compactado e pares adjacentes, por
-    # igualdade exata (sem substring: "cleanup" não acende "clean").
-    # A1 (banca v14): alfabeto POR SINAL — `checkout --`/`dd if=`/`format c:`
-    # eram desqualificados do caminho compacto (fullmatch [a-z0-9 ]) e
-    # "checkout - -" evadia. Mantém a pontuação do próprio sinal no compacto:
-    # "checkout--" só casa se o texto também trouxer os '-' (o discriminador).
-    _allowed = set("abcdefghijklmnopqrstuvwxyz0123456789") | {
-        ch for ch in sig_clean if not ch.isalnum() and ch != " "}
-    sig_compact = "".join(ch for ch in sig_clean if ch in _allowed)
-    # ALTO-2 (banca v13): split em >=3 fragmentos, tokens de pontuação que
-    # compactam pra "" e sinais curtos — janela acumulada até len, piso >=2.
-    # MÉDIO-5 (banca v13): reparte por [_./\\] além de whitespace.
-    # A3 (banca v14): range em vez de fatia — toks[i+1:] era O(n²).
-    if len(sig_compact) >= 2:
-        toks: list[str] = []
-        for _t in re.split(r"\s+", text):
-            for _seg in re.split(r"[_./\\]+", _t):
-                _seg = "".join(ch for ch in _seg if ch in _allowed)
-                if _seg:
-                    toks.append(_seg)
-        for i in range(len(toks)):
-            acc = toks[i]
-            if acc == sig_compact:
-                return True
-            for j in range(i + 1, len(toks)):
-                if len(acc) >= len(sig_compact):
-                    break
-                acc += toks[j]
-                if acc == sig_compact:
-                    return True
-    return False
 
 
 def _atomic_write_json(path: Path, data: object) -> None:
@@ -467,7 +277,7 @@ def _route(prompt: str, repo_root: Path) -> dict:
     if CLI_PATH.is_file():
         try:
             res = subprocess.run(
-                [sys.executable, str(CLI_PATH), "route", prompt, "--repo", str(repo_root), "--json"],
+                [sys.executable, "-Es", str(CLI_PATH), "route", prompt, "--repo", str(repo_root), "--json"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1040,7 +850,7 @@ def _dispatch_driver(
         cli_name, model = parts[0], (parts[1] if len(parts) > 1 else "")
         adapter = SCRIPTS_DIR / "henke_driver_agent.py"
         # argv de lista direta — NUNCA montar string p/ shlex (WinError no Windows).
-        argv = [sys.executable, str(adapter), cli_name] + ([model] if model else [])
+        argv = [sys.executable, "-Es", str(adapter), cli_name] + ([model] if model else [])
         result, err = _run_driver_argv(
             argv, envelope, repo_root, timeout_sec, desc=f"driver '{driver}'"
         )
@@ -1140,7 +950,7 @@ def _invoke_test_cmd(repo_root: Path, test_cmd: str, timeout_sec: float) -> tupl
         return 2, "test_cmd vazio"
     try:
         rc, out, err, timed_out = _run_capturing_tree(
-            [sys.executable, str(CLI_PATH), "exec", "--repo", str(repo_root), "--", *tokens],
+            [sys.executable, "-Es", str(CLI_PATH), "exec", "--repo", str(repo_root), "--", *tokens],
             cwd=repo_root, timeout_sec=timeout_sec,
         )
     except OSError as exc:
@@ -2307,10 +2117,19 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    # R2/R3-PT-06: respawn isolado — sitecustomize via PYTHONPATH não pode
-    # patchar verificadores no pai; o filho -I sai com flags.isolated.
-    if not sys.flags.isolated:
-        sys.exit(subprocess.run(
-            [sys.executable, "-I",
-             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
+    # ISO-BOOT canônico (scripts/_isoboot.py) — sitecustomize/usercustomize/
+    # .pth hostis executam no startup e patcham verificadores no pai; o
+    # respawn -Es nasce sem esses canais (prova ESTRUTURAL: sys.flags
+    # autenticado + os.sys — nunca variável de ambiente). Texto sincronizado
+    # por tests/test_isoboot_guard.py — editar só alterando o canônico.
+    import importlib.util as _ilu
+    import os.path as _osp
+    _ib_p = _osp.join(_osp.dirname(_osp.abspath(__file__)), "_isoboot.py")
+    if not _osp.isfile(_ib_p):
+        _ib_p = _osp.join(_osp.dirname(_osp.dirname(_osp.abspath(__file__))),
+                          "_isoboot.py")
+    _ib_spec = _ilu.spec_from_file_location("henke_isoboot", _ib_p)
+    _ib_mod = _ilu.module_from_spec(_ib_spec)
+    _ib_spec.loader.exec_module(_ib_mod)
+    _ib_mod.ensure_isolated(__file__, sys.argv[1:])
     sys.exit(main())
