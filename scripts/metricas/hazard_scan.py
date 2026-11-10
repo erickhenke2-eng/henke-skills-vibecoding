@@ -59,7 +59,10 @@ _SUITE_ROOT = Path(__file__).resolve().parents[2]
 _SUITE_MANIFEST = _SUITE_ROOT / "evals" / "hazard_fixtures_manifest.json"
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
+if str(_SUITE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SUITE_ROOT))
 import polyglot as _pg  # noqa: E402
+from scripts.state_paths import sanitized_child_env  # noqa: E402
 
 MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB cap (evita bundles/minified)
 SCAN_EXTS = {".py", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts",
@@ -1166,8 +1169,7 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
             cwd=str(cwd), capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=5,
             # A19 (banca v12): GIT_* herdado resolvia toplevel de repo estranho.
-            env={**{k: v for k, v in os.environ.items()
-                    if not k.startswith("GIT_")}, "LC_ALL": "C"},
+            env={**sanitized_child_env(cwd), "LC_ALL": "C"},
         )
         if top_res.returncode != 0:
             err_l = (top_res.stderr or "").lower()
@@ -1186,8 +1188,7 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
              "ls-files"],
             cwd=str(git_root), capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=5,
-            env={k: v for k, v in os.environ.items()
-                 if not k.startswith("GIT_")},
+            env=sanitized_child_env(git_root),
         )
         if res.returncode != 0:
             return [("ENV-CHECK-UNAVAILABLE", str(target), "git",
@@ -1238,6 +1239,10 @@ def scan_path(target: Path, dist_mode: bool = False,
 
     for dirpath, dirnames, filenames in os.walk(target):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        dirnames[:] = [d for d in dirnames
+                       if not (Path(dirpath) / d).is_symlink()
+                       and not (Path(dirpath) / d).is_junction()]
+
         for fn in sorted(filenames):
             p = Path(dirpath) / fn
             if p.suffix.lower() not in SCAN_EXTS and not (dist_mode and p.suffix.lower() in DIST_EXTS) and not _is_config_file(p):

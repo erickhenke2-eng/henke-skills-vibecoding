@@ -203,6 +203,34 @@ def staging_leftovers(repo_root: Path) -> tuple[Path, ...]:
     return tuple(leftovers)
 
 
+def _manifest_hmac(repo_root: Path, manifest: dict) -> str | None:
+    """HMAC-SHA256 do manifesto de quarentena com a chave do perfil —
+    Banca-A 3: manifesto unsigned em .henke/ era forjável (dest+sha256
+    arbitrários → restore exfiltrava arquivo externo via junction)."""
+    import hashlib
+    import hmac as _hmac
+    from scripts.metricas.scan_manifest import _manifest_secret
+    secret = _manifest_secret(Path(repo_root))
+    if secret is None:
+        return None
+    body = {k: v for k, v in manifest.items() if k != "hmac"}
+    canon = json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return _hmac.new(secret, canon, hashlib.sha256).hexdigest()
+
+
+def _quarantine_tree_safe(repo: Path, qroot: Path, batch_dir: Path) -> None:
+    """Recusa operar sob junction/reparse: qroot, batch_dir e payload
+    precisam ser diretórios reais — senão restore/purge age FORA do repo."""
+    qroot_c = qroot.resolve()
+    for cand in (qroot, batch_dir, batch_dir / "payload"):
+        if cand.is_symlink() or (cand.exists() and not _no_reparse(cand)):
+            raise ValueError(
+                f"reparse point na árvore de quarentena: {cand} — "
+                "operação recusada (possível redirecionamento)")
+    if not winpath.is_within(qroot_c, batch_dir.resolve()):
+        raise ValueError("batch_dir resolve fora da raiz de quarentena")
+
+
 def _validate_batch_dir(qroot: Path, batch_id: str) -> Path:
     """batch_id deve ser um único componente seguro contido em `qroot`.
 
@@ -344,6 +372,7 @@ def quarantine(repo_root: Path, candidates: Sequence[CleanCandidate],
         "retention_days": retention_days,
         "items": items,
     }
+    manifest["hmac"] = _manifest_hmac(repo, manifest)
     (batch_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
     )
@@ -351,11 +380,19 @@ def quarantine(repo_root: Path, candidates: Sequence[CleanCandidate],
     return QuarantineBatch(batch_id, _iso(created), _iso(expires), tuple(items))
 
 
-def _load_manifest(batch_dir: Path) -> dict:
+def _load_manifest(repo: Path, batch_dir: Path) -> dict:
     manifest_path = batch_dir / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("schema_version") != _SCHEMA_VERSION:
         raise ValueError("manifesto de quarentena inválido ou de schema desconhecido")
+    import hmac as _hmac
+    expected = _manifest_hmac(repo, data)
+    have = data.get("hmac")
+    if expected is None or not isinstance(have, str) or             not _hmac.compare_digest(expected, have):
+        raise ValueError(
+            "manifesto de quarentena sem assinatura HMAC válida — "
+            "recusado (fail-closed): restore/purge só operam manifestos "
+            "gerados por esta instalação")
     return data
 
 
@@ -364,8 +401,10 @@ def restore_batch(repo_root: Path, batch_id: str) -> int:
     repo = Path(repo_root).resolve()
     qroot = _quarantine_root(repo)
     batch_dir = _validate_batch_dir(qroot, batch_id)
-    manifest = _load_manifest(batch_dir)
+    _quarantine_tree_safe(repo, qroot, batch_dir)
+    manifest = _load_manifest(repo, batch_dir)
     restored = 0
+    qroot_c = qroot.resolve()
     payload_root = (batch_dir / "payload").resolve()
     for item in manifest["items"]:
         # DS-1: `dest` vem do manifesto — caminho absoluto ou `..` faria o
@@ -378,7 +417,9 @@ def restore_batch(repo_root: Path, batch_id: str) -> int:
                  result="bad_dest")
             continue
         dest = (payload_root / raw_dest).resolve()
-        if not winpath.is_within(payload_root, dest):
+        # Banca-A 3: contenção dupla — payload_root JÁ RESOLVIDO pode estar
+        # fora do qroot (junction); exige dentro de ambos.
+        if not winpath.is_within(qroot_c, dest) or                 not winpath.is_within(payload_root, dest):
             _log(repo, "restore_item", batch=batch_id,
                  item=str(item.get("original_path")), hash="",
                  result="dest_escapes_payload")
@@ -454,7 +495,8 @@ def purge_expired_batch(repo_root: Path, batch_id: str, *, now: datetime) -> int
     batch_dir = _validate_batch_dir(qroot, batch_id)
     if not batch_dir.is_dir():
         raise ValueError(f"batch inexistente: {batch_id}")
-    manifest = _load_manifest(batch_dir)
+    _quarantine_tree_safe(repo, qroot, batch_dir)
+    manifest = _load_manifest(repo, batch_dir)
     if now < _parse_iso(manifest["expires_at"]):
         raise ValueError(f"batch {batch_id} ainda não expirou (expires_at={manifest['expires_at']})")
     # DS-2: item não verificado nunca é restaurado, mas entrava no manifesto

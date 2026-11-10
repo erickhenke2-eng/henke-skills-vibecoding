@@ -62,6 +62,8 @@ def iter_source_files(root: Path, exts=None):
         dirnames[:] = [
             d for d in dirnames
             if d not in PRUNE_DIRS and d not in _DOT_PRUNE
+            and not (Path(dirpath) / d).is_symlink()
+            and not (Path(dirpath) / d).is_junction()
         ]
         for fn in filenames:
             if exts is None or Path(fn).suffix.lower() in exts:

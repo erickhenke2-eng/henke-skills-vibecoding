@@ -116,10 +116,6 @@ _GO_TEST_OK_RE = re.compile(r"(?m)^ok\s+\S+")
 _GO_TEST_FAIL_RE = re.compile(r"(?m)^FAIL\s+\S+")
 _CANARY_RE = re.compile(r"(\d+)/(\d+)\s+can[aá]rios\s+aprovados", flags=re.I)
 
-# Arquivo staged que "parece" de teste (para restringir o assertless_scan em --staged)
-_TEST_FILE_RE = re.compile(
-    r"(?i)(^test_.*\.py$|.*_test\.py$|.*[.\-_](test|spec)\.[jt]sx?$|.*\.(test|spec)\.[jt]sx?$)"
-)
 
 # Conteúdo EXATO do stub .henke/POLICY.json criado por `henke setup`
 _POLICY_STUB_JSON = (
@@ -240,12 +236,8 @@ def _scrub_env() -> dict:
     """Env sanitizado para subprocessos de custódia (A6 banca v16):
     _cmd_check/_cmd_init/_derive_outcome/doctor herdavam PYTHONPATH/GIT_*/
     PATH integral — sitecustomize plantado fabricava vereditos."""
-    e = {k: v for k, v in os.environ.items()
-         if not (k.upper().startswith(("PYTHON", "LD_", "DYLD_", "GIT_",
-                                       "NODE_", "BASH_ENV", "ZDOTDIR",
-                                       "NPM_CONFIG_"))
-                 or k in ("VIRTUAL_ENV", "ENV", "PATHEXT", "ComSpec",
-                          "PSModulePath", "CDPATH"))}
+    from scripts.state_paths import sanitized_child_env
+    e = sanitized_child_env(None)
     e["PYTHONUTF8"] = "1"
     e["PYTHONIOENCODING"] = "utf-8"
     return e
@@ -920,8 +912,8 @@ def _cmd_check(
         no_cache = True
         full = True
         try:
-            _git_env = {k: v for k, v in os.environ.items()
-                        if not k.startswith("GIT_")}
+            from scripts.state_paths import sanitized_child_env
+            _git_env = sanitized_child_env(repo_root)
             git_check = subprocess.run(
                 ["git", "rev-parse", "--is-inside-work-tree"],
                 cwd=str(repo_root),
@@ -930,19 +922,58 @@ def _cmd_check(
                 env=_git_env,
             )
             if git_check.returncode == 0:
+                # Merge-Audit 3: checkout-index roda filter.*.smudge de .git/config
+                # (RCE no pre-commit). write-tree + archive não passam pelo
+                # machinery de filtros — export-subst/export-ignore apenas.
                 staged_temp_ctx = tempfile.TemporaryDirectory()
-                prefix = (Path(staged_temp_ctx.name).resolve().as_posix()) + "/"
-                co_res = subprocess.run(
-                    ["git", "checkout-index", "--prefix=" + prefix, "-a", "-f"],
+                # Banca-A 6: write-tree escreveria objetos novos em
+                # .git/objects do repo auditado — redireciona para tempdir
+                # com os objetos existentes como alternates.
+                obj_dir = Path(staged_temp_ctx.name) / "objects"
+                obj_dir.mkdir()
+                _wt_env = dict(_git_env)
+                _wt_env["GIT_OBJECT_DIRECTORY"] = str(obj_dir)
+                _wt_env["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = str(
+                    (repo_root / ".git" / "objects").resolve())
+                wt_res = subprocess.run(
+                    ["git", "-c", "core.fsmonitor=false",
+                     "write-tree"],
                     cwd=str(repo_root),
                     capture_output=True,
                     text=True,
-                    env=_git_env,
+                    env=_wt_env,
                 )
-                if co_res.returncode == 0:
-                    target_root = Path(staged_temp_ctx.name)
-                else:
-                    print(f"ERRO: Falha ao extrair snapshot do index Git via git checkout-index (exit {co_res.returncode}): {co_res.stderr}", file=sys.stderr)
+                co_res = wt_res
+                if wt_res.returncode == 0:
+                    tree = wt_res.stdout.strip()
+                    archive_path = Path(staged_temp_ctx.name) / "index.zip"
+                    ar_res = subprocess.run(
+                        ["git", "archive", "--format=zip",
+                         "-o", str(archive_path), tree],
+                        cwd=str(repo_root),
+                        capture_output=True,
+                        text=True,
+                        env=_git_env,
+                    )
+                    if ar_res.returncode == 0:
+                        import zipfile
+                        extract_dir = Path(staged_temp_ctx.name) / "tree"
+                        extract_dir.mkdir()
+                        with zipfile.ZipFile(archive_path) as zf:
+                            for info in zf.infolist():
+                                rel = info.filename.lstrip("/")
+                                if ".." in rel.split("/"):
+                                    continue  # path traversal não extraído
+                                zf.extract(info, extract_dir)
+                        archive_path.unlink()
+                        target_root = extract_dir
+                    else:
+                        co_res = ar_res
+                if co_res.returncode == 0 and target_root == repo_root:
+                    print("ERRO: Falha ao extrair snapshot do index Git via git archive.", file=sys.stderr)
+                    return 2
+                if co_res.returncode != 0:
+                    print(f"ERRO: Falha ao extrair snapshot do index Git (exit {co_res.returncode}): {co_res.stderr}", file=sys.stderr)
                     return 2
             else:
                 print("ERRO: --staged exige repositório Git.", file=sys.stderr)
@@ -1036,7 +1067,7 @@ def _cmd_check(
                         or not use_manifests]
         if script_gates:
             from scripts.gate_parallel import (
-                GateSpec, aggregate_exit_code, run_gates_parallel,
+                GateSpec, run_gates_parallel,
             )
             uncached: list[tuple[int, str, Path, list[str]]] = []
             cached_results: dict[int, dict] = {}
@@ -1189,8 +1220,6 @@ def _cmd_test_impact(repo_root: Path, base: str, *, full: bool = False,
         print("no_changes: nenhum teste a executar.")
         return 0
     cmd = build_unittest_command(sel, repo_root)
-    env = os.environ.copy()
-    env["HENKE_TEST_IMPACT"] = "1"
     ledger = repo_root / ".henke" / "LEDGER.json"
     exec_log = repo_root / ".henke" / "exec_log.jsonl"
     return _cmd_exec(repo_root, ledger, exec_log, ["--"] + cmd)
@@ -1447,8 +1476,8 @@ def _git_diff_snapshot(repo_root: Path) -> tuple[str | None, str]:
     falha ou não há HEAD, declara a origem exata do que foi capturado.
     """
     try:
-        _genv = {k: v for k, v in os.environ.items()
-                 if not k.startswith("GIT_")}
+        from scripts.state_paths import sanitized_child_env
+        _genv = sanitized_child_env(repo_root)
         res = subprocess.run(
             ["git", "-C", str(repo_root),
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
@@ -1868,14 +1897,13 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("--spec", default=None, help="Spec de referência para contract_closure")
     p_check.add_argument(
         "--staged", action="store_true",
-        help="Restringe hazard_scan/assertless_scan aos arquivos de 'git diff --cached' "
-             "(a11y_scan segue no repo inteiro)",
+        help="Avalia um snapshot do índice Git (conteúdo staged) " "em vez do worktree (a11y_scan segue no repo inteiro)",
     )
     p_check.add_argument("--json", action="store_true", help="Saída em JSON")
     p_check.add_argument("--no-cache", action="store_true", help="Ignora cache e força re-execução dos portões")
     p_check.add_argument("--clear-cache", action="store_true", help="Limpa o cache de portões antes de executar")
     p_check.add_argument("--full", action="store_true", help="Força scan integral (regrava manifesto após sucesso)")
-    p_check.add_argument("--jobs", type=int, default=1, help="Portões de processo em paralelo (1-4)")
+    p_check.add_argument("--jobs", type=int, default=1, choices=(1, 2, 3, 4), help="Portões de processo em paralelo (1-4)")
     p_check.add_argument("--gate-timeout", type=float, default=120.0, help="Timeout por portão em segundos")
     p_check.add_argument("--state-dir", type=Path, default=None, help="Diretório de estado absoluto (equivale a HENKE_STATE_DIR)")
 
@@ -1898,7 +1926,6 @@ def main(argv: list[str] | None = None) -> int:
     p_gf.add_argument("--driver", default=None, help="Comando do revisor externo (sessão zerada)")
     p_gf.add_argument("--run", dest="run_ref", default=None, help="Run alvo (id ou caminho .henke/runs/<id>.json)")
     p_gf.add_argument("--json", action="store_true", help="Saída em JSON")
-    p_gf.add_argument("--no-cache", action="store_true", help="Ignora cache e força re-execução dos portões")
 
     p_install = sub.add_parser("install-hook", help="Instala o pre-commit hook nativo no repositório Git")
     p_install.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
@@ -2090,9 +2117,6 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_install_hook(args.repo.resolve(), force=args.force)
 
     
-    if args.subcmd == "report":
-        return _cmd_report(args.repo.resolve(), out_path=args.out.resolve() if args.out else None)
-
     return 2
 
 

@@ -359,12 +359,21 @@ def compute_cache_key(
     git_state = "NOGIT"
     if (repo / ".git").exists():
         try:
+            import os as _os
             import subprocess
-            res_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo), capture_output=True, text=True)
+            # Merge-Audit 2: env cru + git sem -c — core.fsmonitor/diff.external
+            # de .git/config executam código do repo auditado (RCE no check).
+            from scripts.state_paths import sanitized_child_env
+            _ge = sanitized_child_env(repo)
+            # Banca-A 1: textconv/diff.<drv>.command de .git/config executam
+            # ao materializar o patch — --no-ext-diff E --no-textconv, mais
+            # timeout contra diff gigante/lock (DoS).
+            _gc = ["git", "-c", "core.fsmonitor=false", "-c", "diff.external="]
+            res_head = subprocess.run([*_gc, "rev-parse", "HEAD"], cwd=str(repo), capture_output=True, text=True, env=_ge, timeout=30)
             head_str = res_head.stdout.strip() if res_head.returncode == 0 else ""
-            res_st = subprocess.run(["git", "status", "--porcelain"], cwd=str(repo), capture_output=True, text=True)
+            res_st = subprocess.run([*_gc, "status", "--porcelain"], cwd=str(repo), capture_output=True, text=True, env=_ge, timeout=30)
             st_str = res_st.stdout if res_st.returncode == 0 else ""
-            res_diff = subprocess.run(["git", "diff", "HEAD"], cwd=str(repo), capture_output=True, text=True)
+            res_diff = subprocess.run([*_gc, "diff", "--no-ext-diff", "--no-textconv", "HEAD"], cwd=str(repo), capture_output=True, text=True, env=_ge, timeout=60)
             diff_str = res_diff.stdout if res_diff.returncode == 0 else ""
             git_state = f"{head_str}:{hashlib.sha256((st_str + chr(10) + diff_str).encode('utf-8')).hexdigest()}"
         except Exception:

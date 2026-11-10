@@ -35,7 +35,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import Literal
 
-from scripts.state_paths import state_dir
+from scripts.state_paths import sanitized_child_env, state_dir
 import scripts.winpath as winpath
 
 _SCHEMA_VERSION = 1
@@ -306,9 +306,11 @@ def _secret_is_tracked(repo_root: Path, secret_file: Path) -> bool:
         return False  # state_dir fora do repo (HENKE_STATE_DIR) não é rastreável
     try:
         res = subprocess.run(
-            ["git", "-C", str(Path(repo_root).resolve()), "ls-files",
-             "--error-unmatch", "--", rel],
-            capture_output=True, timeout=10)
+            ["git", "-C", str(Path(repo_root).resolve()),
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "ls-files", "--error-unmatch", "--", rel],
+            capture_output=True, timeout=10,
+            env=sanitized_child_env(repo_root))
     except (OSError, subprocess.SubprocessError):
         return False  # sem git, o arquivo não pode estar no índice
     return res.returncode == 0

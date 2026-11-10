@@ -46,7 +46,6 @@ SUITE_ROOT = Path(__file__).resolve().parents[2]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.process_runner import run_process
 
 for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
@@ -155,7 +154,7 @@ def extract_diff_lines(target: Path, git_ref: str = "HEAD") -> set[int] | None:
     try:
         res = subprocess.run(
             ["git", "-c", "core.fsmonitor=false", "-c", "diff.external=",
-             "diff", "--no-ext-diff", "-U0", git_ref, "--", str(t)],
+             "diff", "--no-ext-diff", "--no-textconv", "-U0", git_ref, "--", str(t)],
             cwd=str(t.parent),
             capture_output=True,
             text=True,

@@ -90,16 +90,9 @@ def run_process(
     if env is not None:
         child_env = dict(env)
     else:
-        child_env = {
-            k: v for k, v in os.environ.items()
-            if not (k.startswith(("GIT_", "PYTHON", "LD_", "DYLD_",
-                                  "NODE_", "NPM_CONFIG", "PERL5", "RUBYOPT",
-                                  "DOTNET_", "JAVA_", "MAVEN_", "GRADLE_",
-                                  "SBT_", "PHP", "GOFLAGS", "RUST",
-                                  "VIRTUAL_ENV"))
-                    or k in ("BASH_ENV", "ENV", "ZDOTDIR", "CDPATH",
-                             "PSModulePath", "ComSpec", "PATHEXT",
-                             "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS"))}
+        from scripts.state_paths import sanitized_child_env
+        child_env = sanitized_child_env(
+            Path(cwd) if cwd is not None else None)
     child_env.setdefault("PYTHONUTF8", "1")
     child_env.setdefault("PYTHONIOENCODING", "utf-8")
 

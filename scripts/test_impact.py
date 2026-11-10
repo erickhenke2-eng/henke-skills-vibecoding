@@ -12,6 +12,7 @@ Nenhuma seleção sob incerteza; `--full` (CI/pré-merge) ignora a otimização.
 from __future__ import annotations
 
 import ast
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 import scripts.winpath as winpath
+from scripts.state_paths import sanitized_child_env
 
 _DIFF_FILTERS = "ACDMRTUXB"
 _TEST_DIR_PREFIX = "tests/"
@@ -47,9 +49,11 @@ class ImpactSelection:
 
 def _git(repo_root: Path, args: list[str]) -> str:
     res = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
+        ["git", "-C", str(repo_root),
+         "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=15,
+        env=sanitized_child_env(repo_root),
     )
     if res.returncode != 0:
         raise GitDiscoveryError(res.stderr.strip()[:300] or "git falhou")
@@ -58,6 +62,9 @@ def _git(repo_root: Path, args: list[str]) -> str:
 
 def _discover(repo_root: Path, base: str) -> tuple[tuple[str, ...], frozenset[str]]:
     """(changed incl. origem+destino de renomes + untracked, deletados)."""
+    # Banca-A 5: `base` vira argv do git — `--output=...` é file-write gadget.
+    if not base or base.lstrip().startswith("-"):
+        raise GitDiscoveryError("base inválida (não pode ser flag)")
     out = _git(repo_root, [
         "diff", "--name-status", "-M", f"--diff-filter={_DIFF_FILTERS}", base, "--",
     ])

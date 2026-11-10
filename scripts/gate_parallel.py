@@ -10,6 +10,8 @@ threads apenas orquestram os `wait` dos filhos criados por `Popen`.
 """
 from __future__ import annotations
 
+import os
+
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,12 +97,14 @@ def run_gates_parallel(specs: Sequence[GateSpec], *,
             finally:
                 sem.release()
 
+        from scripts.state_paths import sanitized_child_env
         for idx, spec in enumerate(specs):
             sem.acquire()
             try:
                 child = supervisor.start(
                     spec.argv,
                     cwd=Path(spec.cwd),
+                    env=sanitized_child_env(Path(spec.cwd)),
                     max_output_bytes=_GATE_MAX_OUTPUT,
                 )
             except (OSError, ValueError) as exc:

@@ -333,11 +333,25 @@ class TestRestoreAndPurge(unittest.TestCase):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["items"][0]["verified"] = False
         manifest["items"][0]["sha256"] = "f" * 64
+        # Banca-A 3: manifesto é assinado — adultera só o item e re-assina
+        # com a chave da instalação para exercitar o caminho verified=False.
+        from scripts.henke_clean import _manifest_hmac
+        manifest["hmac"] = _manifest_hmac(self.repo, manifest)
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         n = restore_batch(self.repo, self.batch.batch_id)
         self.assertEqual(n, 0)
         self.assertFalse(self.cache.exists(),
                          "item não verificado não pode voltar à origem")
+
+    def test_restore_refuses_tampered_manifest(self):
+        """Banca-A 3: manifesto adulterado sem re-assinatura é recusado."""
+        batch_dir = (self.repo / ".henke" / "quarantine" / self.batch.batch_id)
+        manifest_path = batch_dir / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["items"][0]["sha256"] = "0" * 64
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            restore_batch(self.repo, self.batch.batch_id)
 
 
 class TestStagingAndLogging(unittest.TestCase):

@@ -19,6 +19,10 @@ import re
 import subprocess
 import sys
 
+_SUITE_ROOT = Path(__file__).resolve().parents[1]
+if str(_SUITE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SUITE_ROOT))
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -41,7 +45,7 @@ def compute_spec_hash(spec_path: Path) -> str:
 
 
 def _md_clean(text: str) -> str:
-    """H5 (banca v14): comentários HTML e fenced code blocks podiam conter
+    r"""H5 (banca v14): comentários HTML e fenced code blocks podiam conter
     `## 4.` falso ou itens `- \`path\`` — o parser lia o que o humano não
     aprovou. Strip antes de qualquer parse de seção."""
     text = re.sub(r"<!--[\s\S]*?-->", " ", text)
@@ -117,11 +121,10 @@ def parse_declared_symbols(spec_path: Path) -> list[tuple[str, str]]:
 
 # A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
 # no ambiente redirecionariam o git dos vereditos para outro repo/index.
-_GIT_ENV = {k: v for k, v in os.environ.items() if not (k.startswith("GIT_") or k.startswith("PYTHON")
-                or k.startswith("LD_") or k.startswith("DYLD_")
-                or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
-                         "PERL5OPT", "PERL5LIB", "RUBYOPT",
-                         "DOTNET_STARTUP_HOOKS"))}
+def _GIT_ENV_F(repo: Path) -> dict:
+    # Banca-A 2: PATH filtrado — shim `git` no repo resolvia dentro do scan.
+    from scripts.state_paths import sanitized_child_env
+    return sanitized_child_env(repo)
 
 
 def get_git_root(cwd: Path) -> Path:
@@ -133,7 +136,7 @@ def get_git_root(cwd: Path) -> Path:
             text=True,
             check=True,
             timeout=30,
-            env=_GIT_ENV,
+            env=_GIT_ENV_F(cwd),
         )
         return Path(res.stdout.strip()).resolve()
     except Exception as e:
@@ -171,7 +174,7 @@ def _git_paths_z(git_root: Path, *args: str) -> list[str]:
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
              *args],
             cwd=str(git_root), capture_output=True, check=True, timeout=60,
-            env=_GIT_ENV,
+            env=_GIT_ENV_F(git_root),
         )
     # F36 v11 + H4 v15: CalledProcessError/TimeoutExpired/OSError escapavam
     # como traceback exit 1 — crash veste código de veredito. RuntimeError→2.
@@ -194,7 +197,7 @@ def get_touched_files(git_root: Path, against: str | None = None, active_spec: P
         vres = subprocess.run(
             ["git", "rev-parse", "--verify", "--quiet", f"{against}^{{commit}}"],
             cwd=str(git_root), capture_output=True, timeout=30,
-            env=_GIT_ENV,
+            env=_GIT_ENV_F(git_root),
         )
         if vres.returncode != 0:
             raise ValueError(f"ref '--against' não resolve para commit: {against!r}")
@@ -405,7 +408,7 @@ def check_spec_drift(
     vres = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", f"{against}^{{commit}}"],
         cwd=str(git_root), capture_output=True, text=True, timeout=30,
-        env=_GIT_ENV,
+        env=_GIT_ENV_F(git_root),
     )
     if vres.returncode != 0:
         return False, [

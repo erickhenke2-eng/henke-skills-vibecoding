@@ -63,3 +63,48 @@ def cache_root(repo_root: Path) -> Path:
         str(repo_root.resolve()).encode("utf-8")).hexdigest()[:24]
     base = secret_dir(repo_root).parent  # <profile>/henke/
     return base / "cache" / digest
+
+# Banca-Adversarial 2: helper único de env para TODOS os subprocessos.
+# Combina a escova de loader-hooks do process_runner com o filtro de PATH
+# do run_state._git_env_for — um `git`/shim plantado no repo (ou PATH com
+# entrada relativa) resolvia binário hostil dentro do custodiante.
+_CHILD_ENV_STRIP_PREFIX = (
+    "GIT_", "PYTHON", "LD_", "DYLD_", "NODE_", "NPM_CONFIG", "PERL5",
+    "RUBYOPT", "DOTNET_", "JAVA_", "MAVEN_", "GRADLE_", "SBT_", "PHP",
+    "GOFLAGS", "RUST", "VIRTUAL_ENV", "CARGO_", "GEM_HOME", "BUNDLE_",
+)
+_CHILD_ENV_STRIP_EXACT = frozenset({
+    "BASH_ENV", "ENV", "ZDOTDIR", "CDPATH", "PSModulePath", "ComSpec",
+    "PATHEXT", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "NODE_OPTIONS",
+    "PERL5OPT", "PERL5LIB", "DOTNET_STARTUP_HOOKS",
+})
+
+
+def sanitized_child_env(repo_root: Path | None = None) -> dict:
+    """os.environ escovado para filhos: sem loader-hooks/GIT_* e com PATH
+    sem entradas relativas nem dentro do repo auditado."""
+    env = {
+        k: v for k, v in os.environ.items()
+        if not (k.startswith(_CHILD_ENV_STRIP_PREFIX)
+                or k in _CHILD_ENV_STRIP_EXACT)}
+    if repo_root is not None:
+        try:
+            rr = Path(repo_root).resolve()
+        except OSError:
+            rr = Path(repo_root)
+        keep = []
+        for d in env.get("PATH", "").split(os.pathsep):
+            if not d or not os.path.isabs(d):
+                continue
+            try:
+                dr = Path(d).resolve()
+            except OSError:
+                continue
+            if dr == rr or rr in dr.parents:
+                continue
+            keep.append(d)
+        env["PATH"] = os.pathsep.join(keep)
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    return env
+

@@ -309,6 +309,9 @@ def _ext_census(root: Path) -> dict:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames
                        if d not in _SKIP_DIRS and not d.startswith(".")]
+        dirnames[:] = [d for d in dirnames
+                       if not (Path(dirpath) / d).is_symlink()
+                       and not (Path(dirpath) / d).is_junction()]
         for fn in filenames:
             lang = _EXT_LANG.get(Path(fn).suffix.lower())
             if lang:

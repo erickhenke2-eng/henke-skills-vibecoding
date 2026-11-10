@@ -252,6 +252,10 @@ def scan_a11y_path(target: Path) -> tuple[int, list[tuple[str, str, str]], list[
     root_resolved = t.resolve()
     for dirpath, dirnames, filenames in os.walk(t):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        dirnames[:] = [d for d in dirnames
+                       if not (Path(dirpath) / d).is_symlink()
+                       and not (Path(dirpath) / d).is_junction()]
+
         for fn in sorted(filenames):
             fp = Path(dirpath) / fn
             if fp.suffix.lower() not in A11Y_EXTS:

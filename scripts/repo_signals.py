@@ -31,6 +31,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+_SUITE_ROOT = Path(__file__).resolve().parents[1]
+if str(_SUITE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SUITE_ROOT))
+from scripts.state_paths import sanitized_child_env  # noqa: E402
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
@@ -144,8 +149,7 @@ def cmd_churn(args):
     res = subprocess.run(cmd, capture_output=True, text=True,
                          encoding="utf-8", errors="replace", timeout=60,
                          # A19 (banca v12): GIT_* herdado lia outro repo.
-                         env={k: v for k, v in os.environ.items()
-                              if not k.startswith("GIT_")})
+                         env=sanitized_child_env(Path.cwd()))
     if res.returncode != 0:
         _fail(f"git log falhou: {res.stderr.strip()[:200]}")
     sha, count = None, 0
