@@ -445,8 +445,11 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
             no_cache = True
         elif a == "--clear-cache":
             clear_cache(repo_root)
-            print("[OK] Cache de portões limpo.")
-            return 0
+            # DS-19: limpar e sair 0 SEM executar o portão parecia verde —
+            # o operador pedia veredito fresco e recebia nada. Limpa e SEGUE
+            # para a execução (equivalente a --no-cache nesta rodada).
+            no_cache = True
+            print("[OK] Cache de portões limpo — executando portão.")
         else:
             args.append(a)
 
@@ -607,7 +610,7 @@ def _cmd_check(
             from scripts.metricas.scan_manifest import (
                 run_incremental_scan, scanner_specs,
             )
-            spec_by_id = {s.scanner_id: s for s in scanner_specs(repo_root)}
+            spec_by_id = {s.scanner_id: s for s in scanner_specs()}
             manifest_results: dict[str, dict] = {}
             for name, _script, _args in checks_to_run:
                 scanner_id = name.replace("_scan", "")
@@ -617,7 +620,9 @@ def _cmd_check(
                     repo_root, spec_by_id[scanner_id],
                     full=full or effective_no_cache,
                 )
-                passed = res.exit_code == 0
+                # DS-4: exit 3 = n/a (nada elegível a verificar) é veredito
+                # físico honesto — não reprova, mas também não é PASS.
+                passed = res.exit_code in (0, 3)
                 if not passed:
                     overall_ok = False
                 manifest_results[name] = {
@@ -652,7 +657,7 @@ def _cmd_check(
                 cached = None if effective_no_cache else get_cached_gate(key, repo_root=repo_root)
                 if cached is not None:
                     exit_code = cached.get("exit_code", cached.get("returncode", 0))
-                    passed = cached.get("passed", exit_code == 0)
+                    passed = exit_code in (0, 3)
                     if not passed:
                         overall_ok = False
                     cached_results[idx] = {
@@ -709,7 +714,9 @@ def _cmd_check(
             }, ensure_ascii=False, indent=2))
         else:
             for item in results:
-                if item.get("cached"):
+                if item["exit_code"] == 3:
+                    badge = "N/A (CACHED)" if item.get("cached") else "N/A"
+                elif item.get("cached"):
                     badge = "CACHE HIT" if item["passed"] else "FAIL (CACHED)"
                 else:
                     badge = "PASS" if item["passed"] else "FAIL"
@@ -825,8 +832,14 @@ def _cmd_clean(repo_root: Path, *, execute: bool = False,
             print("ERRO: --restore exige --execute.", file=sys.stderr)
             return 2
         n = restore_batch(repo_root, restore)
+        if n == 0:
+            # DS-2: "0 restaurados" não é sucesso — todos os itens foram
+            # pulados (não-verificados, destino ocupado ou fora da raiz).
+            print(f"[FALHA] 0 item(ns) restaurado(s) do batch {restore} "
+                  "(veja clean_log.jsonl).", file=sys.stderr)
+            return 1
         print(f"[OK] {n} item(ns) restaurado(s) do batch {restore}.")
-        return 0 if n >= 0 else 1
+        return 0
     if purge_expired:
         if not execute or not confirm_batch:
             print("ERRO: --purge-expired exige --execute e --confirm-batch <id>.",

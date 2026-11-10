@@ -111,15 +111,150 @@ class TestSelectTests(unittest.TestCase):
                 sel = self._select(["tests/test_prod.py"])
                 self.assertEqual(sel.mode, "full")
 
-    def test_static_subprocess_without_interpreter_stays_selected(self):
-        """subprocess sem sys.executable não dispara o fallback."""
+    def test_static_subprocess_without_interpreter_forces_full(self):
+        """subprocess em tests/ é incerteza MESMO sem sys.executable literal.
+
+        Inversão exigida pela auditoria: `subprocess.run(['git','status'])`
+        não prova que o teste não executa código fora do grafo — dentro de
+        tests/ qualquer import/uso de subprocess força a suíte completa.
+        """
         _write(self.repo, "tests/test_dyn.py",
                "import subprocess\n"
                "def test_x():\n"
                "    subprocess.run(['git', 'status'])\n")
         sel = self._select(["tests/test_prod.py"])
-        self.assertEqual(sel.mode, "selected")
-        self.assertEqual(sel.test_files, ("tests/test_prod.py",))
+        self.assertEqual(sel.mode, "full")
+        self.assertTrue(any(r.startswith("dynamic_exec:") for r in sel.reasons),
+                        f"reasons={sel.reasons}")
+
+    def test_loose_name_dynamic_loader_forces_full(self):
+        """PoC A: loader por nome solto (ast.Name) é detectado.
+
+        `from importlib.util import spec_from_file_location` chamado pelo
+        nome importado — sem o qualificador importlib.util — também força
+        a suíte completa.
+        """
+        for body in (
+            "from importlib.util import spec_from_file_location\n"
+            "spec_from_file_location('m', 'x.py')\n",
+            "from runpy import run_module\n"
+            "run_module('mod')\n",
+            "from importlib import import_module\n"
+            "import_module('pkg.mod')\n",
+            "spec_from_file_location('m', 'x.py')  # nome solto sem import\n",
+        ):
+            _write(self.repo, "tests/test_dyn.py", body)
+            with self.subTest(snippet=body.strip().splitlines()[-1][:48]):
+                sel = self._select(["tests/test_prod.py"])
+                self.assertEqual(sel.mode, "full")
+
+    def test_sys_executable_alias_forces_full(self):
+        """PoC B: `PY = sys.executable; run([PY, ...])` é detectado."""
+        for body in (
+            "import sys\nfrom subprocess import run\n"
+            "PY = sys.executable\nrun([PY, '-V'])\n",
+            "import sys\nPY = sys.executable\n"
+            "Popen([PY, 'm.py'])  # spawn sem import explícito de subprocess\n",
+        ):
+            _write(self.repo, "tests/test_dyn.py", body)
+            with self.subTest(snippet=body.strip().splitlines()[-1][:48]):
+                sel = self._select(["tests/test_prod.py"])
+                self.assertEqual(sel.mode, "full")
+
+    def test_helper_py_under_tests_scanned_for_dynamic_exec(self):
+        """PoC C: helpers sob tests/ (não test_*.py) também são varridos."""
+        for rel in ("tests/helpers.py", "tests/e2e/e2e_common.py"):
+            _write(self.repo, rel,
+                   "import subprocess\n"
+                   "def go():\n"
+                   "    subprocess.call(['echo', 'hi'])\n")
+            with self.subTest(helper=rel):
+                sel = self._select(["tests/test_prod.py"])
+                self.assertEqual(sel.mode, "full")
+                self.assertTrue(
+                    any(r == f"dynamic_exec:{rel}" for r in sel.reasons),
+                    f"reasons={sel.reasons}")
+            (self.repo / rel).unlink()
+
+    def test_dynamic_module_import_alone_forces_full(self):
+        """PoC D: import pelado de módulos de execução já é incerteza."""
+        for body in (
+            "import subprocess\nX = 1\n",
+            "import subprocess as sp\nX = 1\n",
+            "import runpy\nX = 1\n",
+            "import multiprocessing\nX = 1\n",
+            "import os\nos.system('echo hi')\n",
+            "import os as o\no.system('echo hi')\n",
+            "from os import system\nsystem('echo hi')\n",
+            "from os import system\nX = 1\n",
+            "import os\nos.execv('/bin/x', [])\n",
+            "import importlib\nX = 1\n",
+            "import importlib.util\nX = 1\n",
+            "from importlib import import_module\nX = 1\n",
+            "import asyncio\nX = 1\n",
+            "import asyncio.subprocess\nX = 1\n",
+            "from asyncio import create_subprocess_exec\nX = 1\n",
+            # Bare-name sem import delator (from os import * / sombra local):
+            # o chamador, não o import, é a prova conservadora.
+            "system('echo hi')\n",
+            "execv('/bin/x', [])\n",
+        ):
+            _write(self.repo, "tests/test_dyn.py", body)
+            with self.subTest(snippet=body.strip().splitlines()[0][:48]):
+                sel = self._select(["tests/test_prod.py"])
+                self.assertEqual(sel.mode, "full")
+
+    def test_dynamic_exec_in_prod_closure_forces_full(self):
+        """PoC R3-A: produção alcançada pelo grafo com execução dinâmica.
+
+        Um loader de plugins/runner em produção invisível ao grafo torna a
+        seleção não-probante — o fechamento, não só tests/, é varrido.
+        """
+        cases = [
+            "import importlib\ngetattr(importlib, 'import_module')('x')\n",
+            "run = exec\nrun('x=1')\n",
+            "from importlib.machinery import SourceFileLoader\n"
+            "SourceFileLoader('m', 'x.py')\n",
+            "import asyncio\nasyncio.create_subprocess_exec('x')\n",
+            "import importlib\nimportlib.import_module('x')\n",
+            "loader.exec_module(mod)\n",
+            "imp.load_module('m')\n",
+            "util.spec_from_file_location('m', 'x.py')\n",
+        ]
+        for body in cases:
+            _write(self.repo, "scripts/prod.py", body)
+            with self.subTest(snippet=body.strip().splitlines()[0][:48]):
+                sel = self._select(["tests/test_prod.py"])
+                self.assertEqual(sel.mode, "full")
+                self.assertTrue(
+                    any(r == "dynamic_exec:scripts/prod.py"
+                        for r in sel.reasons),
+                    f"reasons={sel.reasons}")
+        _write(self.repo, "scripts/prod.py", "X = 1\n")
+
+    def test_reference_only_dynamic_names_force_full(self):
+        """PoC R3-B: referências em carga sem chamada direta flagam.
+
+        `run = exec` (ast.Name Load), `handler = obj.exec_module`
+        (ast.Attribute Load) e getattr com literal de string escapavam do
+        filtro que só inspecionava ast.Call.
+        """
+        for body in (
+            "run = exec\nX = 1\n",
+            "handler = eval\nX = 1\n",
+            "loader = __import__\nX = 1\n",
+            "fn = mod.exec_module\nX = 1\n",
+            "fn = pkg.load_module\nX = 1\n",
+            "Loader = machinery.SourceFileLoader\nX = 1\n",
+            "factory = util.spec_from_loader\nX = 1\n",
+            "spawn = asyncio.create_subprocess_shell\nX = 1\n",
+            "getattr(obj, 'exec_module')\n",
+            "m = getattr(mod, 'import_module')('x')\n",
+        ):
+            _write(self.repo, "tests/test_dyn.py", body)
+            with self.subTest(snippet=body.strip().splitlines()[0][:48]):
+                sel = self._select(["tests/test_prod.py"])
+                self.assertEqual(sel.mode, "full")
 
     def test_dynamic_exec_scan_survives_missing_tests_dir(self):
         """Repo sem tests/ → scan dinâmico retorna lista vazia, nunca None."""

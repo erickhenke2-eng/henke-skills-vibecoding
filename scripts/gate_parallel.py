@@ -71,7 +71,7 @@ def run_gates_parallel(specs: Sequence[GateSpec], *,
                     exit_code=res.returncode,
                     stdout=res.stdout,
                     stderr=res.stderr,
-                    passed=(res.returncode == 0 and not res.timed_out
+                    passed=(res.returncode in (0, 3) and not res.timed_out
                             and not drain_error),
                     cached=False,
                     timed_out=res.timed_out,

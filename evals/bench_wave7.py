@@ -55,7 +55,7 @@ def bench_gates(repo: Path) -> dict:
 
 def bench_manifest(repo: Path) -> dict:
     from scripts.metricas.scan_manifest import run_incremental_scan, scanner_specs
-    spec = {s.scanner_id: s for s in scanner_specs(repo)}["a11y"]
+    spec = {s.scanner_id: s for s in scanner_specs()}["a11y"]
     import os
     old = os.environ.pop("HENKE_STATE_DIR", None)
     try:

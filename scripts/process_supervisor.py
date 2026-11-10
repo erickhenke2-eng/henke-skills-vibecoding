@@ -386,7 +386,11 @@ class ChildSupervisor:
                 except (OSError, ProcessLookupError):
                     pass
         else:
-            if child._pgid is not None:
+            # DS-15: killpg só no grupo do FILHO — se getpgid devolveu o
+            # nosso próprio pgid (setsid falhou/corrida), mataria o grupo
+            # do processo pai inteiro (CI morre junto com o portão).
+            own_pgid = os.getpgrp()
+            if child._pgid is not None and child._pgid != own_pgid:
                 try:
                     os.killpg(child._pgid, signal.SIGTERM)
                 except (ProcessLookupError, PermissionError, OSError):
@@ -397,6 +401,11 @@ class ChildSupervisor:
                     try:
                         os.killpg(child._pgid, signal.SIGKILL)
                     except (ProcessLookupError, PermissionError, OSError):
+                        pass
+                if proc.poll() is None:
+                    try:
+                        proc.kill()
+                    except (OSError, ProcessLookupError):
                         pass
             else:
                 try:

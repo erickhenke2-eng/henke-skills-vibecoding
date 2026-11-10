@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -38,11 +39,23 @@ class TestScanManifest(unittest.TestCase):
         self.addCleanup(
             lambda: os.environ.__setitem__("HENKE_STATE_DIR", self._sd)
             if self._sd else None)
-        self.specs = {s.scanner_id: s for s in scanner_specs(self.repo)}
+        # DS-5: o segredo mora no perfil — isola em tempdir para nunca
+        # escrever chaves de teste no perfil real do usuário.
+        self._secret_td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._secret_td.cleanup)
+        self._prev_secret_dir = os.environ.get("HENKE_SECRET_DIR")
+        os.environ["HENKE_SECRET_DIR"] = self._secret_td.name
+        def _restore_secret_dir():
+            if self._prev_secret_dir is None:
+                os.environ.pop("HENKE_SECRET_DIR", None)
+            else:
+                os.environ["HENKE_SECRET_DIR"] = self._prev_secret_dir
+        self.addCleanup(_restore_secret_dir)
+        self.specs = {s.scanner_id: s for s in scanner_specs()}
 
     def test_scanners_resolve_from_suite_not_repo(self):
         """Specs apontam para a suíte; repo externo sem scripts/ é escaneado."""
-        for spec in scanner_specs(self.repo):
+        for spec in scanner_specs():
             self.assertTrue(spec.script_path.is_file(),
                             f"scanner inexistente: {spec.script_path}")
             self.assertTrue(
@@ -173,6 +186,176 @@ class TestScanManifest(unittest.TestCase):
         r = run_incremental_scan(self.repo, spec)
         self.assertNotIn("old.html", r.reused_files)
         self.assertNotIn("old.html", r.scanned_files)
+
+    def test_manifest_written_with_hmac(self):
+        """Manifesto persistido carrega assinatura HMAC-SHA256 na raiz."""
+        _write(self.repo, "page.html", "<html><body>ok</body></html>")
+        spec = self.specs["a11y"]
+        run_incremental_scan(self.repo, spec, full=True)
+        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        data = json.loads(mp.read_text(encoding="utf-8"))
+        self.assertIsInstance(data.get("hmac"), str)
+        self.assertEqual(len(data["hmac"]), 64)
+
+    def test_tampered_manifest_forces_rescan(self):
+        """PoC do auditor: payload adulterado (findings zerados) é rejeitado.
+
+        Sem HMAC, zerar findings no JSON transformava FAIL em PASS sem
+        escanear nada. Agora o manifesto adulterado é descartado e a rodada
+        faz re-scan completo com razão hmac_invalid.
+        """
+        _write(self.repo, "bad.html",
+               '<html><body><button aria-hidden="true">x</button>'
+               "</body></html>")
+        spec = self.specs["a11y"]
+        r1 = run_incremental_scan(self.repo, spec, full=True)
+        self.assertEqual(r1.exit_code, 1)
+        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        data = json.loads(mp.read_text(encoding="utf-8"))
+        for entry in data["files"].values():
+            entry["findings"] = []
+        mp.write_text(json.dumps(data), encoding="utf-8")
+        r2 = run_incremental_scan(self.repo, spec)
+        self.assertTrue(r2.full_scan)
+        self.assertTrue(any("hmac_invalid" in x for x in r2.reasons),
+                        f"reasons={r2.reasons}")
+        self.assertIn("bad.html", r2.scanned_files)
+        self.assertTrue(r2.findings, "findings reais reaparecem no re-scan")
+        self.assertEqual(r2.exit_code, 1)
+
+    def test_missing_hmac_rejected(self):
+        """Manifesto sem campo hmac (ex.: versão antiga) é descartado."""
+        _write(self.repo, "page.html", "<html><body>ok</body></html>")
+        spec = self.specs["a11y"]
+        run_incremental_scan(self.repo, spec, full=True)
+        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        data = json.loads(mp.read_text(encoding="utf-8"))
+        del data["hmac"]
+        mp.write_text(json.dumps(data), encoding="utf-8")
+        r = run_incremental_scan(self.repo, spec)
+        self.assertTrue(r.full_scan)
+        self.assertTrue(any("hmac_invalid" in x for x in r.reasons),
+                        f"reasons={r.reasons}")
+
+    def test_planted_repo_secret_never_trusts_manifest(self):
+        """DS-5: `.cache_secret` plantado no repo é ignorado — a chave real
+        vive no perfil; manifesto assinado com a chave plantada falha HMAC."""
+        _write(self.repo, "page.html", "<html><body>ok</body></html>")
+        spec = self.specs["a11y"]
+        r1 = run_incremental_scan(self.repo, spec, full=True)
+        self.assertEqual(r1.exit_code, 0)
+        # O repo não pode conter a chave real — só o perfil do usuário.
+        self.assertFalse((self.repo / ".henke" / ".cache_secret").exists())
+        # Um tarball hostil entrega chave + manifesto assinado com ela:
+        # o verificador usa a chave do perfil → hmac_invalid → full scan.
+        from scripts.metricas.scan_manifest import _manifest_hmac
+        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        data = json.loads(mp.read_text(encoding="utf-8"))
+        data["hmac"] = _manifest_hmac(b"attacker-planted-key", data)
+        mp.write_text(json.dumps(data), encoding="utf-8")
+        r = run_incremental_scan(self.repo, spec)
+        self.assertTrue(r.full_scan)
+        self.assertTrue(any("hmac_invalid" in x for x in r.reasons),
+                        f"reasons={r.reasons}")
+        # E mesmo após forja detectada, rodada seguinte reusa o manifesto
+        # legítimo reescrito com a chave real do perfil.
+        r3 = run_incremental_scan(self.repo, spec)
+        self.assertEqual(r3.exit_code, 0)
+
+    def test_mid_scan_mutation_discards_entry_and_fails(self):
+        """PoC TOCTOU: arquivo alterado entre o snapshot e o fim do scan.
+
+        Sem a re-verificação pós-scan, o manifesto gravaria o hash de uma
+        versão com os findings de outra — falso-verde permanente. A entrada
+        corrompida é descartada, a rodada falha fechada (exit 2) e o
+        manifesto anterior permanece byte a byte intacto.
+        """
+        _write(self.repo, "page.html", "<html><body>v1</body></html>")
+        spec = self.specs["a11y"]
+        run_incremental_scan(self.repo, spec, full=True)
+        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        before = mp.read_bytes()
+
+        _write(self.repo, "page.html", "<html><body>v2</body></html>")
+
+        import scripts.metricas.scan_manifest as sm
+        real_scan_one = sm._scan_one
+
+        def racing(repo_root, spec_, path, rel, mod, **kw):
+            out = real_scan_one(repo_root, spec_, path, rel, mod, **kw)
+            path.write_text("<html><body>v3</body></html>",
+                            encoding="utf-8")
+            return out
+
+        with patch.object(sm, "_scan_one", side_effect=racing):
+            r = run_incremental_scan(self.repo, spec)
+        self.assertEqual(r.exit_code, 2)
+        self.assertTrue(any(x.startswith("race:page.html") for x in r.reasons),
+                        f"reasons={r.reasons}")
+        self.assertEqual(mp.read_bytes(), before,
+                         "manifesto não pode gravar par (hash, findings) corrompido")
+
+    def test_non_utf8_manifest_rebuilds_with_corrupted_reason(self):
+        """Bytes não-UTF-8 → corrupted_file + full rebuild, nunca crash."""
+        _write(self.repo, "page.html", "<html><body>ok</body></html>")
+        spec = self.specs["a11y"]
+        run_incremental_scan(self.repo, spec, full=True)
+        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp.write_bytes(b'\xff\xfe{"schema_version": 1')
+        r = run_incremental_scan(self.repo, spec)
+        self.assertTrue(r.full_scan)
+        self.assertTrue(any("corrupted_file" in x for x in r.reasons),
+                        f"reasons={r.reasons}")
+        self.assertIn("page.html", r.scanned_files)
+
+    def test_non_dict_manifest_is_corrupted_file(self):
+        """JSON válido sem forma de manifesto → corrupted_file."""
+        _write(self.repo, "page.html", "<html><body>ok</body></html>")
+        spec = self.specs["a11y"]
+        run_incremental_scan(self.repo, spec, full=True)
+        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp.write_text("[1, 2, 3]", encoding="utf-8")
+        r = run_incremental_scan(self.repo, spec)
+        self.assertTrue(r.full_scan)
+        self.assertTrue(any("corrupted_file" in x for x in r.reasons),
+                        f"reasons={r.reasons}")
+
+    def test_non_ascii_hmac_rejected_not_crashed(self):
+        """hmac não-ASCII → hmac_invalid (sem TypeError em compare_digest)."""
+        _write(self.repo, "page.html", "<html><body>ok</body></html>")
+        spec = self.specs["a11y"]
+        run_incremental_scan(self.repo, spec, full=True)
+        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        data = json.loads(mp.read_text(encoding="utf-8"))
+        data["hmac"] = "áéíóú" * 13
+        mp.write_text(json.dumps(data), encoding="utf-8")
+        r = run_incremental_scan(self.repo, spec)
+        self.assertTrue(r.full_scan)
+        self.assertTrue(any("hmac_invalid" in x for x in r.reasons),
+                        f"reasons={r.reasons}")
+
+    def test_hmac_predicates_return_exact_booleans(self):
+        """Predicados retornam bool/tupla exatos — nunca None disfarçado."""
+        from scripts.metricas.scan_manifest import (
+            _load_manifest, _manifest_hmac_ok, _secret_is_tracked,
+        )
+        outside = Path(self._td.name).parent / f"outside_{os.getpid()}"
+        self.assertIs(_secret_is_tracked(self.repo, outside), False)
+        with patch("scripts.metricas.scan_manifest.subprocess.run",
+                   side_effect=OSError("sem git")):
+            self.assertIs(_secret_is_tracked(
+                self.repo, self.repo / ".henke" / ".cache_secret"), False)
+        self.assertIs(_manifest_hmac_ok(None, {"hmac": "x" * 64}), False)
+        self.assertIs(_manifest_hmac_ok(b"k", {}), False)
+        self.assertIs(_manifest_hmac_ok(b"k", {"hmac": ""}), False)
+        self.assertIs(_manifest_hmac_ok(b"k", {"hmac": 123}), False)
+        spec = self.specs["a11y"]
+        mdir = self.repo / ".henke" / "scan-manifests"
+        mdir.mkdir(parents=True)
+        (mdir / "a11y.json").write_text(
+            json.dumps({"schema_version": "old"}), encoding="utf-8")
+        self.assertEqual(_load_manifest(self.repo, spec, b"k"),
+                         (None, "corrupted_file"))
 
 
 if __name__ == "__main__":

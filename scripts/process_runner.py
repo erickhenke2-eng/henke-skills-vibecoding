@@ -83,9 +83,23 @@ def run_process(
         elif tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls"):
             tokens = ["cmd.exe", "/c"] + tokens
 
-    child_env = os.environ.copy()
+    # DS-6: `os.environ.copy()` + overlay reintroduzia PYTHONPATH/GIT_DIR/
+    # loader hooks que o chamador removeu — um sitecustomize.py plantado no
+    # repo interceptava o portão e saía verde sem escanear. env fornecido
+    # é usado INTEGRALMENTE; sem env, herda só um baseline escovado.
     if env is not None:
-        child_env.update(env)
+        child_env = dict(env)
+    else:
+        child_env = {
+            k: v for k, v in os.environ.items()
+            if not (k.startswith(("GIT_", "PYTHON", "LD_", "DYLD_",
+                                  "NODE_", "NPM_CONFIG", "PERL5", "RUBYOPT",
+                                  "DOTNET_", "JAVA_", "MAVEN_", "GRADLE_",
+                                  "SBT_", "PHP", "GOFLAGS", "RUST",
+                                  "VIRTUAL_ENV"))
+                    or k in ("BASH_ENV", "ENV", "ZDOTDIR", "CDPATH",
+                             "PSModulePath", "ComSpec", "PATHEXT",
+                             "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS"))}
     child_env.setdefault("PYTHONUTF8", "1")
     child_env.setdefault("PYTHONIOENCODING", "utf-8")
 

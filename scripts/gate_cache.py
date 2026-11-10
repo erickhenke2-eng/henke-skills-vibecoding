@@ -26,7 +26,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.state_paths import state_dir  # noqa: E402
+from scripts.state_paths import cache_root, secret_dir, secret_key_name, state_dir  # noqa: E402
 
 
 def _henke_dir(repo_path: Path) -> Path:
@@ -284,6 +284,38 @@ def _scan_dir_files(dir_path: Path, repo_root: Path, out_entries: Dict[str, str]
         pass
 
 
+_SUITE_DIGEST_CACHE: Dict[str, str] = {}
+
+
+def _suite_scripts_digest(suite_root: Path) -> str:
+    """SHA-256 do fechamento de scripts da suíte (DS-19): a chave cobria só o
+    script do portão — corrigir `polyglot.py`/helper compartilhado reusava
+    veredito velho. Digest de TODOS os .py da suíte; cacheado por processo."""
+    key = str(suite_root.resolve())
+    cached = _SUITE_DIGEST_CACHE.get(key)
+    if cached:
+        return cached
+    h = hashlib.sha256(b"suite-v1\x00")
+    scripts_dir = Path(suite_root) / "scripts"
+    try:
+        files = sorted(
+            p for p in scripts_dir.rglob("*.py")
+            if p.is_file() and "__pycache__" not in p.parts)
+    except OSError:
+        files = []
+    for p in files:
+        try:
+            h.update(p.relative_to(suite_root).as_posix().encode("utf-8"))
+            h.update(b"\x00")
+            h.update(hashlib.sha256(p.read_bytes()).digest())
+            h.update(b"\x00")
+        except OSError:
+            h.update(b"UNREADABLE\x00")
+    digest = h.hexdigest()
+    _SUITE_DIGEST_CACHE[key] = digest
+    return digest
+
+
 def compute_cache_key(
     gate_name: str,
     script_path: Path | str,
@@ -338,11 +370,16 @@ def compute_cache_key(
         except Exception:
             pass
 
-    # 5. Composite key hash
+    # 5. Composite key hash — DS-19: + digest dos scripts da suíte (deps
+    # compartilhadas mudam o veredito) + versão de schema da chave.
     composite = hashlib.sha256()
+    composite.update(b"key-v2\x00")
     composite.update(gate_name.encode("utf-8"))
     composite.update(b"|")
     composite.update(script_hash.encode("utf-8"))
+    composite.update(b"|")
+    suite_root = Path(__file__).resolve().parent.parent
+    composite.update(_suite_scripts_digest(suite_root).encode("utf-8"))
     composite.update(b"|")
     composite.update(json.dumps(canon_args, sort_keys=True).encode("utf-8"))
     composite.update(b"|")
@@ -361,8 +398,13 @@ import hmac
 import secrets
 
 def _get_cache_secret(repo_path: Path) -> bytes:
-    """Recupera ou gera a chave secreta HMAC para autenticação das entradas de cache."""
-    secret_file = _henke_dir(repo_path) / ".cache_secret"
+    """Recupera ou gera a chave secreta HMAC das entradas de cache.
+
+    DS-5: a chave vive FORA da árvore auditada (perfil do usuário, chaveada
+    pelo repo). Um `.cache_secret` dentro do repo — plantado por zip/tarball
+    ou commit — nunca é consultado: quem controla o repo não controla a chave.
+    """
+    secret_file = secret_dir(Path(repo_path)) / secret_key_name(Path(repo_path))
     if secret_file.is_file():
         try:
             raw = secret_file.read_bytes()
@@ -377,6 +419,8 @@ def _get_cache_secret(repo_path: Path) -> bytes:
     try:
         secret_file.parent.mkdir(parents=True, exist_ok=True)
         secret_file.write_text(new_hex, encoding="utf-8")
+        if os.name != "nt":
+            os.chmod(secret_file, 0o600)
     except Exception:
         pass
     return new_hex.encode("utf-8")
@@ -423,7 +467,7 @@ def get_cached_gate(
                 del _IN_MEMORY_CACHE[key]
 
     # Check disk cache
-    cache_dir = _henke_dir(repo_path) / "cache"
+    cache_dir = cache_root(repo_path)
 
     # 1. Check consolidated gate_cache.json if present
     consolidated_file = cache_dir / "gate_cache.json"
@@ -479,7 +523,7 @@ def store_cached_gate(
 
     try:
         repo_path = _discover_repo_root(Path(repo_root) if repo_root else None)
-        cache_dir = _henke_dir(repo_path) / "cache"
+        cache_dir = cache_root(repo_path)
 
         # 1. Write individual gate entry atomically
         gate_file = cache_dir / "gates" / _safe_key_filename(key)
@@ -515,7 +559,7 @@ def enforce_ram_limit(
 
     if current_mb >= limit_mb or force_flush or limit_mb <= 0.0:
         repo_path = _discover_repo_root(Path(repo_root) if repo_root else None)
-        cache_dir = _henke_dir(repo_path) / "cache"
+        cache_dir = cache_root(repo_path)
         consolidated_file = cache_dir / "gate_cache.json"
         consolidated = _read_json_safe(consolidated_file) or {}
 
@@ -566,23 +610,26 @@ def clear_cache(repo_root: Optional[Path | str] = None) -> int:
 
     try:
         repo_path = _discover_repo_root(Path(repo_root) if repo_root else None)
-        cache_dir = repo_path / ".henke" / "cache"
+        # DS-14: cache vive fora do repo; limpa ambos (externo novo + legado
+        # .henke/cache de runs antigas) — o legado pode conter entradas
+        # pré-migração que seriam resgatadas depois.
+        for cache_dir in (cache_root(repo_path),
+                          repo_path / ".henke" / "cache"):
+            gates_dir = cache_dir / "gates"
+            if gates_dir.is_dir():
+                for f in gates_dir.glob("*.json"):
+                    try:
+                        f.unlink()
+                        count += 1
+                    except OSError:
+                        pass
 
-        gates_dir = cache_dir / "gates"
-        if gates_dir.is_dir():
-            for f in gates_dir.glob("*.json"):
+            consolidated_file = cache_dir / "gate_cache.json"
+            if consolidated_file.is_file():
                 try:
-                    f.unlink()
-                    count += 1
+                    consolidated_file.unlink()
                 except OSError:
                     pass
-
-        consolidated_file = cache_dir / "gate_cache.json"
-        if consolidated_file.is_file():
-            try:
-                consolidated_file.unlink()
-            except OSError:
-                pass
     except Exception:
         pass
 

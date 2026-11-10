@@ -111,7 +111,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)  # repo externo sem scripts/ — scanners vêm da suíte
         (repo / "p.html").write_text("<html><body>x</body></html>", encoding="utf-8")
-        spec = {s.scanner_id: s for s in scanner_specs(repo)}["a11y"]
+        spec = {s.scanner_id: s for s in scanner_specs()}["a11y"]
         old_sd = os.environ.pop("HENKE_STATE_DIR", None)
         try:
             run_incremental_scan(repo, spec, full=True)

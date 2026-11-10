@@ -102,6 +102,22 @@ class TestCleanCLI(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertFalse(pc.exists())
 
+    def test_restore_returns_exact_zero(self):
+        """rc exato 0 no restore — 'return None' seria exit 0 mas falha aqui."""
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            pc = repo / "__pycache__"
+            pc.mkdir()
+            (pc / "x.pyc").write_bytes(b"0")
+            res = _cli("clean", "--repo", repo, "--execute")
+            self.assertEqual(res.returncode, 0, res.stderr)
+            batch_id = next(
+                (repo / ".henke" / "quarantine").iterdir()).name
+            rc = scripts.henke_cli._cmd_clean(
+                repo, execute=True, restore=batch_id)
+            self.assertEqual(rc, 0)
+            self.assertTrue((pc / "x.pyc").is_file())
+
 
 class TestSessionCLI(unittest.TestCase):
     def test_start_heartbeat_end(self):

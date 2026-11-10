@@ -11,13 +11,25 @@ manifesto → `dirty = reverse_closure(changed)` com arestas antigas ∪ novas �
 scan só dos dirty existentes + checagens globais sempre → escrita atômica só
 em sucesso total. Corrupção, `.tmp` incompleto ou divergência → full rebuild,
 nunca "cache vazio com zero findings".
+
+Anti-TOCTOU: após cada scan o arquivo é re-hasheado e comparado ao snapshot
+(sha256, size, mtime_ns). Divergência = corrida → a entrada é descartada e a
+rodada falha fechada, sem gravar par (hash, findings) incoerente no manifesto.
+
+Todo manifesto gravado carrega assinatura HMAC-SHA256 na raiz, calculada com a
+mesma chave do gate cache — armazenada no perfil do usuário, FORA da árvore
+auditada (DS-5): payload adulterado, HMAC ausente ou assinado com chave
+plantada no repo → manifesto descartado e rebuild integral (`hmac_invalid`),
+nunca findings zerados aceitos.
 """
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -184,12 +196,12 @@ def _load_scanner_module(spec: ScannerSpec):
     return mod
 
 
-def scanner_specs(repo_root: Path | None = None) -> tuple[ScannerSpec, ...]:
+def scanner_specs() -> tuple[ScannerSpec, ...]:
     """Os três scanners com adapter nesta Wave — resolvidos na suíte Henke.
 
-    `repo_root` é aceito por compatibilidade de chamada, mas NUNCA fornece
-    código executável: em repos externos `<repo>/scripts/metricas/` não
-    existe e, se existisse, seria conteúdo auditado — não ferramenta.
+    NENHUM código executável vem do repo alvo: em repos externos
+    `<repo>/scripts/metricas/` não existe e, se existisse, seria conteúdo
+    auditado — não ferramenta.
     """
     mdir = _metricas_dir()
     return (
@@ -215,8 +227,14 @@ def _eligible(spec: ScannerSpec, rel: str, mod) -> bool:
     raise ValueError(f"scanner desconhecido: {spec.scanner_id}")
 
 
-def _scan_one(repo_root: Path, spec: ScannerSpec, path: Path, rel: str, mod):
-    """(status, findings) ou None em erro de leitura/parse (nunca findings vazios por erro)."""
+def _scan_one(repo_root: Path, spec: ScannerSpec, path: Path, rel: str, mod,
+              *, content: str | None = None):
+    """(status, findings) ou None em erro de leitura/parse (nunca findings vazios por erro).
+
+    `content` (a11y) permite escanear exatamente os bytes já lidos pelo
+    chamador — o par (hash, findings) gravado no manifesto corresponde ao
+    mesmo conteúdo, sem re-leitura do disco dentro do scanner.
+    """
     if spec.scanner_id == "hazard":
         sc, fnd, ov = mod.scan_file(path)
         findings = [{"rule": r, "location": loc, "scope": sc_, "message": msg}
@@ -232,7 +250,10 @@ def _scan_one(repo_root: Path, spec: ScannerSpec, path: Path, rel: str, mod):
                      "message": why} for v, _p, fn, why in fnd]
         return "scanned", n, findings
     if spec.scanner_id == "a11y":
-        fnd = mod.scan_a11y_file(path, root=Path(repo_root).resolve())
+        if content is None:
+            fnd = mod.scan_a11y_file(path, root=Path(repo_root).resolve())
+        else:
+            fnd = mod.scan_a11y_content(content, rel)
         findings = [{"rule": r, "location": loc, "message": msg} for r, loc, msg in fnd]
         return "scanned", 1 if path.suffix.lower() in mod.A11Y_EXTS else 0, findings
     raise ValueError(f"scanner desconhecido: {spec.scanner_id}")
@@ -249,7 +270,10 @@ def _global_findings(repo_root: Path, spec: ScannerSpec, mod) -> list[dict]:
 
 def _empty_exit(spec: ScannerSpec) -> int:
     """Código auxiliar para 'nada escaneado': ausência de veredito, nunca sucesso."""
-    return {"hazard": 2, "assertless": 3, "a11y": 0}[spec.scanner_id]
+    # DS-4: a11y sem arquivo de UI era PASS (0) — um repo só-backend ou com a
+    # UI escondida atrás de junction passava no `henke check` sem a11y. O
+    # protocolo exige n/a (3): veredito honesto, nunca verde por tautologia.
+    return {"hazard": 2, "assertless": 3, "a11y": 3}[spec.scanner_id]
 
 
 def _nonempty_exit(spec: ScannerSpec, findings: list[dict]) -> int:
@@ -269,15 +293,72 @@ def _manifest_path(repo_root: Path, spec: ScannerSpec) -> Path:
     return _manifest_dir(repo_root) / f"{spec.scanner_id}.json"
 
 
-def _load_manifest(repo_root: Path, spec: ScannerSpec) -> dict | None:
+# ---------------------------------------------------------------------------
+# Assinatura HMAC-SHA256 do manifesto (anti-forja, mesma chave do gate cache)
+# ---------------------------------------------------------------------------
+
+
+def _secret_is_tracked(repo_root: Path, secret_file: Path) -> bool:
+    """True se a chave HMAC está versionada — segredo público não assina nada."""
+    try:
+        rel = secret_file.resolve().relative_to(Path(repo_root).resolve()).as_posix()
+    except (ValueError, OSError):
+        return False  # state_dir fora do repo (HENKE_STATE_DIR) não é rastreável
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(Path(repo_root).resolve()), "ls-files",
+             "--error-unmatch", "--", rel],
+            capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return False  # sem git, o arquivo não pode estar no índice
+    return res.returncode == 0
+
+
+def _manifest_secret(repo_root: Path) -> bytes | None:
+    """Chave HMAC compartilhada com o gate cache; None se comprometida."""
+    from scripts.gate_cache import _get_cache_secret
+    from scripts.state_paths import secret_dir, secret_key_name
+    # DS-5: a chave mora no perfil do usuário (fora da árvore auditada); o
+    # check de "rastreada" ainda vale para overrides apontados ao repo.
+    secret_file = secret_dir(Path(repo_root)) / secret_key_name(Path(repo_root))
+    if _secret_is_tracked(repo_root, secret_file):
+        return None
+    return _get_cache_secret(Path(repo_root))
+
+
+def _manifest_hmac(secret: bytes, manifest: dict) -> str:
+    """HMAC-SHA256 sobre o payload canônico (tudo menos o próprio campo)."""
+    clean = {k: v for k, v in manifest.items() if k != "hmac"}
+    canonical = json.dumps(clean, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hmac.new(secret, b"henke-scan-manifest-v1\x00" + canonical,
+                    hashlib.sha256).hexdigest()
+
+
+def _manifest_hmac_ok(secret: bytes | None, manifest: dict) -> bool:
+    if secret is None:
+        return False
+    stored = manifest.get("hmac")
+    if not isinstance(stored, str) or not stored.isascii():
+        return False
+    return hmac.compare_digest(stored, _manifest_hmac(secret, manifest))
+
+
+def _load_manifest(repo_root: Path, spec: ScannerSpec,
+                   secret: bytes | None) -> tuple[dict | None, str | None]:
+    """(manifesto, rejeição). HMAC ausente/adulterado → 'hmac_invalid';
+    arquivo ilegível/corrompido → 'corrupted_file' (ambos → full rebuild)."""
     path = _manifest_path(repo_root, spec)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    except FileNotFoundError:
+        return None, None
+    except (OSError, ValueError, TypeError, UnicodeDecodeError, RecursionError):
+        return None, "corrupted_file"
     if not isinstance(data, dict) or data.get("schema_version") != _SCHEMA_VERSION:
-        return None
-    return data
+        return None, "corrupted_file"
+    if not _manifest_hmac_ok(secret, data):
+        return None, "hmac_invalid"
+    return data, None
 
 
 def _write_manifest_atomic(repo_root: Path, spec: ScannerSpec, manifest: dict) -> None:
@@ -320,6 +401,38 @@ def _graph_edges(repo_root: Path) -> dict[str, frozenset[str]]:
         return dict(g.direct), g.unresolved
     except Exception:
         return {}, {"__engine__": ("graph_build_failed",)}
+
+
+def _manifest_fingerprint_ok(old: dict, fp: dict) -> bool:
+    """Manifesto reusável somente se o fingerprint bater em todos os eixos."""
+    scn = old.get("scanner") or {}
+    return (
+        scn.get("id") == fp["id"]
+        and scn.get("version") == fp["version"]
+        and scn.get("script_sha256") == fp["script_sha256"]
+        and scn.get("engine_sha256") == fp["engine_sha256"]
+        and scn.get("python") == fp["python"]
+        and scn.get("args_sha256") == fp["args_sha256"]
+        and scn.get("config_sha256") == fp["config_sha256"]
+        and scn.get("graph_version") == fp["graph_version"]
+    )
+
+
+def _write_signed_manifest(repo_root: Path, spec: ScannerSpec,
+                           secret: bytes | None, fp: dict,
+                           new_entries: dict[str, dict],
+                           reasons: list[str]) -> None:
+    """Persiste manifesto assinado; sem chave confiável nada é gravado."""
+    if secret is None:
+        reasons.append("hmac_secret_compromised:manifest_write_skipped")
+        return
+    manifest = {
+        "schema_version": _SCHEMA_VERSION,
+        "scanner": fp,
+        "files": {rel: new_entries[rel] for rel in sorted(new_entries)},
+    }
+    manifest["hmac"] = _manifest_hmac(secret, manifest)
+    _write_manifest_atomic(repo_root, spec, manifest)
 
 
 def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
@@ -374,27 +487,21 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
         if unresolved:
             reasons.append("graph_unresolved:full_rebuild")
 
-        old = _load_manifest(repo, spec) if locked else None
+        secret = _manifest_secret(repo)
+        old, manifest_reject = (_load_manifest(repo, spec, secret)
+                                if locked else (None, None))
         old_files: dict[str, dict] = {}
         manifest_valid = False
         if old and not full and not unresolved:
-            scn = old.get("scanner") or {}
-            manifest_valid = (
-                scn.get("id") == fp["id"]
-                and scn.get("version") == fp["version"]
-                and scn.get("script_sha256") == fp["script_sha256"]
-                and scn.get("engine_sha256") == fp["engine_sha256"]
-                and scn.get("python") == fp["python"]
-                and scn.get("args_sha256") == fp["args_sha256"]
-                and scn.get("config_sha256") == fp["config_sha256"]
-                and scn.get("graph_version") == fp["graph_version"]
-            )
+            manifest_valid = _manifest_fingerprint_ok(old, fp)
             if manifest_valid:
                 old_files = old.get("files") or {}
             else:
                 reasons.append("fingerprint_or_schema_diverged:full_rebuild")
         elif full:
             reasons.append("forced_full")
+        if manifest_reject:
+            reasons.append(f"{manifest_reject}:full_rebuild")
 
         # 4-5. changed + dirty = reverse_closure(changed) com arestas antigas∪novas.
         removed = sorted(set(old_files) - set(files_now))
@@ -418,9 +525,37 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
         new_entries: dict[str, dict] = {}
         failed = False
         for rel in dirty_existing:
-            out = _scan_one(repo, spec, repo / rel, rel, mod)
+            fpath = repo / rel
+            # Scanners com leitura em memória recebem exatamente os bytes
+            # avaliados — o hash re-verificado abaixo fecha a janela TOCTOU.
+            content = None
+            if spec.scanner_id == "a11y":
+                try:
+                    content = fpath.read_bytes().decode("utf-8", errors="replace")
+                except OSError as exc:
+                    reasons.append(f"scan_error:{rel}:{type(exc).__name__}")
+                    failed = True
+                    break
+            out = _scan_one(repo, spec, fpath, rel, mod, content=content)
             if out is None:
                 reasons.append(f"scan_error:{rel}")
+                failed = True
+                break
+            # Anti-TOCTOU: se (sha256, size, mtime_ns) divergir do snapshot
+            # pré-scan, a entrada casaria hash de uma versão com findings de
+            # outra — falso-verde permanente. A entrada é descartada e a
+            # rodada falha fechada (manifesto anterior permanece intocado).
+            try:
+                post = winpath.sha256_file(fpath)
+            except (winpath.UnstableFileError, winpath.PathSafetyError,
+                    OSError) as exc:
+                reasons.append(f"race:{rel}:{type(exc).__name__}")
+                failed = True
+                break
+            snap = files_now[rel]
+            if (post.sha256, post.size, post.mtime_ns) != (
+                    snap["sha256"], snap["size"], snap["mtime_ns"]):
+                reasons.append(f"race:{rel}")
                 failed = True
                 break
             status, sc_count, findings = out
@@ -449,14 +584,11 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
             all_findings.extend(new_entries[rel].get("findings") or [])
         all_findings.extend(_global_findings(repo, spec, mod))
 
-        # 8. Escrita atômica única somente em sucesso total.
+        # 8. Escrita atômica única somente em sucesso total — e somente
+        # assinada: sem chave confiável o manifesto não é persistido.
         if locked:
-            manifest = {
-                "schema_version": _SCHEMA_VERSION,
-                "scanner": fp,
-                "files": {rel: new_entries[rel] for rel in sorted(new_entries)},
-            }
-            _write_manifest_atomic(repo, spec, manifest)
+            _write_signed_manifest(repo, spec, secret, fp, new_entries,
+                                   reasons)
 
         scanned_now = sorted(rel for rel in dirty_existing
                              if new_entries[rel]["status"] == "scanned"

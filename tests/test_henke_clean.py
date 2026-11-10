@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -161,6 +162,97 @@ class TestQuarantine(unittest.TestCase):
         self.assertTrue((payload / "a.pyc").is_file())
         self.assertEqual((payload / "a.pyc").read_bytes(), b"deadbeef")
 
+    def test_origin_race_preserves_staged_and_source(self):
+        """Corrida na origem: staged NUNCA é apagado — os dois lados ficam.
+
+        Se a 2ª perna falha e a origem reaparece com conteúdo novo (outro
+        processo correndo), apagar o staged destruiria a única cópia do
+        item movido. O correto é falhar preservando staged + src.
+        """
+        cache = self._seed_cache()
+        cand = CleanCandidate(source=cache, kind="repo-cache", size_bytes=16)
+        real_replace = os.replace
+
+        def flaky(src, dst):
+            if "payload" in str(dst):
+                # Corrida: recria a origem com conteúdo novo antes de falhar.
+                cache.mkdir(parents=True, exist_ok=True)
+                (cache / "novo.pyc").write_bytes(b"racer")
+                raise OSError("segunda perna com origem recriada")
+            return real_replace(src, dst)
+
+        with patch("scripts.henke_clean.os.replace", side_effect=flaky):
+            batch = quarantine(self.repo, [cand])
+
+        self.assertEqual(batch.items, ())
+        self.assertTrue((cache / "novo.pyc").is_file(),
+                        "origem concorrente deve permanecer intacta")
+        leftovers = staging_leftovers(self.repo)
+        self.assertTrue(leftovers, "staged do item movido não pode ser apagado")
+        staged_item = leftovers[0]
+        self.assertEqual((staged_item / "a.pyc").read_bytes(), b"deadbeef")
+
+    def test_cross_volume_src_removal_is_fail_safe(self):
+        """Fallback cross-volume: origem trancada não derruba o item movido.
+
+        A remoção final de src é best-effort (ignore_errors=True): um arquivo
+        bloqueado não pode virar falha depois do payload já estar íntegro —
+        mutante `ignore_errors=False` propaga a OSError e perde o item.
+        """
+        cache = self._seed_cache()
+        cand = CleanCandidate(source=cache, kind="repo-cache", size_bytes=16)
+        real_replace = os.replace
+        real_rmtree = shutil.rmtree
+        state = {"failed": False}
+
+        def flaky(src_, dst):
+            if "payload" in str(dst) and not state["failed"]:
+                state["failed"] = True
+                raise OSError("segunda perna forçada (cross-volume)")
+            return real_replace(src_, dst)
+
+        def honored(path, *a, **kw):
+            if not kw.get("ignore_errors", False):
+                raise OSError("arquivo bloqueado por outro processo")
+            return real_rmtree(path, *a, **kw)
+
+        with patch("scripts.henke_clean.os.replace", side_effect=flaky), \
+             patch("scripts.henke_clean.shutil.rmtree", side_effect=honored):
+            batch = quarantine(self.repo, [cand])
+
+        self.assertEqual(len(batch.items), 1)
+        payload = (self.repo / ".henke" / "quarantine" / batch.batch_id
+                   / "payload" / batch.items[0]["dest"])
+        self.assertTrue((payload / "a.pyc").is_file())
+        self.assertEqual((payload / "a.pyc").read_bytes(), b"deadbeef")
+
+    def test_post_move_hash_divergence_logged_as_hash_mismatch(self):
+        """Divergência pós-move registra result='hash_mismatch' no log.
+
+        O item movido EXISTE no payload — fica rastreado no manifesto com
+        verified=False e o hash real do conteúdo (não o esperado), para que
+        purge/restore nunca o tratem como órfão ou íntegro.
+        """
+        cache = self._seed_cache()
+        cand = CleanCandidate(source=cache, kind="repo-cache", size_bytes=16)
+        with patch("scripts.henke_clean._tree_sha256",
+                   side_effect=["a" * 64, "b" * 64, "b" * 64]):
+            batch = quarantine(self.repo, [cand])
+        self.assertEqual(len(batch.items), 1)
+        item = batch.items[0]
+        self.assertIs(item["verified"], False)
+        self.assertEqual(item["sha256"], "b" * 64,
+                         "sha256 deve registrar o hash REAL do payload")
+        self.assertEqual(item["expected_sha256"], "a" * 64)
+        self.assertEqual(item["allowed_root"], "repo",
+                         "repo-cache deve registrar allowed_root='repo'")
+        log = self.repo / ".henke" / "clean_log.jsonl"
+        lines = [json.loads(l) for l in
+                 log.read_text(encoding="utf-8").splitlines() if l.strip()]
+        item_logs = [e for e in lines if e["action"] == "quarantine_item"]
+        self.assertTrue(any(e["result"] == "hash_mismatch" for e in item_logs),
+                        f"log sem hash_mismatch: {item_logs}")
+
 
 class TestRestoreAndPurge(unittest.TestCase):
     """Restore exigente e purga somente após expiração."""
@@ -208,6 +300,44 @@ class TestRestoreAndPurge(unittest.TestCase):
             purge_expired_batch(self.repo, "..", now=future)
         with self.assertRaises(ValueError):
             purge_expired_batch(self.repo, "../..", now=future)
+
+    def test_purge_refuses_nonempty_staging(self):
+        """Staging com leftover bloqueia a purga do batch inteiro."""
+        batch_dir = (self.repo / ".henke" / "quarantine" / self.batch.batch_id)
+        leftover = batch_dir / "staging" / "em_transito"
+        leftover.mkdir(parents=True)
+        (leftover / "x.pyc").write_bytes(b"keep")
+        future = _utcnow() + timedelta(days=8)
+        with self.assertRaises(ValueError):
+            purge_expired_batch(self.repo, self.batch.batch_id, now=future)
+        self.assertTrue(batch_dir.exists(),
+                        "batch não pode ser removido com staging não vazio")
+
+    def test_purge_refuses_unregistered_payload(self):
+        """Item em payload/ fora do manifesto bloqueia a purga (nunca apaga
+        conteúdo não rastreado em massa)."""
+        batch_dir = (self.repo / ".henke" / "quarantine" / self.batch.batch_id)
+        stray = batch_dir / "payload" / "9999-stray"
+        stray.mkdir()
+        (stray / "x.pyc").write_bytes(b"orphan")
+        future = _utcnow() + timedelta(days=8)
+        with self.assertRaises(ValueError):
+            purge_expired_batch(self.repo, self.batch.batch_id, now=future)
+        self.assertTrue(batch_dir.exists(),
+                        "batch não pode ser removido com payload não registrado")
+
+    def test_restore_skips_unverified_item(self):
+        """Item com verified=False nunca é restaurado como se fosse íntegro."""
+        batch_dir = (self.repo / ".henke" / "quarantine" / self.batch.batch_id)
+        manifest_path = batch_dir / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["items"][0]["verified"] = False
+        manifest["items"][0]["sha256"] = "f" * 64
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        n = restore_batch(self.repo, self.batch.batch_id)
+        self.assertEqual(n, 0)
+        self.assertFalse(self.cache.exists(),
+                         "item não verificado não pode voltar à origem")
 
 
 class TestStagingAndLogging(unittest.TestCase):

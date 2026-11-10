@@ -47,6 +47,10 @@ class QuarantineBatch:
     items: tuple[dict[str, object], ...]
 
 
+class _HashMismatchError(ValueError):
+    """Divergência de hash pós-movimentação — log result='hash_mismatch'."""
+
+
 def _quarantine_root(repo_root: Path) -> Path:
     return state_dir(Path(repo_root)) / "quarantine"
 
@@ -64,8 +68,7 @@ def _log(repo_root: Path, action: str, **fields: object) -> None:
 
 def _tree_size(root: Path) -> int:
     total = 0
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames]
+    for dirpath, _dirnames, filenames in os.walk(root):
         for name in filenames:
             try:
                 total += (Path(dirpath) / name).stat().st_size
@@ -76,6 +79,12 @@ def _tree_size(root: Path) -> int:
 
 def _tree_sha256(root: Path) -> str:
     """Hash agregado determinístico: relpath + sha256 de cada arquivo, ordenado."""
+    # Um arquivo isolado não é árvore: os.walk devolve zero entradas e o
+    # hash da "árvore vazia" colidiria para QUALQUER arquivo — um manifesto
+    # forjado com sha256(vazio) validava qualquer payload externo (DS-1).
+    root = Path(root)
+    if root.is_file():
+        return hashlib.sha256(b"file\x00" + root.read_bytes()).hexdigest()
     agg = hashlib.sha256()
     entries: list[tuple[str, str]] = []
     for dirpath, dirnames, filenames in os.walk(root):
@@ -213,6 +222,40 @@ def _validate_batch_dir(qroot: Path, batch_id: str) -> Path:
     return batch_dir
 
 
+def _move_transacted(src: Path, staged: Path, dest: Path,
+                     tree_hash: str) -> None:
+    """Move src -> staging -> payload sem janela de perda.
+
+    Falha na 2ª perna restaura staged -> src quando seguro; se a origem
+    reapareceu (corrida) ou a restauração falhou, dá raise preservando
+    staged e src — o staged nunca é apagado (pode ser a única cópia).
+    """
+    try:
+        os.replace(src, staged)
+        os.replace(staged, dest)
+    except OSError:
+        # Se a 2ª perna falhou com o item já só em staging, restaura
+        # staged -> src ANTES de qualquer remoção (nunca perde dados).
+        if staged.exists() and not src.exists():
+            os.replace(staged, src)
+        if staged.exists():
+            # Origem já existe (corrida) ou restauração impossível:
+            # nunca apaga staged — falha explícita preserva os dois.
+            raise
+        if not src.exists():
+            raise  # origem perdida sem cópia local: falha explícita
+        # Entre unidades: copia para staging, verifica, renomeia, remove origem.
+        shutil.copytree(src, staged)
+        if _tree_sha256(staged) != tree_hash:
+            raise _HashMismatchError("hash divergente após cópia cross-volume")
+        if dest.exists():
+            shutil.rmtree(dest)  # falha propaga: nunca esconde dest estranho
+        os.replace(staged, dest)
+        shutil.rmtree(src, ignore_errors=True)
+    if _tree_sha256(dest) != tree_hash:
+        raise _HashMismatchError("hash divergente após movimentação")
+
+
 def quarantine(repo_root: Path, candidates: Sequence[CleanCandidate],
                *, retention_days: int = 7) -> QuarantineBatch:
     """Move candidatos para quarentena com manifesto transacional.
@@ -236,37 +279,25 @@ def quarantine(repo_root: Path, candidates: Sequence[CleanCandidate],
     staging.mkdir(exist_ok=True)
 
     for idx, cand in enumerate(candidates):
+        # DS-3: checar reparse ANTES do resolve — um junction `pkg/__pycache__
+        # -> src` resolvia para o ALVO e o `_no_reparse` do alvo passava:
+        # a limpeza movia src/ inteiro para a quarentena.
+        if not _no_reparse(cand.source):
+            _log(repo, "quarantine_item", batch=batch_id, item=str(cand.source),
+                 hash="", result="reparse_skip")
+            continue
         src = cand.source.resolve()
+        dest = payload / f"{idx:04d}-{src.name}"
         root = _allowed_root(repo, cand)
+        rel = ""
+        tree_hash = ""
         try:
             if root is None or not src.exists() or not _no_reparse(src):
                 raise ValueError("origem fora da raiz permitida ou reparse point")
             rel = src.name if cand.kind == "ephemeral-expired" else src.relative_to(root).as_posix()
             tree_hash = _tree_sha256(src)
-            dest = payload / f"{idx:04d}-{src.name}"
             staged = staging / dest.name
-            try:
-                os.replace(src, staged)
-                os.replace(staged, dest)
-            except OSError:
-                # Se a 2ª perna falhou com o item já só em staging, restaura
-                # staged -> src ANTES de qualquer remoção (nunca perde dados).
-                if staged.exists() and not src.exists():
-                    os.replace(staged, src)
-                if staged.exists():
-                    shutil.rmtree(staged, ignore_errors=True)
-                if not src.exists():
-                    raise  # origem perdida sem cópia local: falha explícita
-                # Entre unidades: copia para staging, verifica, renomeia, remove origem.
-                shutil.copytree(src, staged)
-                if _tree_sha256(staged) != tree_hash:
-                    raise ValueError("hash divergente após cópia cross-volume")
-                if dest.exists():
-                    shutil.rmtree(dest)  # falha propaga: nunca esconde dest estranho
-                os.replace(staged, dest)
-                shutil.rmtree(src, ignore_errors=True)
-            if _tree_sha256(dest) != tree_hash:
-                raise ValueError("hash divergente após movimentação")
+            _move_transacted(src, staged, dest, tree_hash)
             items.append({
                 "original_path": str(src),
                 "allowed_root": "repo" if cand.kind == "repo-cache" else "ephemeral",
@@ -275,12 +306,33 @@ def quarantine(repo_root: Path, candidates: Sequence[CleanCandidate],
                 "kind": cand.kind,
                 "size_bytes": cand.size_bytes,
                 "sha256": tree_hash,
+                "verified": True,
                 "created_at": _iso(created),
                 "expires_at": _iso(expires),
             })
             _log(repo, "quarantine_item", batch=batch_id, item=str(src), hash=tree_hash, result="moved")
         except Exception as exc:
-            _log(repo, "quarantine_item", batch=batch_id, item=str(src), hash="", result=f"failed:{exc}")
+            # Divergência de hash com o item já no payload: o conteúdo
+            # movido existe e precisa ficar rastreado — registra com
+            # verified=False e o hash REAL do que está em quarentena
+            # (nunca o hash esperado, que corresponderia a outro conteúdo).
+            if isinstance(exc, _HashMismatchError) and dest.exists():
+                items.append({
+                    "original_path": str(src),
+                    "allowed_root": "repo" if cand.kind == "repo-cache" else "ephemeral",
+                    "relative": rel,
+                    "dest": dest.name,
+                    "kind": cand.kind,
+                    "size_bytes": cand.size_bytes,
+                    "sha256": _tree_sha256(dest),
+                    "expected_sha256": tree_hash,
+                    "verified": False,
+                    "created_at": _iso(created),
+                    "expires_at": _iso(expires),
+                })
+            _log(repo, "quarantine_item", batch=batch_id, item=str(src), hash="",
+                 result="hash_mismatch" if isinstance(exc, _HashMismatchError)
+                        else f"failed:{exc}")
 
     if staging.is_dir() and not any(staging.iterdir()):
         staging.rmdir()
@@ -314,16 +366,36 @@ def restore_batch(repo_root: Path, batch_id: str) -> int:
     batch_dir = _validate_batch_dir(qroot, batch_id)
     manifest = _load_manifest(batch_dir)
     restored = 0
+    payload_root = (batch_dir / "payload").resolve()
     for item in manifest["items"]:
-        dest = batch_dir / "payload" / item["dest"]
-        original = Path(item["original_path"])
-        if item["allowed_root"] == "repo":
-            root = repo
-        else:
-            root = original  # efêmero: a própria workspace era a raiz
+        # DS-1: `dest` vem do manifesto — caminho absoluto ou `..` faria o
+        # restore mover um arquivo de FORA da quarentena para dentro do repo.
+        # Aceita só nome relativo simples confinado ao payload/.
+        raw_dest = item.get("dest")
+        if not isinstance(raw_dest, str) or not raw_dest:
+            _log(repo, "restore_item", batch=batch_id,
+                 item=str(item.get("original_path")), hash="",
+                 result="bad_dest")
+            continue
+        dest = (payload_root / raw_dest).resolve()
+        if not winpath.is_within(payload_root, dest):
+            _log(repo, "restore_item", batch=batch_id,
+                 item=str(item.get("original_path")), hash="",
+                 result="dest_escapes_payload")
+            continue
+        orig_raw = item.get("original_path")
+        if not isinstance(orig_raw, str) or not orig_raw:
+            _log(repo, "restore_item", batch=batch_id,
+                 item="", hash="", result="bad_original")
+            continue
+        original = Path(orig_raw)
+        if item.get("verified") is False:
+            _log(repo, "restore_item", batch=batch_id, item=orig_raw,
+                 hash=item.get("sha256", ""), result="unverified_skip")
+            continue
         if original.exists():
-            _log(repo, "restore_item", batch=batch_id, item=item["original_path"],
-                 hash=item["sha256"], result="dest_exists")
+            _log(repo, "restore_item", batch=batch_id, item=orig_raw,
+                 hash=item.get("sha256", ""), result="dest_exists")
             continue
         resolved = original.resolve().parent
         if item["allowed_root"] == "repo":
@@ -332,27 +404,41 @@ def restore_batch(repo_root: Path, batch_id: str) -> int:
             # efêmero: a workspace sempre vive diretamente sob o temp do sistema
             contained = resolved == Path(tempfile.gettempdir()).resolve()
         if not contained:
-            _log(repo, "restore_item", batch=batch_id, item=item["original_path"],
-                 hash=item["sha256"], result="outside_root")
+            _log(repo, "restore_item", batch=batch_id, item=orig_raw,
+                 hash=item.get("sha256", ""), result="outside_root")
             continue
-        if _tree_sha256(dest) != item["sha256"]:
-            _log(repo, "restore_item", batch=batch_id, item=item["original_path"],
-                 hash=item["sha256"], result="hash_mismatch")
+        if _tree_sha256(dest) != item.get("sha256"):
+            _log(repo, "restore_item", batch=batch_id, item=orig_raw,
+                 hash=item.get("sha256", ""), result="hash_mismatch")
             continue
         original.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.replace(dest, original)
         except OSError:
-            shutil.copytree(dest, original)
-            if _tree_sha256(original) != item["sha256"]:
-                shutil.rmtree(original, ignore_errors=True)
-                _log(repo, "restore_item", batch=batch_id, item=item["original_path"],
-                     hash=item["sha256"], result="copy_verify_failed")
+            # dest pode ser arquivo único — copytree falharia com traceback.
+            try:
+                if dest.is_dir():
+                    shutil.copytree(dest, original)
+                else:
+                    shutil.copy2(dest, original)
+                copy_ok = _tree_sha256(original) == item.get("sha256")
+            except OSError:
+                copy_ok = False
+            if not copy_ok:
+                if original.is_dir():
+                    shutil.rmtree(original, ignore_errors=True)
+                else:
+                    original.unlink(missing_ok=True)
+                _log(repo, "restore_item", batch=batch_id, item=orig_raw,
+                     hash=item.get("sha256", ""), result="copy_verify_failed")
                 continue
-            shutil.rmtree(dest, ignore_errors=True)
+            if dest.is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+            else:
+                dest.unlink(missing_ok=True)
         restored += 1
-        _log(repo, "restore_item", batch=batch_id, item=item["original_path"],
-             hash=item["sha256"], result="restored")
+        _log(repo, "restore_item", batch=batch_id, item=orig_raw,
+             hash=item.get("sha256", ""), result="restored")
     _log(repo, "restore_batch", batch=batch_id, item=str(restored), hash="", result="done")
     return restored
 
@@ -371,6 +457,30 @@ def purge_expired_batch(repo_root: Path, batch_id: str, *, now: datetime) -> int
     manifest = _load_manifest(batch_dir)
     if now < _parse_iso(manifest["expires_at"]):
         raise ValueError(f"batch {batch_id} ainda não expirou (expires_at={manifest['expires_at']})")
+    # DS-2: item não verificado nunca é restaurado, mas entrava no manifesto
+    # e a purga apagava a ÚNICA cópia. Recusa até resolução manual.
+    unverified = sorted(str(i.get("original_path")) for i in manifest["items"]
+                        if i.get("verified") is False)
+    if unverified:
+        raise ValueError(
+            f"batch {batch_id} possui {len(unverified)} item(ns) não verificados "
+            "— a purga apagaria a única cópia; resolva manualmente")
+    staging_dir = batch_dir / "staging"
+    if staging_dir.is_dir() and any(staging_dir.iterdir()):
+        raise ValueError(
+            f"batch {batch_id} possui staging não vazio; purga recusada "
+            "até o leftover ser resolvido manualmente")
+    # Todo payload precisa estar registrado no manifesto — um diretório
+    # estranho não rastreado nunca é apagado em massa.
+    payload_dir = batch_dir / "payload"
+    registered = {item.get("dest") for item in manifest["items"]}
+    if payload_dir.is_dir():
+        strays = sorted(e.name for e in payload_dir.iterdir()
+                        if e.name not in registered)
+        if strays:
+            raise ValueError(
+                f"batch {batch_id} possui payload não registrado no manifesto "
+                f"({', '.join(strays)}); purga recusada")
     shutil.rmtree(batch_dir)
     _log(repo, "purge_batch", batch=batch_id, item="", hash="", result="purged")
     return 1

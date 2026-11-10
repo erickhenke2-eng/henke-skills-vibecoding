@@ -71,6 +71,12 @@ def _discover(repo_root: Path, base: str) -> tuple[tuple[str, ...], frozenset[st
         if status.startswith("R") or status.startswith("C"):
             if len(parts) >= 3:
                 changed.extend((parts[1].strip(), parts[2].strip()))
+                if status.startswith("R"):
+                    # DS-6: origem de RENAME não existe mais — sem marcar
+                    # como deletada, a seleção tentava executar o módulo
+                    # antigo (arquivo inexistente) em vez de cair no
+                    # veredito conservador `deleted:` → suíte completa.
+                    deleted.add(parts[1].strip())
             continue
         if status.startswith("D"):
             if len(parts) >= 2:
@@ -100,61 +106,146 @@ def _is_test_file(rel: str) -> bool:
 
 
 # --- Execução dinâmica: invisível ao grafo de imports → incerteza → full ----
+#
+# Em QUALQUER arquivo do fechamento dos testes (tests/ inteira ∪ produção
+# alcançada pelo grafo), QUALQUER import ou referência em carga a execução
+# dinâmica é incerteza: o código efetivamente exercido é invisível ao grafo
+# de imports — incluindo produção (loaders de plugins, runners de CLI),
+# não apenas arquivos sob tests/.
 
-_DYNAMIC_NAME_CALLS = frozenset({"exec"})
-_DYNAMIC_ATTR_CALLS = frozenset({
-    "spec_from_file_location",  # importlib.util.spec_from_file_location
-    "run_module", "run_path",   # runpy.*
+_DYNAMIC_MODULES = frozenset({"subprocess", "runpy", "multiprocessing"})
+_DYNAMIC_IMPORT_ROOTS = _DYNAMIC_MODULES | frozenset({"importlib", "asyncio"})
+_DYNAMIC_REF_NAMES = frozenset({
+    "exec", "eval", "__import__",
+    "import_module", "load_module", "exec_module",
+    "SourceFileLoader", "module_from_spec",
+    "run_module", "run_path",  # runpy.*
 })
-_SPAWN_WITH_INTERPRETER = frozenset({
+_DYNAMIC_REF_PREFIXES = ("spec_from_", "create_subprocess_")
+_OS_EXEC_ATTRS = frozenset({
+    "system", "popen",
+    "execl", "execle", "execlp", "execlpe",
+    "execv", "execve", "execvp", "execvpe",
+    "spawnl", "spawnle", "spawnlp", "spawnlpe",
+    "spawnv", "spawnve", "spawnvp", "spawnvpe",
+})
+_SPAWN_WITH_INTERPRETER = _OS_EXEC_ATTRS | frozenset({
     "run", "Popen", "call", "check_call", "check_output",
     "getoutput", "getstatusoutput",  # subprocess.*
-    "spawnl", "spawnlp", "spawnv", "spawnvp",
-    "spawnve", "spawnvpe", "system", "popen",  # os.* legados
 })
 
 
-def _has_sys_executable(node: ast.AST) -> bool:
+def _dynamic_ref(name: str) -> bool:
+    """Nome/atributo de execução dinâmica — exato ou por prefixo."""
+    return (name in _DYNAMIC_REF_NAMES
+            or name.startswith(_DYNAMIC_REF_PREFIXES))
+
+
+def _has_sys_executable(node: ast.AST,
+                        extra_names: frozenset[str] = frozenset()) -> bool:
     for sub in ast.walk(node):
         if (isinstance(sub, ast.Attribute) and sub.attr == "executable"
                 and isinstance(sub.value, ast.Name) and sub.value.id == "sys"):
+            return True
+        if isinstance(sub, ast.Name) and sub.id in extra_names:
             return True
     return False
 
 
 def _test_uses_dynamic_exec(path: Path) -> bool:
-    """True se o arquivo de teste executa código invisível ao grafo de imports.
+    """True se o arquivo executa código invisível ao grafo de imports.
 
-    Cobre `exec`, `spec_from_file_location`, `runpy.run_module`/`run_path` e
-    spawns de processo cujos argumentos citam `sys.executable` — por atributo
-    (`subprocess.run(...)`, `os.system(...)`) ou por nome importado
-    (`from subprocess import run; run(sys.executable ...)`,
-    `Popen(sys.executable, ...)`). Arquivo não parseável também conta como
-    incerteza (fail-closed).
+    Regras conservadoras (fail-closed), por import, por REFERÊNCIA em carga
+    e por chamada: qualquer import de subprocess/runpy/multiprocessing/
+    importlib.*/asyncio flaga; qualquer referência ast.Load (Name ou
+    Attribute, não só chamadas) a exec, eval, __import__, import_module,
+    load_module, exec_module, SourceFileLoader, spec_from_* e
+    create_subprocess_* flaga — cobre `run = exec`, `getattr(mod,
+    "import_module")` e loaders indiretos; getattr com literal de string
+    flaga pelo nome buscado; chamadas os.system/os.exec*/os.spawn*/os.popen
+    flagam por atributo ou nome solto; spawns cujos argumentos citam
+    `sys.executable` flagam inclusive via alias (`PY = sys.executable;
+    run([PY, ...])`). Arquivo não parseável também conta como incerteza.
     """
     try:
         tree = ast.parse(path.read_bytes())
     except (OSError, SyntaxError, ValueError, RecursionError):
         return True
+
+    os_aliases: set[str] = set()
+    exe_names: set[str] = set()  # nomes ligados a sys.executable
     for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".", 1)[0]
+                if root in _DYNAMIC_IMPORT_ROOTS:
+                    return True
+                if root == "os":
+                    os_aliases.add(alias.asname or root)
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".", 1)[0]
+            if root in _DYNAMIC_IMPORT_ROOTS:
+                return True
+            if root == "os" and any(a.name in _OS_EXEC_ATTRS for a in node.names):
+                return True
+        elif isinstance(node, ast.Assign) and _has_sys_executable(node.value):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name):
+                    exe_names.add(tgt.id)
+
+    exe_frozen = frozenset(exe_names)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            # `run = exec`, `handler = eval`, `__import__` solto em carga.
+            if isinstance(node.ctx, ast.Load) and _dynamic_ref(node.id):
+                return True
+            continue
+        if isinstance(node, ast.Attribute):
+            if isinstance(node.ctx, ast.Load):
+                # `importlib.import_module`, `loader.exec_module`,
+                # `machinery.SourceFileLoader`, `x.spec_from_*`,
+                # `asyncio.create_subprocess_*` — referência, não só call.
+                if _dynamic_ref(node.attr):
+                    return True
+                base = node.value
+                if isinstance(base, ast.Name):
+                    if base.id in _DYNAMIC_MODULES:
+                        return True
+                    if (base.id == "os" or base.id in os_aliases) \
+                            and node.attr in _OS_EXEC_ATTRS:
+                        return True
+            continue
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        if isinstance(func, ast.Name) and func.id in _DYNAMIC_NAME_CALLS:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr in _DYNAMIC_ATTR_CALLS:
-            return True
-        call_args = (*node.args, *(kw.value for kw in node.keywords))
-        if any(_has_sys_executable(a) for a in call_args):
-            callee = func.attr if isinstance(func, ast.Attribute) else (
-                func.id if isinstance(func, ast.Name) else "")
-            if callee in _SPAWN_WITH_INTERPRETER:
+        if isinstance(func, ast.Name):
+            # getattr(importlib, "import_module") e afins: o nome buscado
+            # como literal de string também é execução dinâmica.
+            if func.id == "getattr" and any(
+                    isinstance(a, ast.Constant) and isinstance(a.value, str)
+                    and _dynamic_ref(a.value) for a in node.args[1:]):
+                return True
+            if func.id in _OS_EXEC_ATTRS:
+                return True
+            callee = func.id
+        elif isinstance(func, ast.Attribute):
+            callee = func.attr
+        else:
+            continue
+        if callee in _SPAWN_WITH_INTERPRETER:
+            call_args = (*node.args, *(kw.value for kw in node.keywords))
+            if any(_has_sys_executable(a, exe_frozen) for a in call_args):
                 return True
     return False
 
 
 def _dynamic_exec_test_files(repo: Path) -> list[str]:
-    """Test files on disk que executam código fora do grafo → incerteza."""
+    """Todo .py sob tests/ que executa código fora do grafo → incerteza.
+
+    Não se restringe a test_*.py: helpers (`tests/helpers.py`,
+    `tests/e2e/e2e_common.py`) também carregam execução dinâmica e tornam
+    a seleção por grafo não-probante.
+    """
     tests_root = Path(repo) / "tests"
     if not tests_root.is_dir():
         return []
@@ -166,12 +257,38 @@ def _dynamic_exec_test_files(repo: Path) -> list[str]:
             if entry.kind == "error":
                 flagged.add(f"<walk_error:{rel}>")
                 continue
-            if entry.kind != "file" or not _is_test_file(rel):
+            if entry.kind != "file" or not rel.endswith(".py"):
                 continue
             if _test_uses_dynamic_exec(entry.path):
                 flagged.add(rel)
     except winpath.PathSafetyError:
         flagged.add("<tests_root_unsafe>")
+    return sorted(flagged)
+
+
+def _dynamic_exec_files(repo: Path, union_closure) -> list[str]:
+    """tests/ ∪ todo .py do fechamento dos testes → arquivos com incerteza.
+
+    O fechamento inclui código de PRODUÇÃO alcançado pelo grafo: um loader
+    de plugins ou runner de CLI que execute código dinâmico invalida a
+    seleção tanto quanto um teste dinâmico. Membros do fechamento ilegíveis
+    ou fora da contenção do repo flagam como incerteza (fail-closed).
+    """
+    flagged: set[str] = set(_dynamic_exec_test_files(repo))
+    for rel in sorted(union_closure):
+        if not rel.endswith(".py") or rel in flagged:
+            continue
+        path = Path(repo) / rel
+        try:
+            if not path.is_file() or not winpath.is_within(
+                    repo, path.resolve()):
+                flagged.add(rel)
+                continue
+        except (OSError, winpath.PathSafetyError):
+            flagged.add(rel)
+            continue
+        if _test_uses_dynamic_exec(path):
+            flagged.add(rel)
     return sorted(flagged)
 
 
@@ -234,18 +351,19 @@ def select_tests(repo_root: Path, base: str,
         unresolved_files = sorted(unresolved)
         reasons.append("graph_unresolved")
 
-    # Testes que executam código fora do grafo (subprocess com
-    # sys.executable, spec_from_file_location, runpy, exec) tornam o
-    # fechamento de imports não-probante → incerteza → suíte completa.
-    for rel in _dynamic_exec_test_files(repo):
-        reasons.append(f"dynamic_exec:{rel}")
-
     all_tests = sorted(
         rel for rel in direct
         if _is_test_file(rel) and (repo / rel).is_file()
     )
     test_closures = {t: _forward_closure(direct, (t,)) for t in all_tests}
     union_closure = frozenset().union(*test_closures.values()) if test_closures else frozenset()
+
+    # Execução dinâmica em QUALQUER arquivo do fechamento — testes e
+    # produção alcançada pelo grafo (loaders de plugins, runners de CLI,
+    # importlib.*/asyncio) — torna a seleção por grafo não-probante →
+    # incerteza → suíte completa.
+    for rel in _dynamic_exec_files(repo, union_closure):
+        reasons.append(f"dynamic_exec:{rel}")
 
     selected: set[str] = set()
     for rel in changed_t:
