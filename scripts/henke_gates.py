@@ -312,6 +312,15 @@ def _record_gate_verdict(
             # — passá-los tornava o fallback permanentemente quebrado.
         ],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cwd=str(SCRIPTS_DIR),
+        # MÉDIO-5 (banca v15): único subprocesso sem env sanitizado —
+        # PYTHONPATH/GIT_* alcançavam o gravador de vereditos.
+        env={k: v for k, v in os.environ.items()
+             if not (k.startswith("GIT_") or k.startswith("PYTHON")
+                     or k.startswith("LD_") or k.startswith("DYLD_")
+                     or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
+                              "PERL5OPT", "PERL5LIB", "RUBYOPT",
+                              "DOTNET_STARTUP_HOOKS"))},
     )
     if res.returncode != 0:
         raise RuntimeError(f"record-gate falhou (exit {res.returncode}): {(res.stderr or '').strip()}")

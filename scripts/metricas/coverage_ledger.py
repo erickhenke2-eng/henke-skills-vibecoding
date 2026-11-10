@@ -193,7 +193,11 @@ def verify_ledger(
     if not isinstance(data, dict) or "units" not in data or "metadata" not in data:
         return False, ["SCHEMA-ERR: campos obrigatórios 'metadata' e 'units' ausentes"], {}
 
+    # H3 (banca v15): units null/lista e metadata não-dict explodiam em
+    # traceback exit 1 (código de veredito-vermelho) — schema validado.
     meta = data["metadata"]
+    if not isinstance(meta, dict) or not isinstance(data["units"], list):
+        return False, ["SCHEMA-ERR: 'metadata' deve ser objeto e 'units' lista"], {}
     profile = meta.get("profile", "standard")
     if profile not in VALID_PROFILES:
         return False, [f"SCHEMA-ERR: profile inválido '{profile}'"], {}
@@ -311,7 +315,14 @@ def verify_ledger(
                 errors.append(f"FINDING-NO-TRACE [{fid}]: finding_confirmed exige 'trace[]' (source -> sink)")
             else:
                 for step in trace:
+                    # H3 (banca v15): step não-dict/file não-str explodia.
+                    if not isinstance(step, dict):
+                        errors.append(f"INVALID-TRACE [{fid}]: step não-objeto")
+                        continue
                     tf = step.get("file", "")
+                    if not isinstance(tf, str):
+                        errors.append(f"INVALID-TRACE [{fid}]: file não-string")
+                        continue
                     tline = step.get("line", 0)
                     tpath = (root / tf).resolve()
                     root_res = root.resolve()

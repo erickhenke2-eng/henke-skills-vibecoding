@@ -41,12 +41,16 @@ _GIT_ENV = {k: v for k, v in os.environ.items() if not (k.startswith("GIT_") or 
 
 
 def git(cwd, *args, check=True):
-    result = subprocess.run(
-        ["git", "-C", str(cwd), "-c", "core.quotePath=false",
-         "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=30, env=_GIT_ENV,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), "-c", "core.quotePath=false",
+             "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30, env=_GIT_ENV,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # H4 (banca v15): timeout vestia exit 1 (veredito) — infra é erro.
+        raise RuntimeError(f"git {' '.join(args)} timeout: {exc}") from exc
     if check and result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} falhou: {result.stderr.strip()}")
     return result

@@ -73,7 +73,7 @@ def parse_declared_bridges_with_validation(spec_path: Path) -> tuple[bool, list[
     # falsa — strip antes do parse (espelho do _md_clean de spec_drift).
     text = re.sub(r"<!--[\s\S]*?-->", " ", text)
     text = re.sub(r"(?m)^```[^\n]*\n[\s\S]*?^```\s*$", " ", text)
-    match = re.search(r"(?mi)^## 5\..*?(?:Ponte|Bridge).*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
+    match = re.search(r"(?mi)^## 5\.[^\n]*?(?:Ponte|Bridge)[^\n]*?\n(.*?)(?=\n## |\Z)", text, flags=re.S)
     if not match:
         # Seção '## 5.' presente com heading não reconhecido (ex.: 'Contract
         # Bridges' em outra forma) desligava a verificação em silêncio —

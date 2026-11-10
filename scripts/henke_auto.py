@@ -145,7 +145,8 @@ DESTRUCTIVE_VERBS = (
     "deleted", "removed", "dropped", "wiped", "destroyed", "purged",
     "erased", "truncated", "uninstall", "uninstalled", "desinstalou",
     "rm", "rd", "del", "dd of=", "dropdb", "dropuser", "drop database",
-    "checkout --", "git restore", "restore --", "branch -d", "format e:",
+    "checkout --", "git restore", "restore --", "branch -d", "branch -df",
+    "checkout -f", "push -fu", "format e:",
     "format f:", "format a:", "format b:", "format g:", "sdelete64",
     # Cobertura EN provada ausente (banca v11 — A3): paráfrases naturais que
     # chegavam ao driver em EXECUTAR sem trava humana.
@@ -201,12 +202,14 @@ _HOMOGLYPHS = str.maketrans({
     "ɢ": "g", "ʟ": "l", "ɴ": "n", "ɵ": "o", "ɸ": "o", "χ": "x",
     # Leetspeak/dígitos-homoglifos (banca v11 — A3): 'd3l3t3', 'w1p3',
     # 'nu|<' → dobra para a letra óbvia antes da comparação de termos.
-    "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t",
+    "0": "o", "3": "e", "4": "a", "5": "s", "7": "t",
     "@": "a", "$": "s", "!": "i",
     # A2 (banca v14): confusáveis que faltavam — lunate epsilon, YE cirílico,
-    # leet 2/6/8/9/| e small-caps (ᴅᴇʟᴇᴛᴇ).
+    # leet 2/6/8/9 e small-caps (ᴅᴇʟᴇᴛᴇ).
+    # ALTO-1 (banca v15): '|'→'l' FUNDA o sinal ao vizinho ('delete|x'→
+    # 'deletelx') — separador, não letra. '1'→'i' cobre 'w1pe'.
     "ϵ": "e", "є": "e", "ε": "e", "2": "z", "6": "b", "8": "b", "9": "g",
-    "|": "l", "Ꭰ": "a",
+    "1": "i", "|": " ", "Ꭰ": "a",
     "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f",
     "ɢ": "g", "ʜ": "h", "ɪ": "i", "ᴊ": "j", "ᴋ": "k", "ʟ": "l",
     "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ǫ": "q", "ʀ": "r",
@@ -1474,6 +1477,10 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
         "rework_attempts": 0,
         # snapshot do route p/ retomada futura (--resume) — escopo vinculado à run
         "route_snapshot": route_snapshot,
+        # ALTO-2 (banca v15): o resumo do approve lia 'test_cmd' e sempre
+        # mostrava '(nenhum)' — o humano aprovava sem ver o comando que o
+        # fingerprint ancora e o stage 7 executa.
+        "test_cmd": (project or {}).get("test_cmd") if isinstance(project, dict) else None,
     }
     if resumed is None:
         # Vínculo da aprovação (--resume): HEAD + sha256(prompt+route_snapshot).
@@ -1694,6 +1701,10 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                     ".henke/policy.json", ".henke/project.json",
                     ".henke/ratchet-baseline.tsv", ".henke/fence.json",
                     ".henke/coverage-ledger.json",
+                    # MÉDIO-3 (banca v15): memória é injetada verbatim em todo
+                    # envelope futuro — driver "declarando" diario/decisoes
+                    # plantava prompt-injection persistente.
+                    ".henke/diario.md", ".henke/decisoes.md",
                 }
                 undeclared = sorted(set(undeclared) | {
                     t for t in touched if t.lower() in _never_declared})
@@ -1953,6 +1964,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                         ".henke/policy.json", ".henke/project.json",
                         ".henke/ratchet-baseline.tsv", ".henke/fence.json",
                         ".henke/coverage-ledger.json",
+                        ".henke/diario.md", ".henke/decisoes.md",
                     }
                     _newig2 = sorted(
                         p for p in _cur2 - set(_ign2)
@@ -1966,6 +1978,7 @@ def _run_auto_inner(args: argparse.Namespace) -> int:
                 ".henke/policy.json", ".henke/project.json",
                 ".henke/ratchet-baseline.tsv", ".henke/fence.json",
                 ".henke/coverage-ledger.json",
+                ".henke/diario.md", ".henke/decisoes.md",
             }
             _und2 = sorted(set(_und2) | {
                 t for t in set(_gtf2(repo_root, against=_anchor2))

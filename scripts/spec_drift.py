@@ -52,7 +52,8 @@ def _md_clean(text: str) -> str:
 # H5 (banca v14): `.*?Escopo` casava 'Itens fora de Escopo' (inversão
 # semântica — exclusões viravam escopo). Rejeita negação antes do termo.
 _SCOPE_HEAD_RE = re.compile(
-    r"(?m)^## 4\.(?![^\n]*\b(?:fora|non-|not\s|out\s+of|exclu))[^\n]*?Escopo[^\n]*?\n"
+    r"(?m)^## 4\.\s+(?![^\n]*\b(?:fora|non-|not\s|out\s+of|exclu|proibid|"
+    r"n[aã]o|negad|forbid|denied|restrit|unauthor))Escopo\b[^\n]*?\n"
     r"(.*?)(?=\n#{1,6} |\Z)", flags=re.S)
 
 
@@ -172,11 +173,12 @@ def _git_paths_z(git_root: Path, *args: str) -> list[str]:
             cwd=str(git_root), capture_output=True, check=True, timeout=60,
             env=_GIT_ENV,
         )
-    # F36 (banca v11): CalledProcessError escapava como traceback exit 1 —
-    # crash veste código de veredito-vermelho. RuntimeError → exit 2.
-    except subprocess.CalledProcessError as exc:
+    # F36 v11 + H4 v15: CalledProcessError/TimeoutExpired/OSError escapavam
+    # como traceback exit 1 — crash veste código de veredito. RuntimeError→2.
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            OSError) as exc:
         raise RuntimeError(
-            f"git {' '.join(args)} falhou (rc={exc.returncode})") from exc
+            f"git {' '.join(args)} falhou ({type(exc).__name__})") from exc
     return [p for p in res.stdout.decode("utf-8", errors="replace").split("\0") if p]
 
 

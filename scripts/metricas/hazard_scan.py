@@ -177,10 +177,16 @@ _JS_SHELL_OBJ_RE = re.compile(
 # `import sh from 'child_process'` evadiam a allowlist de receptores.
 _JS_CP_ALIAS_RE = re.compile(
     r"\bimport\s+(?:\*\s+as\s+(\w+)|(\w+)\s*(?:,\s*\{[^}]*\})?\s*from)"
-    r"\s*['\"](?:node:)?child_process['\"]")
+    r"\s*['\"](?:node:)?child_process['\"]"
+    # H6 (banca v15): `import { exec as run }`/`const { exec: run } =
+    # require(...)` — destructure renomeado evadia tudo.
+    r"|\b(?:import\s+\{[^}]*\b(?:exec|execSync|spawn|fork|execFile)\s+as\s+(\w+)"
+    r"[^}]*\}\s*from\s*['\"](?:node:)?child_process['\"]"
+    r"|(?:const|let|var)\s*\{[^}]*\b(?:exec|execSync|spawn|fork|execFile)"
+    r"\s*:\s*(\w+)[^}]*\}\s*=\s*require\s*\()")
 _JS_SHELL_ARGV0_RE = re.compile(
     r"\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*['\"]"
-    r"(?:sh|bash|zsh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?)['\"]")
+    r"(?:[^'\"]*[\\/])?(?:sh|bash|zsh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?)['\"]")
 _RS_SHELL_RE = re.compile(r'Command::new\s*\(\s*\)\s*|\bCommand::new\s*\([^)]*\)\s*\.\s*arg\s*\(\s*"(?:-c|/c)"')
 # Go não tinha nenhuma regra de execução (banca v9 A3): os/exec + syscall.Exec
 # + plugin.Open são os sinks equivalentes a exec.Command("sh","-c",user).
@@ -973,6 +979,16 @@ def scan_file(path: Path, extra_exts: set | None = None,
                     lineno = masked.count("\n", 0, m.start()) + 1
                     add("SHELL-INJECTION", lineno, f"line:{lineno}",
                         f"child_process alias '{_al}' shell sink")
+            _al2 = _am.group(3) or _am.group(4)
+            if _al2:
+                # H6 (banca v15): alias desestruturado É o nome do sink —
+                # `{ exec as run }` → `run(cmd)`.
+                for m in re.finditer(
+                        r"\b" + re.escape(_al2)
+                        + r"\s*\(\s*(?:\+|[A-Za-z_$'\"`])", masked):
+                    lineno = masked.count("\n", 0, m.start()) + 1
+                    add("SHELL-INJECTION", lineno, f"line:{lineno}",
+                        f"child_process destructured alias '{_al2}' sink")
 
     for m in _UNSAFE_DESER_RE.finditer(masked):
         tok = m.group(0)

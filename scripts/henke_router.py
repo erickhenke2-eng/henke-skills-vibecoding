@@ -66,11 +66,12 @@ _HOMOGLYPHS = str.maketrans({
     "ɢ": "g", "ʟ": "l", "ɴ": "n", "ɵ": "o", "ɸ": "o", "χ": "x",
     # Leetspeak/dígitos-homoglifos (banca v11 — A3): 'd3l3t3', 'w1p3'
     # dobram para a letra óbvia antes da comparação de termos.
-    "0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t",
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
     "@": "a", "$": "s", "!": "i",
-    # A2 (banca v14): idêntico ao henke_auto — ϵ/є, leet 2/6/8/9/|, small-caps.
+    # A2 v14 + ALTO-1 v15 (idêntico ao henke_auto): ϵ/є, leet 2/6/8/9,
+    # small-caps. '|'→espaço (não letra — fundia sinal ao vizinho).
     "ϵ": "e", "є": "e", "ε": "e", "2": "z", "6": "b", "8": "b", "9": "g",
-    "|": "l", "Ꭰ": "a",
+    "|": " ", "Ꭰ": "a",
     "ᴀ": "a", "ʙ": "b", "ᴄ": "c", "ᴅ": "d", "ᴇ": "e", "ꜰ": "f",
     "ɢ": "g", "ʜ": "h", "ɪ": "i", "ᴊ": "j", "ᴋ": "k", "ʟ": "l",
     "ᴍ": "m", "ɴ": "n", "ᴏ": "o", "ᴘ": "p", "ǫ": "q", "ʀ": "r",

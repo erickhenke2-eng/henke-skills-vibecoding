@@ -362,25 +362,32 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
 
     i, n = 0, len(text)
     is_hash_lang = lang in ("py", "python", "tf", "tfvars", "toml", "yaml", "yml", "dockerfile", "sh", "bash")
-    can_html_comment = lang not in ("rs", "go")
+    # H1 (banca v15): '//'/'/*'/'<!--' rodavam em TODAS as langs — o '//' de
+    # uma URL num .yml abria CommentSpan contendo um marker de supressão e
+    # calava o finding da própria linha. C-like só nas langs c-like.
+    is_clike = lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts",
+                        "rs", "go", "java", "c", "cpp", "h", "hpp", "cs",
+                        "kt", "swift", "scala", "php")
+    can_html_comment = lang in ("html", "htm", "xml", "md", "vue", "svelte",
+                                "jsx", "tsx")
     while i < n:
         c = text[i]
         nxt = text[i + 1] if i + 1 < n else ""
-        if c == "/" and nxt == "/":
+        if is_clike and c == "/" and nxt == "/":
             j = text.find("\n", i)
             j = n if j == -1 else j
             sl, sc = _offset_to_pos(i)
             el, ec = _offset_to_pos(j)
             spans.append(CommentSpan(sl, sc, el, ec, text[i:j]))
             i = j
-        elif c == "/" and nxt == "*":
+        elif is_clike and c == "/" and nxt == "*":
             j = text.find("*/", i + 2)
             end_pos = n if j == -1 else j + 2
             sl, sc = _offset_to_pos(i)
             el, ec = _offset_to_pos(end_pos)
             spans.append(CommentSpan(sl, sc, el, ec, text[i:end_pos]))
             i = end_pos
-        elif can_html_comment and text.startswith("<!--", i):
+        elif can_html_comment and text.startswith("<!--", i) and not is_hash_lang:
             if lang in ("js", "jsx", "ts", "tsx", "mjs", "cjs"):
                 # Annex B: comentário de LINHA em JS — o span não pode engolir
                 # o resto do arquivo (A1).
