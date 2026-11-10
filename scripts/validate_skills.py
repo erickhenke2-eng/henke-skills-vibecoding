@@ -8,6 +8,23 @@ from pathlib import Path
 import re
 import sys
 
+if __name__ == "__main__":
+    # ISO-BOOT canônico (scripts/_isoboot.py) — sitecustomize/usercustomize/
+    # .pth hostis executam no startup e patcham verificadores no pai; o
+    # respawn -Es nasce sem esses canais (prova ESTRUTURAL: sys.flags
+    # autenticado + os.sys — nunca variável de ambiente). Texto sincronizado
+    # por tests/test_isoboot_guard.py — editar só alterando o canônico.
+    import importlib.util as _ilu
+    import os.path as _osp
+    _ib_p = _osp.join(_osp.dirname(_osp.abspath(__file__)), "_isoboot.py")
+    if not _osp.isfile(_ib_p):
+        _ib_p = _osp.join(_osp.dirname(_osp.dirname(_osp.abspath(__file__))),
+                          "_isoboot.py")
+    _ib_spec = _ilu.spec_from_file_location("henke_isoboot", _ib_p)
+    _ib_mod = _ilu.module_from_spec(_ib_spec)
+    _ib_spec.loader.exec_module(_ib_mod)
+    _ib_mod.ensure_isolated(__file__, sys.argv[1:])
+
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -18,7 +35,19 @@ try:
     import yaml
     from yaml.constructor import ConstructorError
 except ImportError:
-    sys.exit("Dependência ausente. Execute: python -m pip install -r requirements.txt")
+    # -I/-Es esconde o user site — `pip install --user pyyaml` fica invisível.
+    # Re-expõe só para resolução de import (.pth/usercustomize NÃO executam
+    # num append de sys.path — ver scripts/_isoboot.py).
+    import site as _site
+    _usp = _site.getusersitepackages()
+    for _d in ([_usp] if isinstance(_usp, str) else list(_usp or [])):
+        if _d and Path(_d).is_dir() and _d not in sys.path:
+            sys.path.append(_d)
+    try:
+        import yaml
+        from yaml.constructor import ConstructorError
+    except ImportError:
+        sys.exit("Dependência ausente. Execute: python -m pip install -r requirements.txt")
 
 class UniqueKeyLoader(yaml.SafeLoader):
     """YAML Loader que rejeita chaves duplicadas no mesmo mapeamento."""

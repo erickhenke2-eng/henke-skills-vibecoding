@@ -486,4 +486,19 @@ def main():
 
 
 if __name__ == "__main__":
+    # ISO-BOOT canônico (scripts/_isoboot.py) — sitecustomize/usercustomize/
+    # .pth hostis executam no startup e patcham verificadores no pai; o
+    # respawn -Es nasce sem esses canais (prova ESTRUTURAL: sys.flags
+    # autenticado + os.sys — nunca variável de ambiente). Texto sincronizado
+    # por tests/test_isoboot_guard.py — editar só alterando o canônico.
+    import importlib.util as _ilu
+    import os.path as _osp
+    _ib_p = _osp.join(_osp.dirname(_osp.abspath(__file__)), "_isoboot.py")
+    if not _osp.isfile(_ib_p):
+        _ib_p = _osp.join(_osp.dirname(_osp.dirname(_osp.abspath(__file__))),
+                          "_isoboot.py")
+    _ib_spec = _ilu.spec_from_file_location("henke_isoboot", _ib_p)
+    _ib_mod = _ilu.module_from_spec(_ib_spec)
+    _ib_spec.loader.exec_module(_ib_mod)
+    _ib_mod.ensure_isolated(__file__, sys.argv[1:])
     sys.exit(main())

@@ -76,20 +76,20 @@ class WatchController:
         repo = self.config.repo_root
         specs = [
             GateSpec("hazard_scan",
-                     (sys.executable, str(mdir / "hazard_scan.py"), str(repo)),
+                     (sys.executable, "-Es", str(mdir / "hazard_scan.py"), str(repo)),
                      repo, timeout_sec=self.config.gate_timeout_sec),
             GateSpec("a11y_scan",
-                     (sys.executable, str(mdir / "a11y_scan.py"), str(repo)),
+                     (sys.executable, "-Es", str(mdir / "a11y_scan.py"), str(repo)),
                      repo, timeout_sec=self.config.gate_timeout_sec),
         ]
         if (repo / "tests").is_dir():
             specs.insert(1, GateSpec(
                 "assertless_scan",
-                (sys.executable, str(mdir / "assertless_scan.py"), str(repo / "tests")),
+                (sys.executable, "-Es", str(mdir / "assertless_scan.py"), str(repo / "tests")),
                 repo, timeout_sec=self.config.gate_timeout_sec))
         for name, argv_tail in self.config.extra_gate_args:
             specs.append(GateSpec(
-                name, (sys.executable, *argv_tail), repo,
+                name, (sys.executable, "-Es", *argv_tail), repo,
                 timeout_sec=self.config.gate_timeout_sec))
         return specs
 

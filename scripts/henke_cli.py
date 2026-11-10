@@ -256,7 +256,8 @@ def _cmd_init(repo_root: Path) -> int:
 
     if (repo_root / ".git").exists():
         subprocess.run(
-            [sys.executable, str(SCRIPTS_DIR / "henke_gate.py"), "baseline", "--force"],
+            # -Es: filho já nasce isolado (ver scripts/_isoboot.py BOOT_FLAG)
+            [sys.executable, "-Es", str(SCRIPTS_DIR / "henke_gate.py"), "baseline", "--force"],
             cwd=str(repo_root),
             capture_output=True,
             text=True,
@@ -853,7 +854,7 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
                     sys.stderr.write("\n")
             return code
 
-    res = run_process([sys.executable, str(script_path), *args], cwd=str(repo_root), timeout_sec=120.0)
+    res = run_process([sys.executable, "-Es", str(script_path), *args], cwd=str(repo_root), timeout_sec=120.0)
     out_text = res.stdout or ""
     err_text = res.stderr or ""
     if out_text:
@@ -1170,7 +1171,7 @@ def _cmd_check(
                 else:
                     uncached.append((idx, name, script_path, gate_args))
             specs = [
-                GateSpec(name, (sys.executable, str(script_path), *gate_args),
+                GateSpec(name, (sys.executable, "-Es", str(script_path), *gate_args),
                          target_root, timeout_sec=float(gate_timeout))
                 for _idx, name, script_path, gate_args in uncached
             ]
@@ -1435,7 +1436,7 @@ def _derive_outcome_safe(run_path: Path, run_data: dict) -> str:
             pass
     try:
         res = subprocess.run(
-            [sys.executable, str(SCRIPTS_DIR / "run_state.py"), "verify", "--json", str(run_path)],
+            [sys.executable, "-Es", str(SCRIPTS_DIR / "run_state.py"), "verify", "--json", str(run_path)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         env=_scrub_env())
         payload = json.loads(res.stdout or "{}")
@@ -1523,7 +1524,7 @@ def _cmd_run(argv_list: list[str]) -> int:
         run_state_main = None
     if run_state_main is not None:
         return run_state_main(argv_list)
-    res = subprocess.run([sys.executable, str(SCRIPTS_DIR / "run_state.py"), *argv_list], env=_scrub_env())
+    res = subprocess.run([sys.executable, "-Es", str(SCRIPTS_DIR / "run_state.py"), *argv_list], env=_scrub_env())
     return res.returncode
 
 
@@ -1916,7 +1917,28 @@ def _cmd_report(repo_root: Path, run_ref: str) -> int:
         return 2
 
 
+def _ensure_isolated_main() -> None:
+    """Bootstrap de isolamento no nível de main() — ver scripts/_isoboot.py.
+
+    Carrega _isoboot por path explícito (meta_path finder plantado não
+    consegue servir um falso) e respawna `python -Es <este arquivo> argv`
+    quando o runtime não prova isolamento. No-op quando já isolado."""
+    import importlib.util as _ilu
+    _ib_p = Path(__file__).resolve().parent / "_isoboot.py"
+    _ib_spec = _ilu.spec_from_file_location("henke_isoboot", str(_ib_p))
+    _ib_mod = _ilu.module_from_spec(_ib_spec)
+    _ib_spec.loader.exec_module(_ib_mod)
+    _ib_mod.ensure_isolated(__file__, sys.argv[1:])
+
+
 def main(argv: list[str] | None = None) -> int:
+    # Console-script `henke` (pyproject): o shim gerado pelo pip importa
+    # scripts.henke_cli e chama main() DIRETO — o guarda do __main__ nunca
+    # roda nesse caminho. Repete a verificação aqui (no-op se já isolado).
+    # main(argv=[...]) programático em testes NÃO respawna (argv explícito =
+    # uso em-processo, não entrypoint de processo).
+    if argv is None:
+        _ensure_isolated_main()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if not raw_argv:
         raw_argv = ["--help"]
@@ -2203,16 +2225,19 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    # R2-PT-06: um sitecustomize.py do repo via PYTHONPATH executa NA
-    # INICIALIZAÇÃO do interpretador — antes de _drop_repo_syspath e da
-    # checagem de __file__ — e pode substituir run_incremental_scan/
-    # scanner_specs no processo pai (PoC: check retornava PASS em repo
-    # com os.system). Respawna isolado: -I implica -E (ignora PYTHONPATH)
-    # e -s (ignora user site). O filho -I já sai com sys.flags.isolated
-    # verdadeiro — o guard é auto-limite, sem sentinel de ambiente (um
-    # sitecustomize hostil poderia defini-la, R3-PT-06).
-    if not sys.flags.isolated:
-        sys.exit(subprocess.run(
-            [sys.executable, "-I",
-             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
+    # ISO-BOOT canônico (scripts/_isoboot.py) — sitecustomize/usercustomize/
+    # .pth hostis executam no startup e patcham verificadores no pai; o
+    # respawn -Es nasce sem esses canais (prova ESTRUTURAL: sys.flags
+    # autenticado + os.sys — nunca variável de ambiente). Texto sincronizado
+    # por tests/test_isoboot_guard.py — editar só alterando o canônico.
+    import importlib.util as _ilu
+    import os.path as _osp
+    _ib_p = _osp.join(_osp.dirname(_osp.abspath(__file__)), "_isoboot.py")
+    if not _osp.isfile(_ib_p):
+        _ib_p = _osp.join(_osp.dirname(_osp.dirname(_osp.abspath(__file__))),
+                          "_isoboot.py")
+    _ib_spec = _ilu.spec_from_file_location("henke_isoboot", _ib_p)
+    _ib_mod = _ilu.module_from_spec(_ib_spec)
+    _ib_spec.loader.exec_module(_ib_mod)
+    _ib_mod.ensure_isolated(__file__, sys.argv[1:])
     sys.exit(main())

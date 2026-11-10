@@ -226,8 +226,8 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
         if args is None:
             return script.stem, None, False
         if script.stem in _PIPELINE_GATES:
-            return script.stem, [sys.executable, str(_PIPELINE_SCRIPT), *args], False
-        return script.stem, [sys.executable, str(script), *args], False
+            return script.stem, [sys.executable, "-Es", str(_PIPELINE_SCRIPT), *args], False
+        return script.stem, [sys.executable, "-Es", str(script), *args], False
     if not _looks_like_path(token):
         return None
     cand = Path(token)
@@ -263,8 +263,8 @@ def _resolve_gate(token: str, repo_root: Path, spec_path: Path | None = None,
     if args is None:
         return resolved.stem, None, _external
     if name in _PIPELINE_GATES:
-        return resolved.stem, [sys.executable, str(_PIPELINE_SCRIPT), *args], _external
-    return resolved.stem, [sys.executable, str(resolved), *args], _external
+        return resolved.stem, [sys.executable, "-Es", str(_PIPELINE_SCRIPT), *args], _external
+    return resolved.stem, [sys.executable, "-Es", str(resolved), *args], _external
 
 
 def _gate_id_of(token: str) -> str:
@@ -305,7 +305,7 @@ def _record_gate_verdict(
         return
     res = subprocess.run(  # fallback subprocess (mesma CLI real de run_state.py)
         [
-            sys.executable, str(SCRIPTS_DIR / "run_state.py"), "record-gate",
+            sys.executable, "-Es", str(SCRIPTS_DIR / "run_state.py"), "record-gate",
             str(run_path), "--gate", gate_id, "--exit-code", str(int(exit_code)),
             "--summary", summary,
             # F-9 (banca v12): o CLI recusa --command/--evidence-file (M2 v9)
@@ -660,10 +660,19 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    # R3-PT-06: respawn isolado — sitecustomize via PYTHONPATH não pode
-    # patchar os portões no processo pai; o filho -I sai com flags.isolated.
-    if not sys.flags.isolated:
-        raise SystemExit(subprocess.run(
-            [sys.executable, "-I",
-             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
+    # ISO-BOOT canônico (scripts/_isoboot.py) — sitecustomize/usercustomize/
+    # .pth hostis executam no startup e patcham verificadores no pai; o
+    # respawn -Es nasce sem esses canais (prova ESTRUTURAL: sys.flags
+    # autenticado + os.sys — nunca variável de ambiente). Texto sincronizado
+    # por tests/test_isoboot_guard.py — editar só alterando o canônico.
+    import importlib.util as _ilu
+    import os.path as _osp
+    _ib_p = _osp.join(_osp.dirname(_osp.abspath(__file__)), "_isoboot.py")
+    if not _osp.isfile(_ib_p):
+        _ib_p = _osp.join(_osp.dirname(_osp.dirname(_osp.abspath(__file__))),
+                          "_isoboot.py")
+    _ib_spec = _ilu.spec_from_file_location("henke_isoboot", _ib_p)
+    _ib_mod = _ilu.module_from_spec(_ib_spec)
+    _ib_spec.loader.exec_module(_ib_mod)
+    _ib_mod.ensure_isolated(__file__, sys.argv[1:])
     raise SystemExit(main())

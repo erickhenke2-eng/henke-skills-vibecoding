@@ -241,7 +241,7 @@ def install(repo, user_root, dry_run=False, lock_timeout=LOCK_TIMEOUT_SEC):
     _validator = Path(__file__).resolve().parent / "validate_skills.py"
     if not _validator.is_file():
         _validator = _resolve_source(repo, Path("scripts/validate_skills.py"))
-    subprocess.run([sys.executable, str(_validator)], check=True)
+    subprocess.run([sys.executable, "-Es", str(_validator)], check=True)
     files = inventory(repo)
     targets = [user_root / p for p in (".agents/skills", ".gemini/config/skills", ".gemini/skills", ".claude/skills")]
     if dry_run:
@@ -433,6 +433,21 @@ def _publish(repo, targets, files):
 
 
 if __name__ == "__main__":
+    # ISO-BOOT canônico (scripts/_isoboot.py) — sitecustomize/usercustomize/
+    # .pth hostis executam no startup e patcham verificadores no pai; o
+    # respawn -Es nasce sem esses canais (prova ESTRUTURAL: sys.flags
+    # autenticado + os.sys — nunca variável de ambiente). Texto sincronizado
+    # por tests/test_isoboot_guard.py — editar só alterando o canônico.
+    import importlib.util as _ilu
+    import os.path as _osp
+    _ib_p = _osp.join(_osp.dirname(_osp.abspath(__file__)), "_isoboot.py")
+    if not _osp.isfile(_ib_p):
+        _ib_p = _osp.join(_osp.dirname(_osp.dirname(_osp.abspath(__file__))),
+                          "_isoboot.py")
+    _ib_spec = _ilu.spec_from_file_location("henke_isoboot", _ib_p)
+    _ib_mod = _ilu.module_from_spec(_ib_spec)
+    _ib_spec.loader.exec_module(_ib_mod)
+    _ib_mod.ensure_isolated(__file__, sys.argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--user-root", type=Path, default=Path.home())
