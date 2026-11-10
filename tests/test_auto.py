@@ -526,7 +526,8 @@ class DriverAgentAdapterTests(unittest.TestCase):
     def test_agent_without_result_json_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as td:
             fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="texto sem json", stderr="")
-            with mock.patch("subprocess.run", return_value=fake):
+            with mock.patch("subprocess.run", return_value=fake), \
+                    mock.patch("shutil.which", return_value="/usr/bin/claude"):
                 rc, out = self._run_adapter(["prog", "claude"], json.dumps({"repo_root": td}))
         self.assertNotEqual(rc, 0)
         self.assertIn("sem JSON", json.loads(out)["notes"])
@@ -535,7 +536,8 @@ class DriverAgentAdapterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             payload = '{"files_changed": ["a.py"], "notes": "feito"}'
             fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="log...\n" + payload, stderr="")
-            with mock.patch("subprocess.run", return_value=fake):
+            with mock.patch("subprocess.run", return_value=fake), \
+                    mock.patch("shutil.which", return_value="/usr/bin/claude"):
                 rc, out = self._run_adapter(["prog", "claude"], json.dumps({"repo_root": td}))
         self.assertEqual(rc, 0)
         self.assertEqual(json.loads(out)["files_changed"], ["a.py"])

@@ -282,6 +282,7 @@ class TestTier1InstallHook(unittest.TestCase):
         hook_file.parent.mkdir(parents=True, exist_ok=True)
         # Mock hook that simulates a failing henke check
         hook_file.write_text("#!/bin/sh\necho '[HENKE BLOQUEIO] Falha' >&2\nexit 1\n", encoding="utf-8")
+        hook_file.chmod(0o755)  # POSIX: hook sem bit executável é ignorado pelo git
         
         # Attempt to commit
         (self.repo_path / "new_file.txt").write_text("content", encoding="utf-8")
@@ -294,6 +295,7 @@ class TestTier1InstallHook(unittest.TestCase):
         hook_file = self.repo_path / ".git" / "hooks" / "pre-commit"
         hook_file.parent.mkdir(parents=True, exist_ok=True)
         hook_file.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        hook_file.chmod(0o755)  # POSIX: hook sem bit executável é ignorado pelo git
 
         (self.repo_path / "valid_file.txt").write_text("valid content", encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=str(self.repo_path), check=True, capture_output=True)
