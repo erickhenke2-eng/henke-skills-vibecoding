@@ -330,8 +330,12 @@ def is_test_command(cmd_tokens: list[str], cmd_str: str) -> bool:
     if stem == "dotnet" and any(t.lower() == "test" for t in tokens[1:]):
         return True
 
-    # Gerenciadores de pacote: npm test, yarn test, pnpm test, bun test
-    if stem in ("npm", "pnpm", "yarn", "bun") and any(t.lower() in ("test", "t") for t in tokens[1:]):
+    # Gerenciadores de pacote: npm test, yarn test, pnpm test, bun test.
+    # Mesma borda do audit_ledger (A2 v15): 'npm run test:unit' é teste,
+    # 'npm run latest'/'attest' NÃO é — wedge nas duas direções eliminado.
+    if stem in ("npm", "pnpm", "yarn", "bun") and any(
+            re.fullmatch(r"t|test(?:[.:_/-].*)?|teste\w*", t.lower())
+            for t in tokens[1:]):
         return True
 
     # NPX com test runner

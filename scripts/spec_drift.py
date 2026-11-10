@@ -449,7 +449,13 @@ def main():
                   file=sys.stderr)
             sys.exit(2)
 
-    ok, errors = check_spec_drift(spec_path, expected_hash=args.expected_hash, against=args.against, git_root=git_root)
+    # F2 (opus v15): RuntimeError de timeout/OSError do git virava traceback
+    # exit 1 (código de veredito-vermelho) — erro de infra sai como 2.
+    try:
+        ok, errors = check_spec_drift(spec_path, expected_hash=args.expected_hash, against=args.against, git_root=git_root)
+    except RuntimeError as exc:
+        print(f"ERRO: spec drift indisponível: {exc}", file=sys.stderr)
+        sys.exit(2)
     if not ok:
         print(f"FALHA: Spec Drift detectado em relação a '{spec_path.name}':", file=sys.stderr)
         for err in errors:

@@ -24,8 +24,8 @@ HAZARDOUS_PATTERNS = [
     (r"\bgit\s+push\b.*(?:--force|-f\b)", "Comando 'git push --force' destrutivo proibido em ledger"),
     # M3 (banca v15): args interpostos entre binário e subcomando evadiam
     # `git\s+push` — `git -C . push -f`, `git -c x=y push`, `push -fu` bundle.
-    (r"\bgit\b[^|;&]*\bpush\b[^|;&]*(?:--force|-\w*f\b|-f\w*\b)",
-     "git push forçado (args interpostos/bundle) proibido"),
+    (r"\bgit\b[^|;&]*\bpush\b[^|;&]*(?:--force|-\w*f\b|-f\w*\b|\+\S*)",
+     "git push forçado (args interpostos/bundle/refspec +) proibido"),
     (r"\b(?:npm|pnpm|yarn|bun)\b[^|;&]*\bpublish\b|\bnpx\b[^|;&]*\bpublish\b",
      "Comando de publicação (publish, args interpostos) proibido em ledger"),
     (r"\b(?:cargo|poetry|uv)\s+publish\b|\bgem\s+push\b|\bdotnet\s+nuget\s+push\b",
@@ -115,7 +115,9 @@ _TEST_CMD_RE = re.compile(
     r"\b(?:pytest|py\.test|tox|nox|jest|vitest|mocha|unittest|playwright|"
     r"cargo\s+test|go\s+test|ctest|dotnet\s+test|deno\s+test|"
     r"(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?\s+"
-    r"(?:(?:-\S+\s+)*(?:run\s+)?)\S*test\S*|"
+    # F1 (opus v15): `\S*test\S*` casava 'latest'/'attest'/'pretest' — script
+    # token exige prefixo 'test'/'t' (mesma borda do is_test_cmd).
+    r"(?:(?:-\S+\s+)*(?:run\s+)?)(?:t|test(?:[.:_/-]\S*)?|teste\w*)\b|"
     r"npx\s+(?:jest|vitest|mocha|playwright|cypress))\b",
     re.IGNORECASE,
 )

@@ -799,7 +799,9 @@ def derive_run_outcome(run_data: dict) -> tuple[str, list[str]]:
 
 def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     """Verifica um arquivo .henke/runs/<run_id>.json contra adulteração de estado e falhas."""
-    p = Path(run_path)
+    # F4 (opus v15): `p` não-resolvido divergia do evidence_root (.resolve())
+    # — path relativo marcava TODA run como EVIDENCE-UNANCHORED.
+    p = Path(run_path).resolve()
     if not p.is_file():
         return False, [f"RUN-FILE-MISSING: arquivo não encontrado em '{p}'"]
     try:

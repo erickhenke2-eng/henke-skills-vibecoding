@@ -247,7 +247,7 @@ DESTRUCTIVE_SIGNALS = (
     "remove", "remover", "removo", "remova", "removendo", "erase", "erases",
     "drop", "drop table", "truncate", "wipe", "wipe database",
     "destroi", "destruo", "destruir", "destruimos", "destroy", "purge",
-    "force-push", "push --force", "force push", "push -f", "reset --hard",
+    "force-push", "push --force", "force push", "push -f", "push -fu", "reset --hard",
     "hard reset", "rm -rf", "rm -r", "git clean", "clean -fd", "clean -fdx",
     "apaga o banco", "apagar o banco", "derruba", "zera", "zerar",
     # Gerúndios/imperativos/plurais/passado — flexões que o \b não pega
@@ -272,7 +272,7 @@ DESTRUCTIVE_SIGNALS = (
     "deleted", "removed", "dropped", "wiped", "destroyed", "purged",
     "erased", "truncated", "uninstall", "uninstalled", "desinstalou",
     "rm", "rd", "del", "dd of=", "dropdb", "dropuser", "drop database",
-    "checkout --", "git restore", "restore --", "branch -d", "format e:",
+    "checkout --", "checkout -f", "git restore", "restore --", "branch -d", "branch -df", "format e:",
     "format f:", "format a:", "format b:", "format g:", "sdelete64",
     # Cobertura EN provada ausente (banca v11 — A3): paráfrases naturais que
     # chegavam ao driver em EXECUTAR sem trava humana.
