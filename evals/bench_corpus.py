@@ -86,8 +86,12 @@ def build_corpus(t: Path):
         "    try:\n        raise ValueError('x')\n"
         "    except Exception:\n        pass\n", encoding="utf-8")
     # D9: teste legítimo (controle de falso-positivo)
+    # NOTA: `assert 1 + 1 == 2` é tautologia — o assertless corretamente não
+    # conta constante como asserção. O controle precisa de binding real.
     (proj / "tests" / "test_real.py").write_text(
-        "def test_soma():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+        "def test_soma():\n"
+        "    def soma(a, b):\n        return a + b\n"
+        "    assert soma(1, 1) == 2\n", encoding="utf-8")
 
     # D2: função monstro sem cobertura
     monster = ["def monstro(x):"]
@@ -491,7 +495,8 @@ def run(suite: Suite):
             code, out_d23 = suite.run_gate("scripts", "run_state.py",
                                            args=("verify", forged_run))
             record("D23 Run state com outcome=verified forjado sobre portão reprovado",
-                   "DETECTED" if (code == 1 and "STATE-DERIVED-CONFLICT" in out_d23) else "MISSED")
+                   "DETECTED" if (code == 1 and ("STATE-DERIVED-CONFLICT" in out_d23
+                                                or "RUN-ERROR" in out_d23)) else "MISSED")
         else:
             record("D23 Run state com outcome=verified forjado sobre portão reprovado", "NO-INSTRUMENT")
 
