@@ -142,14 +142,23 @@ def inventory(repo):
     # pega junction); um `scripts/metricas -> C:\evil` instalaria portões
     # arbitrários que a próxima run executa.
     repo_resolved = repo.resolve()
+    # PT-03: num wheel `repo` é henke_data/ e `scripts/*` vivem no pacote —
+    # a contenção tem que aceitar as DUAS raízes legítimas e medir o arquivo
+    # pela fonte real (_resolve_source), senão stat() num path inexistente
+    # descartava TODO script em silêncio.
+    pkg_resolved = Path(__file__).resolve().parents[1]
     confined: list[Path] = []
     for rel in files:
-        src = repo / rel
+        src = _resolve_source(repo, rel)
         try:
             resolved = src.resolve()
         except OSError:
             continue
-        if resolved != repo_resolved and repo_resolved not in resolved.parents:
+        under_repo = (resolved == repo_resolved
+                      or repo_resolved in resolved.parents)
+        under_pkg = (resolved == pkg_resolved
+                     or pkg_resolved in resolved.parents)
+        if not (under_repo or under_pkg):
             continue
         if src.is_symlink():
             continue
@@ -160,6 +169,26 @@ def inventory(repo):
         except OSError:
             continue
         confined.append(rel)
+    # PT-12: a ponte do contrato exige que módulos críticos de runtime
+    # cheguem ao destino — falha ALTA e explícita se a contenção ou o glob
+    # perder algum (nunca mais drop silencioso).
+    _required = (
+        "henke_router.py", "henke_cli.py", "state_paths.py", "winpath.py",
+        "gate_cache.py", "gate_parallel.py", "process_runner.py",
+        "process_supervisor.py", "test_impact.py", "mission_classifier.py",
+        "henke_clean.py", "import_graph.py", "henke_watch.py",
+        "henke_session.py", "ephemeral.py", "report_generator.py",
+        "install_hook.py", "spec_drift.py", "repo_signals.py",
+        "audit_ledger.py", "henke_gate.py", "run_state.py", "henke_auto.py",
+        "henke_detect.py", "henke_gates.py", "henke_report.py",
+        "henke_driver_opencode.py", "henke_driver_agent.py", "_paths.py",
+        "validate_skills.py",
+    )
+    _shipped = {f.name for f in confined if f.parent == Path("scripts")}
+    _missing = [n for n in _required if n not in _shipped]
+    if _missing:
+        raise SystemExit(
+            f"FALHA instalador: módulos obrigatórios fora do pacote: {_missing}")
     return confined
 
 

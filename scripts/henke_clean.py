@@ -68,7 +68,12 @@ def _log(repo_root: Path, action: str, **fields: object) -> None:
 
 def _tree_size(root: Path) -> int:
     total = 0
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        # PT-02: poda junction/reparse descendente — sem isso o tamanho
+        # incluía a árvore EXTERNA do alvo dentro de um candidato.
+        dirnames[:] = [
+            d for d in dirnames if not _is_reparse_dir(Path(dirpath) / d)
+        ]
         for name in filenames:
             try:
                 total += (Path(dirpath) / name).stat().st_size
@@ -88,7 +93,12 @@ def _tree_sha256(root: Path) -> str:
     agg = hashlib.sha256()
     entries: list[tuple[str, str]] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
+        # PT-02: poda junction/reparse descendente — um `pkg/__pycache__/leak
+        # -> C:\segredos` fazia o hash engolir a árvore EXTERNA do alvo e o
+        # copytree de fallback materializava segredo dentro da quarentena.
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if not _is_reparse_dir(Path(dirpath) / d))
         for name in sorted(filenames):
             p = Path(dirpath) / name
             try:
@@ -133,6 +143,67 @@ def _no_reparse(path: Path) -> bool:
         if anc.parent == anc:
             break
     return True
+
+
+def _is_reparse_dir(p: Path) -> bool:
+    """Junction/symlink/reparse em UM caminho — portável py3.11+
+    (``Path.is_junction`` só existe em 3.12+). Em dúvida, True (fail-closed):
+    diretório que não conseguimos classificar não é atravessado."""
+    try:
+        if p.is_symlink():
+            return True
+        st = p.lstat()
+    except OSError:
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
+def _has_reparse_descendant(root: Path) -> bool:
+    """PT-02: True se QUALQUER descendente (dir ou arquivo) for reparse/symlink.
+
+    os.walk(followlinks=False) não desce em symlinks de diretório, mas
+    junctions Windows NÃO são ``is_symlink`` — sem o check por
+    ``st_file_attributes`` o walk desceria a árvore externa. O retorno
+    antecipado sai antes do próximo yield: o alvo nunca é atravessado.
+    """
+    root = Path(root)
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in dirnames:
+            if _is_reparse_dir(Path(dirpath) / name):
+                return True
+        for name in filenames:
+            p = Path(dirpath) / name
+            try:
+                if p.is_symlink():
+                    return True
+                st = p.lstat()
+                if getattr(st, "st_file_attributes", 0) & 0x400:
+                    return True
+            except OSError:
+                return True  # ilegível: em dúvida, recusa o candidato
+    return False
+
+
+def _ignore_reparse(dirpath: str, names: list) -> set:
+    """``ignore`` do copytree: descarta todo entry reparse/symlink (PT-02).
+
+    Defesa anti-TOCTOU do fallback cross-volume: se um junction/symlink for
+    plantado entre o check e a cópia, ele nunca é materializado na quarentena.
+    Entrada ilegível também é descartada — copiar cego seria pior que pular.
+    """
+    skipped: set = set()
+    for name in names:
+        p = Path(dirpath) / name
+        try:
+            if p.is_symlink():
+                skipped.add(name)
+                continue
+            st = p.lstat()
+            if getattr(st, "st_file_attributes", 0) & 0x400:
+                skipped.add(name)
+        except OSError:
+            skipped.add(name)
+    return skipped
 
 
 def _iter_repo_files(root: Path):
@@ -282,7 +353,8 @@ def _move_transacted(src: Path, staged: Path, dest: Path,
         if not src.exists():
             raise  # origem perdida sem cópia local: falha explícita
         # Entre unidades: copia para staging, verifica, renomeia, remove origem.
-        shutil.copytree(src, staged)
+        shutil.copytree(src, staged, ignore=_ignore_reparse,
+                        ignore_dangling_symlinks=True)
         if _tree_sha256(staged) != tree_hash:
             raise _HashMismatchError("hash divergente após cópia cross-volume")
         if dest.exists():
@@ -322,6 +394,14 @@ def quarantine(repo_root: Path, candidates: Sequence[CleanCandidate],
         if not _no_reparse(cand.source):
             _log(repo, "quarantine_item", batch=batch_id, item=str(cand.source),
                  hash="", result="reparse_skip")
+            continue
+        # PT-02: junction/symlink DENTRO do candidato aponta para fora da
+        # árvore — o hash incluiria conteúdo externo e o copytree de fallback
+        # materializaria segredo na quarentena (e de volta no restore).
+        # Candidato com reparse descendente é recusado inteiro (fail-closed).
+        if _has_reparse_descendant(cand.source):
+            _log(repo, "quarantine_item", batch=batch_id, item=str(cand.source),
+                 hash="", result="reparse_descendant")
             continue
         src = cand.source.resolve()
         dest = payload / f"{idx:04d}-{src.name}"
@@ -468,7 +548,8 @@ def restore_batch(repo_root: Path, batch_id: str) -> int:
             # dest pode ser arquivo único — copytree falharia com traceback.
             try:
                 if dest.is_dir():
-                    shutil.copytree(dest, original)
+                    shutil.copytree(dest, original, ignore=_ignore_reparse,
+                                    ignore_dangling_symlinks=True)
                 else:
                     shutil.copy2(dest, original)
                 copy_ok = _tree_sha256(original) == item.get("sha256")

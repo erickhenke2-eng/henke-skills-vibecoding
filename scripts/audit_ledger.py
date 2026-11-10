@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import sys
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -158,8 +159,91 @@ _TEST_CMD_RE = re.compile(
 )
 
 
+# PT-01: flags cujo argumento é CÓDIGO AVALIADO — flag, payload e argv nunca
+# são um comando executável; um `pytest` ali dentro mintava crédito falso.
+_EVAL_FLAG = {"python": {"-c"}, "py": {"-c"},
+              "node": {"-e", "-p", "--eval"},
+              "ruby": {"-e"}, "perl": {"-e"}, "php": {"-r"}}
+_INTERP_RE = re.compile(
+    r"(python[\d.]*|py(?:-\d(?:\.\d+)?)?|node(?:js)?|ruby|perl|php)(?:\.(?:exe|cmd|bat|com))?",
+    re.IGNORECASE)
+# Shells (`sh -c`, `cmd /c`, `pwsh -Command`) NÃO estão aqui de propósito:
+# a string deles É o comando executado — mascará-la apagaria `sh -c 'pytest'`.
+# Passthrough de saída: `echo "pytest; 10 passed"` nunca EXECUTA nada — os
+# argumentos são só texto; mascarados até o próximo separador.
+_PASSTHRU_RE = re.compile(
+    r"(?:echo|printf|print|write-output)(?:\.(?:exe|cmd|bat|com))?",
+    re.IGNORECASE)
+
+
+def _interp_kind(tok: str) -> str | None:
+    m = _INTERP_RE.fullmatch(tok)
+    if not m:
+        return None
+    base = m.group(1).lower()
+    if base == "nodejs":
+        return "node"
+    return "py" if base.startswith("py") and not base.startswith("python") else base.rstrip("0123456789.")
+
+
+def _strip_interp_argv(full_cmd: str) -> str:
+    """Remove payload/argv pós-entry-point de invocações de interpretador.
+
+    `python -c "print('1 passed')" -m pytest` minta crédito porque o detector
+    via o token `pytest` — mas após `-c <code>` (ou um script path, ou uma
+    flag eval de node/ruby/perl/php) tudo é sys.argv, NUNCA executado.
+    `-m <mod>` é exceção: o módulo É o runner real e fica visível. Tokens de
+    um segundo comando (`&& pytest`) continuam visíveis."""
+    try:
+        toks = shlex.split(full_cmd)
+    except ValueError:
+        toks = full_cmd.split()
+    out: list[str] = []
+    i = 0
+    while i < len(toks):
+        kind = _interp_kind(toks[i])
+        if kind is None:
+            if _PASSTHRU_RE.fullmatch(toks[i]):
+                i += 1
+                while (i < len(toks)
+                       and toks[i] not in ("&&", "||", ";", "|")):
+                    i += 1
+                continue
+            out.append(toks[i])
+            i += 1
+            continue
+        j = i + 1
+        keep_until = j  # tokens toks[i:keep_until] permanecem visíveis
+        while j < len(toks):
+            f = toks[j]
+            if f in _EVAL_FLAG.get(kind, set()):
+                j += 2  # flag eval + payload: some tudo (flag, código, argv)
+                keep_until = i + 1
+                break
+            if kind in ("python", "py") and f == "-m":
+                j += 2  # -m <mod>: o módulo É o runner — permanece visível
+                keep_until = j
+                break
+            if f in ("-W", "-X"):
+                j += 2
+                continue
+            if f.startswith("-"):
+                j += 1
+                continue
+            j += 1  # script path permanece (padrão `python tests/x.py`)
+            keep_until = j
+            break
+        out.extend(toks[i:keep_until])
+        k = j
+        while k < len(toks) and toks[k] not in ("&&", "||", ";", "|"):
+            k += 1
+        i = k
+    return " ".join(out)
+
+
 def is_test_cmd(full_cmd: str) -> bool:
     """Detecta comando de teste com word-boundary (não confunde 'echo contest' com teste)."""
+    full_cmd = _strip_interp_argv(full_cmd)
     if _TEST_CMD_RE.search(full_cmd):
         return True
     # A5 (banca v14): `npm -w pkg test`/`npm t` — script resolvido via

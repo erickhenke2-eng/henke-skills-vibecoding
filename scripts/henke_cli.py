@@ -890,6 +890,29 @@ def _format_manifest_output(scanner_id: str, res) -> str:
     return "\n".join(lines)
 
 
+def _drop_repo_syspath(repo_root: Path) -> None:
+    """PT-6: PYTHONPATH/sys.path apontando para dentro do repo auditado fazia
+    `import scripts.metricas.*` no PROCESSO PAI carregar código hostil
+    (sitecustomize/meta-path finder) antes de qualquer sandbox. Remove toda
+    entrada que resolve dentro do alvo."""
+    try:
+        rr = Path(repo_root).resolve()
+    except OSError:
+        return
+    kept = []
+    for entry in sys.path:
+        if not entry:
+            continue
+        try:
+            resolved = Path(entry).resolve()
+        except OSError:
+            continue
+        if resolved == rr or rr in resolved.parents:
+            continue
+        kept.append(entry)
+    sys.path[:] = kept
+
+
 def _cmd_check(
     repo_root: Path,
     spec_path: str | None = None,
@@ -901,6 +924,7 @@ def _cmd_check(
     jobs: int = 1,
     gate_timeout: float = 120.0,
 ) -> int:
+    _drop_repo_syspath(repo_root)
     if clear_cache_flag:
         clear_cache(repo_root)
         print("[OK] Cache de portões limpo.")
@@ -1040,11 +1064,11 @@ def _cmd_check(
         checks_to_run.append(("hazard_scan", GATE_MAP["hazard"], [str(target_root)]))
         manifest_scanners.append("hazard")
 
-        # 2. Universal assertless scan: se diretório tests/ existir no snapshot inspecionado
-        tests_dir = target_root / "tests"
-        if tests_dir.is_dir():
-            checks_to_run.append(("assertless_scan", GATE_MAP["assertless"], [str(tests_dir)]))
-            manifest_scanners.append("assertless")
+        # 2. Universal assertless scan: PT-7 — rodava só se `tests/`
+        # existia; test_*.py na raiz ou em spec/ passavam sem auditoria.
+        # O scanner decide elegibilidade (TEST_FILE) e sai n/a quando vazio.
+        checks_to_run.append(("assertless_scan", GATE_MAP["assertless"], [str(target_root)]))
+        manifest_scanners.append("assertless")
 
         # 3. Universal a11y scan: executado incondicionalmente para evitar regressões
         checks_to_run.append(("a11y_scan", GATE_MAP["a11y"], [str(target_root)]))
@@ -1056,6 +1080,13 @@ def _cmd_check(
                 GATE_MAP["contracts"],
                 ["--repo", str(target_root), "--spec", spec_path],
             ))
+            # PT-5: `--spec` sem spec_drift aprovava mutação fora do escopo —
+            # o drift é o portão que compara spec contra o diff real.
+            checks_to_run.append((
+                "spec_drift",
+                GATE_MAP["drift"],
+                ["--repo", str(repo_root), "--spec", spec_path],
+            ))
 
         use_manifests = not staged
         effective_no_cache = no_cache or staged
@@ -1066,6 +1097,19 @@ def _cmd_check(
             from scripts.metricas.scan_manifest import (
                 run_incremental_scan, scanner_specs,
             )
+            # PT-6: um meta-path finder plantado (sitecustomize via
+            # PYTHONPATH do repo) pode ter interceptado o import mesmo com
+            # o sys.path podado — exige que o módulo venha da suíte.
+            import scripts.metricas.scan_manifest as _sm_mod
+            try:
+                if not Path(_sm_mod.__file__ or "").resolve().is_relative_to(
+                        SUITE_ROOT):
+                    print("ERRO: scripts.metricas.scan_manifest resolveu "
+                          "fora da suíte — possível sys.path poisoning.",
+                          file=sys.stderr)
+                    return 2
+            except (OSError, TypeError):
+                return 2
             spec_by_id = {s.scanner_id: s for s in scanner_specs()}
             manifest_results: dict[str, dict] = {}
             for name, _script, _args in checks_to_run:

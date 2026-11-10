@@ -375,7 +375,8 @@ class TestMissionClassifier(unittest.TestCase):
         self.assertTrue(data["stacks"]["rust"]["configured"])
 
     def test_prompt_unconfigured_stack_interactive_decline(self):
-        """Recusa no prompt interativo grava stack como desabilitada em CONFIG.json."""
+        """PT-11: recusa interativa NÃO persiste no repo — CONFIG.json fica
+        intocado (sujeira permanente no alvo auditado era o achado)."""
         cfg_file = self.repo_path / ".henke" / "CONFIG.json"
         cfg_file.parent.mkdir()
         cfg_file.write_text('{"stacks": {}}', encoding="utf-8")
@@ -385,8 +386,7 @@ class TestMissionClassifier(unittest.TestCase):
             self.assertFalse(res)
 
         data = json.loads(cfg_file.read_text(encoding="utf-8"))
-        self.assertFalse(data["stacks"]["rust"]["enabled"])
-        self.assertEqual(data["stacks"]["rust"].get("reason"), "user_declined")
+        self.assertNotIn("rust", data["stacks"])
 
     def test_prompt_unconfigured_stack_non_interactive(self):
         """Em modo não-interativo, bypassa a stack e retorna False sem travar."""

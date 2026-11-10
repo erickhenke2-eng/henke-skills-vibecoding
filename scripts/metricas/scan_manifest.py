@@ -35,7 +35,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import Literal
 
-from scripts.state_paths import sanitized_child_env, state_dir
+from scripts.state_paths import cache_root, sanitized_child_env
 import scripts.winpath as winpath
 
 _SCHEMA_VERSION = 1
@@ -286,7 +286,10 @@ def _nonempty_exit(spec: ScannerSpec, findings: list[dict]) -> int:
 
 
 def _manifest_dir(repo_root: Path) -> Path:
-    return state_dir(Path(repo_root)) / "scan-manifests"
+    # PT-11: manifestos são CACHE regenerável — em `.henke/` sujavam o
+    # git status do auditado e entravam no próprio TIA. Mesma raiz externa
+    # keyed-by-repo do gate cache (DS-14), não o state_dir do usuário.
+    return cache_root(Path(repo_root)) / "scan-manifests"
 
 
 def _manifest_path(repo_root: Path, spec: ScannerSpec) -> Path:
@@ -605,6 +608,12 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
             exit_code = _empty_exit(spec)
         else:
             exit_code = _nonempty_exit(spec, all_findings)
+        # PT-08: arquivo oversize nunca é veredito — o scanner standalone já
+        # sai 2 nele; o manifesto reaproveitava a lacuna como PASS eterno.
+        if any(e.get("status") == "skipped_oversize"
+               for e in new_entries.values()):
+            reasons.append("oversize_present:not_a_verdict")
+            exit_code = 2
         return IncrementalScanResult(
             spec.scanner_id, exit_code, tuple(all_findings),
             tuple(scanned_now), tuple(reused), tuple(sorted(dirty)),

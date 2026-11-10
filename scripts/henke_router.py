@@ -323,6 +323,18 @@ DESTRUCTIVE_SIGNALS = (
     "remove-physicaldisk", "robocopy /mir", "robocopy /purge",
     "torch the", "gut the", "axe the", "scrap the", "annihilate",
     "decimate", "vaporize", "torch o", "destrói",
+    # PT-10 (pentest r2): paráfrases destrutivas que chegavam ao driver sem
+    # `henke approve` — "faz reset no main", "empurra com force", "checkout
+    # HEAD~1" passavam como ANALISAR/EXECUTAR sem trava.
+    "reset no", "reset na", "reset para", "reset pro", "reset pra",
+    "reset em", "reset to", "reset back", "reset --soft", "reset --mixed",
+    "com force", "force para", "force pro", "force pra", "com força",
+    "força para", "força pro", "empurra com força", "push force",
+    "checkout head", "checkout ~", "checkout main --", "switch -d",
+    "restore --source", "restore .", "restore --staged",
+    "rebase", "rebased", "rebasing", "rebase --onto", "cherry-pick --no-commit",
+    "merge --abort", "revert --no-commit", "amend --no-edit",
+    "stash drop", "stash pop", "clean -f", "branch -D",
 )
 _DESTRUCTIVE_SIGNALS = DESTRUCTIVE_SIGNALS
 

@@ -147,10 +147,11 @@ class TestCheckParallelAndManifests(unittest.TestCase):
                          f"{res.stdout[-800:]} {res.stderr[-400:]}")
 
     def test_manifest_files_created_on_check(self):
+        """PT-11: manifestos vivem em cache_root (fora do repo), não em state_dir."""
         with tempfile.TemporaryDirectory() as td:
-            sd = Path(td) / "state"
+            cd = Path(td) / "cache"
             env = os.environ.copy()
-            env["HENKE_STATE_DIR"] = str(sd)
+            env["HENKE_CACHE_DIR"] = str(cd)
             res = subprocess.run(
                 [sys.executable, str(CLI), "check", "--repo", ROOT],
                 capture_output=True, text=True, env=env, timeout=180,
@@ -159,8 +160,8 @@ class TestCheckParallelAndManifests(unittest.TestCase):
                              f"check na suíte deve passar limpo: "
                              f"{res.stdout[-600:]} {res.stderr[-300:]}")
             self.assertTrue(
-                (sd / "scan-manifests" / "a11y.json").is_file(),
-                f"manifesto a11y ausente em {sd}: {res.stderr[:300]}")
+                (cd / "scan-manifests" / "a11y.json").is_file(),
+                f"manifesto a11y ausente em {cd}: {res.stderr[:300]}")
 
 
 if __name__ == "__main__":

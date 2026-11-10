@@ -172,7 +172,7 @@ class TestTier1MissionClassifier(unittest.TestCase):
             self.assertTrue(content["stacks"].get("rust", {}).get("enabled", False))
 
     def test_r1_9_unconfigured_stack_interactive_prompt_decline(self):
-        """T1.1.9: User declining [s/N] prompt keeps stack disabled."""
+        """T1.1.9/PT-11: decline retorna False sem persistir nada no repo."""
         if not HAS_MISSION_CLASSIFIER:
             self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
@@ -185,7 +185,7 @@ class TestTier1MissionClassifier(unittest.TestCase):
             res = classifier.prompt_unconfigured_stack("rust", cfg_file, interactive=True)
             self.assertFalse(res)
             content = json.loads(cfg_file.read_text(encoding="utf-8"))
-            self.assertFalse(content["stacks"].get("rust", {}).get("enabled", True))
+            self.assertNotIn("rust", content["stacks"])
 
     def test_r1_10_extensibility_documentation(self):
         """T1.1.10: docs/BRIDGES.md documents bridge adaptation and custom bridge schemas."""

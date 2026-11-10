@@ -105,6 +105,54 @@ def discover_hooks_dir(repo_path: Path | str) -> Path | None:
         return None
 
 
+def _is_within(root: Path, cand: Path) -> bool:
+    """Contenção lexical com normcase — local para não exigir scripts.winpath
+    (este módulo é distribuído standalone via load_module_from_path)."""
+    root_n = os.path.normcase(os.path.normpath(os.fspath(root))).rstrip(os.sep)
+    cand_n = os.path.normcase(os.path.normpath(os.fspath(cand)))
+    return cand_n == root_n or cand_n.startswith(root_n + os.sep)
+
+
+def _no_reparse(path: Path) -> bool:
+    """Componentes ainda INEXISTENTES não bloqueiam (um hooksPath custom pode
+    ser criado depois). Qualquer ancestral existente reparse/symlink -> recusa."""
+    p = Path(path)
+    for anc in [p, *p.parents]:
+        try:
+            if not anc.exists() and not anc.is_symlink():
+                continue  # ainda não criado — nada a redirecionar
+            if anc.is_symlink():
+                return False
+            st = anc.stat(follow_symlinks=False)
+            if os.name == "nt" and getattr(st, "st_file_attributes", 0) & 0x400:
+                return False
+        except OSError:
+            return False
+        if anc.parent == anc:
+            break
+    return True
+
+
+def _git_common_dir(repo: Path) -> Path | None:
+    """git-common-dir resolvido — em worktree aponta o .git do repo principal
+    (onde os hooks efetivamente vivem)."""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=str(repo), capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        if res.returncode != 0:
+            return None
+        raw = res.stdout.strip()
+        if not raw:
+            return None
+        p = Path(raw)
+        return p.resolve() if p.is_absolute() else (repo / p).resolve()
+    except Exception:
+        return None
+
+
 def install_hook(
     repo_path: Path | str,
     hook_type: str = "pre-commit",
@@ -115,7 +163,8 @@ def install_hook(
     Args:
         repo_path: Diretório raiz do repositório Git.
         hook_type: Tipo do hook (padrão: "pre-commit").
-        force: Se True, sobrescreve hooks legados sem criar backup .legacy.
+        force: Se True, sobrescreve sem mover para .legacy — o hook existente
+            é sempre preservado em <hook>.legacy.<ts> (PT-04).
 
     Returns:
         (sucesso: bool, mensagem: str)
@@ -124,6 +173,24 @@ def install_hook(
     hooks_dir = discover_hooks_dir(repo)
     if hooks_dir is None:
         return (False, "Erro: diretório não é um repositório Git válido")
+
+    # PT-04: core.hooksPath pode resolver FORA do repo (o PoC escreveu 2
+    # níveis acima). Só se aceita o hooks dir dentro do worktree ou do git
+    # common-dir (worktree vinculada compartilha os hooks do repo principal);
+    # qualquer outro destino é recusa fail-closed — nada é escrito.
+    common_dir = _git_common_dir(repo)
+    if common_dir is None:
+        return (False, "Erro: git common-dir indisponível — instalação recusada")
+    if not (_is_within(repo, hooks_dir) or _is_within(common_dir, hooks_dir)):
+        return (False,
+                f"Erro: core.hooksPath resolve para fora do repositório "
+                f"({hooks_dir}) — instalação recusada")
+    # Ancestral reparse/symlink redirecionaria a escrita para fora do repo
+    # mesmo com contenção lexical — recusa igual (PT-04).
+    if not _no_reparse(hooks_dir):
+        return (False,
+                f"Erro: diretório de hooks sob reparse point ({hooks_dir}) "
+                "— instalação recusada")
 
     try:
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -154,7 +221,18 @@ def install_hook(
                     except Exception as err:
                         return (False, f"Erro ao criar backup do hook legado: {err}")
                 else:
-                    pass
+                    # PT-04: --force também preserva — o PoC mostrou hook
+                    # estrangeiro sobrescrito sem backup. Arquiva em
+                    # <hook>.legacy.<ts> (mesma convenção timestamped já
+                    # usada acima) antes de sobrescrever. NÃO usar .legacy
+                    # puro: testes exigem sua ausência no modo force.
+                    ts = int(time.time() * 1000)
+                    archived = hooks_dir / f"{hook_type}.legacy.{ts}"
+                    try:
+                        os.replace(target_file, archived)
+                    except Exception as err:
+                        return (False,
+                                f"Erro ao preservar hook existente (--force): {err}")
 
         # Determina caminhos canônicos da suíte Henke
         cli_path = Path(__file__).parent / "henke_cli.py"

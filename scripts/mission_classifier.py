@@ -177,6 +177,10 @@ DEFAULT_STACK_METADATA: dict[str, dict[str, Any]] = {
 def _atomic_write_json(path: Path, data: object) -> None:
     """Grava JSON atomicamente em arquivo usando substituição atômica no Windows."""
     path = Path(path).resolve()
+    # PT-14: `.henke` existindo como ARQUIVO comum virava traceback
+    # (FileExistsError no mkdir) — erro de uso explícito, nunca crash.
+    if path.parent.exists() and not path.parent.is_dir():
+        raise ValueError(f"destino não é diretório: {path.parent}")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -625,19 +629,22 @@ def prompt_unconfigured_stack(
             "test_cmd": default_info.get("test_cmd"),
             "gates": default_info.get("gates", ["hazard"]),
         }
-        _atomic_write_json(config_p, cfg_data)
+        try:
+            _atomic_write_json(config_p, cfg_data)
+        except (OSError, ValueError) as exc:
+            err = (f"ERRO: não foi possível gravar {config_p}: {exc}\n")
+            (output_stream.write(err) if output_stream is not None
+             else sys.stderr.write(err))
+            return False
         if output_stream is not None:
             output_stream.write(f"[OK] Stack '{stack_name}' configurada e habilitada.\n")
             if hasattr(output_stream, "flush"):
                 output_stream.flush()
         return True
     else:
-        cfg_data["stacks"][stack_name] = {
-            "enabled": False,
-            "configured": False,
-            "reason": "user_declined",
-        }
-        _atomic_write_json(config_p, cfg_data)
+        # PT-11: a recusa é decisão DA SESSÃO — persistir `user_declined`
+        # criava `.henke/CONFIG.json` dentro do repo auditado (sujeita git
+        # status e custódia). Não-interativo já retorna acima sem escrever.
         msg = f"[INFO] Stack '{stack_name}' ignorada nesta sessão.\n"
         if output_stream is not None:
             output_stream.write(msg)

