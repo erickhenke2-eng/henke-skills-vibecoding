@@ -209,3 +209,88 @@ class TestPurgeRefusesUnverified(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStagedSnapshotRealIndex(unittest.TestCase):
+    """Delta-F1/F2: `check --staged` precisa ver objetos escritos no tempdir
+    pelo write-tree e o snapshot extraído tem que bater com ls-tree."""
+
+    def _run_check(self, repo: Path) -> subprocess.CompletedProcess:
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("GIT_")}
+        return subprocess.run(
+            [sys.executable, str(SUITE_ROOT / "scripts" / "henke_cli.py"),
+             "check", "--repo", str(repo), "--staged", "--jobs", "1"],
+            capture_output=True, text=True, env=env, timeout=180)
+
+    def test_staged_change_scans_snapshot_not_error(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            _init_repo(repo)
+            (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-qm", "init")
+            # índice difere de HEAD — caso que quebrava (F1: not a tree object)
+            (repo / "b.py").write_text("def t():\n    pass\n", encoding="utf-8")
+            _git(repo, "add", "b.py")
+            res = self._run_check(repo)
+            self.assertNotEqual(res.returncode, 2,
+                                f"extração do índice falhou: {res.stderr[:300]}")
+            self.assertIn("hazard_scan", res.stdout)
+
+    def test_export_ignore_rejects_snapshot(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            _init_repo(repo)
+            (repo / ".gitattributes").write_text(
+                "segredo.txt export-ignore\n", encoding="utf-8")
+            (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-qm", "init")
+            (repo / "segredo.txt").write_text("s3cr3t\n", encoding="utf-8")
+            _git(repo, "add", "segredo.txt")
+            res = self._run_check(repo)
+            # arquivo staged omitido do archive → divergência → exit 2
+            self.assertEqual(res.returncode, 2)
+            self.assertIn("diverge", res.stderr)
+
+
+class TestSanitizedChildEnvPath(unittest.TestCase):
+    """Delta-F4/F5: filtro de PATH do helper canônico remove dirs do repo."""
+
+    def test_path_inside_repo_removed(self):
+        from scripts.state_paths import sanitized_child_env
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td).resolve()
+            planted = repo / "bin"
+            planted.mkdir()
+            fake_path = os.pathsep.join(
+                [str(planted), "entrada-relativa", str(Path(sys.executable).parent)])
+            with unittest.mock.patch.dict(
+                    os.environ, {"PATH": fake_path}, clear=False):
+                env = sanitized_child_env(repo)
+            parts = env["PATH"].split(os.pathsep)
+            self.assertNotIn(str(planted), parts)
+            self.assertNotIn("entrada-relativa", parts)
+            self.assertIn(str(Path(sys.executable).parent), parts)
+
+
+class TestBaseFlagInjection(unittest.TestCase):
+    """Delta já cobria: --base que começa com '-' nunca chega ao argv do git."""
+
+    def test_flag_like_base_rejected(self):
+        from scripts.test_impact import GitDiscoveryError
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            _init_repo(repo)
+            (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+            _git(repo, "add", ".")
+            _git(repo, "commit", "-qm", "init")
+            with self.assertRaises(GitDiscoveryError):
+                select_tests(repo, "--exec=calc", {})
+            with self.assertRaises(GitDiscoveryError):
+                select_tests(repo, "-c core.pager=calc", {})
+
+
+if __name__ == "__main__":
+    unittest.main()

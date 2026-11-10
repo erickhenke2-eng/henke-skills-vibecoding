@@ -137,7 +137,13 @@ def _no_reparse(path: Path) -> bool:
 
 def _iter_repo_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+        # Delta-F13: poda junction/reparse — sem isso o plano descia a
+        # árvore externa do alvo (IO ilimitado + hash de conteúdo fora do
+        # repo no _tree_sha256).
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in _SKIP_DIRS
+            and _no_reparse(Path(dirpath) / d))
         yield Path(dirpath), dirnames, filenames
 
 
@@ -215,7 +221,10 @@ def _manifest_hmac(repo_root: Path, manifest: dict) -> str | None:
         return None
     body = {k: v for k, v in manifest.items() if k != "hmac"}
     canon = json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    return _hmac.new(secret, canon, hashlib.sha256).hexdigest()
+    # Delta-F14: separador de domínio — a chave é compartilhada com o
+    # scan-manifest; um HMAC de um protocolo nunca valida no outro.
+    return _hmac.new(secret, b"henke-quarantine-v1\x00" + canon,
+                     hashlib.sha256).hexdigest()
 
 
 def _quarantine_tree_safe(repo: Path, qroot: Path, batch_dir: Path) -> None:

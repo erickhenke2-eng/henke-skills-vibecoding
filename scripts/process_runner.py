@@ -75,14 +75,6 @@ def run_process(
     if not tokens:
         raise ValueError("cmd cannot be empty")
 
-    # Resolução de binário e comandos internos no Windows (sem shell=True)
-    if sys.platform == "win32" and tokens:
-        resolved = shutil.which(tokens[0])
-        if resolved:
-            tokens[0] = resolved
-        elif tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls"):
-            tokens = ["cmd.exe", "/c"] + tokens
-
     # DS-6: `os.environ.copy()` + overlay reintroduzia PYTHONPATH/GIT_DIR/
     # loader hooks que o chamador removeu — um sitecustomize.py plantado no
     # repo interceptava o portão e saía verde sem escanear. env fornecido
@@ -95,6 +87,17 @@ def run_process(
             Path(cwd) if cwd is not None else None)
     child_env.setdefault("PYTHONUTF8", "1")
     child_env.setdefault("PYTHONIOENCODING", "utf-8")
+
+    # Resolução de binário e comandos internos no Windows (sem shell=True).
+    # Delta-F9: `which` usava o PATH do PAI (os.environ) — um binário
+    # plantado no repo resolvia antes do env sanitizado. Resolve contra o
+    # PATH do FILHO, já filtrado.
+    if sys.platform == "win32" and tokens:
+        resolved = shutil.which(tokens[0], path=child_env.get("PATH"))
+        if resolved:
+            tokens[0] = resolved
+        elif tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls"):
+            tokens = ["cmd.exe", "/c"] + tokens
 
     work_dir = Path(cwd) if cwd is not None else Path.cwd()
 

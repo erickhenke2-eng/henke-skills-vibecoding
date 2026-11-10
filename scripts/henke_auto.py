@@ -339,36 +339,19 @@ def _child_env(repo: Path | None = None) -> dict:
     # check-ignore) para outro repo/index — strip em todo filho.
     # A4 (banca v14): PYTHONPATH/loader hooks subvertem o tooling que
     # produz evidência — strip amplo igual ao do `henke exec`.
-    env = {k: v for k, v in os.environ.items()
-           if not (k.startswith("GIT_") or k.startswith("PYTHON")
-                   or k.startswith("LD_") or k.startswith("DYLD_")
-                   or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
-                            "PERL5OPT", "PERL5LIB", "RUBYOPT",
-                            "DOTNET_STARTUP_HOOKS"))}
+    # Delta-F5: delega para o helper canônico — a strip-list local ficou
+    # mais fraca (NODE_*/NPM_CONFIG/PERL5*/DOTNET_*/JAVA_*/GOFLAGS/RUST*/
+    # VIRTUAL_ENV/CLASSPATH etc. sobreviviam e mintavam evidência via
+    # driver cmd:/agent:/test_cmd). O helper também cobre o filtro de
+    # PATH ancorado no repo (A4 banca v16 / DS-12b).
+    from scripts.state_paths import sanitized_child_env
+    env = sanitized_child_env(repo)
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     # F-07 (banca v8): CreateProcess/`shutil.which` procuram no CWD no
     # Windows — um `git.exe`/`npm.cmd` plantado no repo seria executado por
     # driver `cmd:`/agent:/test_cmd/git interno. Remove o CWD do path de busca.
     env["NoDefaultCurrentDirectoryInExePath"] = "1"
-    # A4 (banca v16): PATH com entrada relativa ou dentro do repo resolvia
-    # `git`/`npm` plantado → portões e auditoria liam stdout forjado. Mesma
-    # regra do `henke exec`: remove CWD e dirs que resolvem no repo.
-    # DS-12b: o filtro tem que usar o REPO efetivo (--repo), não o CWD do
-    # processo — o subprocesso roda com cwd=<repo>, que pode ser outro.
-    _rr = Path(repo).resolve() if repo is not None else Path.cwd().resolve()
-    _parts = []
-    for _d in env.get("PATH", "").split(os.pathsep):
-        if not _d or not os.path.isabs(_d):
-            continue
-        try:
-            _dr = Path(_d).resolve()
-        except OSError:
-            continue
-        if _dr == _rr or _rr in _dr.parents:
-            continue
-        _parts.append(_d)
-    env["PATH"] = os.pathsep.join(_parts)
     return env
 
 

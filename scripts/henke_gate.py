@@ -33,11 +33,14 @@ DEFAULT_BASELINE = ".henke/gate-baseline.json"
 
 # A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
 # no ambiente redirecionariam o git dos vereditos para outro repo/index.
-_GIT_ENV = {k: v for k, v in os.environ.items() if not (k.startswith("GIT_") or k.startswith("PYTHON")
-                or k.startswith("LD_") or k.startswith("DYLD_")
-                or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
-                         "PERL5OPT", "PERL5LIB", "RUBYOPT",
-                         "DOTNET_STARTUP_HOOKS"))}
+# Delta-F11: strip-list mais fraca e SEM filtro de PATH — shim `git` no
+# repo mintava o baseline/check. Delega para o helper canônico.
+def _git_env(root) -> dict:
+    try:
+        from scripts.state_paths import sanitized_child_env
+    except ImportError:
+        from state_paths import sanitized_child_env
+    return sanitized_child_env(Path(root))
 
 
 def git(cwd, *args, check=True):
@@ -46,7 +49,7 @@ def git(cwd, *args, check=True):
             ["git", "-C", str(cwd), "-c", "core.quotePath=false",
              "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=30, env=_GIT_ENV,
+            timeout=30, env=_git_env(cwd),
         )
     except subprocess.TimeoutExpired as exc:
         # H4 (banca v15): timeout vestia exit 1 (veredito) — infra é erro.

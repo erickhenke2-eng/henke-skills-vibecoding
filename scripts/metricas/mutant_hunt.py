@@ -141,11 +141,11 @@ def _collect_mutants(tree: ast.AST, diff_lines: set[int] | None, max_mutants: in
 
 # A11 (banca v10): GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/GIT_CONFIG_* plantados
 # no ambiente redirecionariam o git dos vereditos para outro repo/index.
-_GIT_ENV = {k: v for k, v in os.environ.items() if not (k.startswith("GIT_") or k.startswith("PYTHON")
-                or k.startswith("LD_") or k.startswith("DYLD_")
-                or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
-                         "PERL5OPT", "PERL5LIB", "RUBYOPT",
-                         "DOTNET_STARTUP_HOOKS"))}
+# Delta-F10: strip-list módulo-level era mais fraca e NÃO filtrava PATH —
+# shim `git` no repo mintava diffs. Delega para o helper canônico.
+def _git_env(root: Path) -> dict:
+    from scripts.state_paths import sanitized_child_env
+    return sanitized_child_env(root)
 
 
 def extract_diff_lines(target: Path, git_ref: str = "HEAD") -> set[int] | None:
@@ -159,7 +159,7 @@ def extract_diff_lines(target: Path, git_ref: str = "HEAD") -> set[int] | None:
             capture_output=True,
             text=True,
             encoding="utf-8",
-            env=_GIT_ENV,
+            env=_git_env(t.parent),
             errors="replace",
             timeout=5,
         )
@@ -397,7 +397,7 @@ def _git_z(repo: Path, *args: str) -> list[str] | None:
         res = subprocess.run(
             ["git", "-C", str(repo),
              "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
-            capture_output=True, timeout=10, env=_GIT_ENV,
+            capture_output=True, timeout=10, env=_git_env(repo),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -609,7 +609,7 @@ def main(argv: list[str] | None = None) -> int:
             ["git", "rev-parse", "--verify", "--quiet",
              f"{args.diff_against}^{{commit}}"],
             cwd=str(target_path.parent), capture_output=True, timeout=10,
-            env=_GIT_ENV,
+            env=_git_env(target_path.parent),
         )
         if _v.returncode != 0:
             # Modo single-target: a ref só ESTREITA o escopo do arquivo alvo

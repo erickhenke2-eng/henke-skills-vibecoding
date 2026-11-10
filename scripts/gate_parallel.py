@@ -50,8 +50,14 @@ class GateResult:
 
 
 def run_gates_parallel(specs: Sequence[GateSpec], *,
-                       max_parallel: int = 4) -> list[GateResult]:
-    """Executa os portões em paralelo (teto de 4 filhos) e preserva a ordem."""
+                       max_parallel: int = 4,
+                       filter_root: Path | None = None) -> list[GateResult]:
+    """Executa os portões em paralelo (teto de 4 filhos) e preserva a ordem.
+
+    `filter_root` ancora o filtro de PATH dos filhos no repo AUDITADO
+    (Delta-F8): em `--staged` o spec.cwd é o tempdir de extração e um
+    filtro ancorado nele deixaria sobreviver PATH entries dentro do repo —
+    netos dos portões (git -C etc.) resolveriam shims plantados."""
     if not 1 <= max_parallel <= _GATE_MAX_PARALLEL:
         raise ValueError(f"max_parallel deve estar entre 1 e {_GATE_MAX_PARALLEL}")
     if not specs:
@@ -104,7 +110,9 @@ def run_gates_parallel(specs: Sequence[GateSpec], *,
                 child = supervisor.start(
                     spec.argv,
                     cwd=Path(spec.cwd),
-                    env=sanitized_child_env(Path(spec.cwd)),
+                    env=sanitized_child_env(
+                        filter_root if filter_root is not None
+                        else Path(spec.cwd)),
                     max_output_bytes=_GATE_MAX_OUTPUT,
                 )
             except (OSError, ValueError) as exc:

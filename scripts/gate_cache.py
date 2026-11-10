@@ -414,6 +414,14 @@ def _get_cache_secret(repo_path: Path) -> bytes:
     ou commit — nunca é consultado: quem controla o repo não controla a chave.
     """
     secret_file = secret_dir(Path(repo_path)) / secret_key_name(Path(repo_path))
+    try:
+        # Delta-F15: HENKE_SECRET_DIR dentro do repo auditado = chave
+        # legível por quem controla o repo → entradas de cache forjáveis.
+        # Fail-closed: sem chave, nenhuma entrada verifica (cache miss).
+        secret_file.resolve().relative_to(Path(repo_path).resolve())
+        return None
+    except ValueError:
+        pass
     if secret_file.is_file():
         try:
             raw = secret_file.read_bytes()
@@ -435,20 +443,24 @@ def _get_cache_secret(repo_path: Path) -> bytes:
     return new_hex.encode("utf-8")
 
 
-def _compute_entry_hmac(secret: bytes, key: str, entry: Dict[str, Any]) -> str:
+def _compute_entry_hmac(secret: bytes | None, key: str, entry: Dict[str, Any]) -> str:
     """Calcula a assinatura HMAC-SHA256 para impedir forja de vereditos no cache."""
+    if secret is None:
+        return ""  # Delta-F15: sem chave confiável, nada assina/verifica
     clean = {k: v for k, v in entry.items() if k not in ("hmac", "last_accessed", "access_count")}
     canonical = json.dumps(clean, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hmac.new(secret, f"{key}:".encode("utf-8") + canonical, hashlib.sha256).hexdigest()
 
 
-def _verify_entry_hmac(secret: bytes, key: str, entry: Dict[str, Any]) -> bool:
+def _verify_entry_hmac(secret: bytes | None, key: str, entry: Dict[str, Any]) -> bool:
     """Verifica a integridade criptográfica da entrada do cache."""
+    if secret is None:
+        return False
     stored_hmac = entry.get("hmac")
     if not stored_hmac or not isinstance(stored_hmac, str):
         return False
     expected = _compute_entry_hmac(secret, key, entry)
-    return hmac.compare_digest(stored_hmac, expected)
+    return bool(expected) and hmac.compare_digest(stored_hmac, expected)
 
 
 # ---------------------------------------------------------------------------

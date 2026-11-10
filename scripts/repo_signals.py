@@ -149,7 +149,10 @@ def cmd_churn(args):
     res = subprocess.run(cmd, capture_output=True, text=True,
                          encoding="utf-8", errors="replace", timeout=60,
                          # A19 (banca v12): GIT_* herdado lia outro repo.
-                         env=sanitized_child_env(Path.cwd()))
+                         # Delta-F6: âncora = args.repo, não o CWD — se o
+                         # processo roda fora do repo, PATH entries dentro
+                         # do repo sobreviviam e mintavam o churn.
+                         env=sanitized_child_env(Path(args.repo).resolve()))
     if res.returncode != 0:
         _fail(f"git log falhou: {res.stderr.strip()[:200]}")
     sha, count = None, 0

@@ -193,7 +193,7 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
     git_res = subprocess.run(
         ["git", "--version"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-    env=_scrub_env())
+    env=_scrub_env(repo_root))
     git_ok = git_res.returncode == 0
     missing_scripts = [name for name, p in sorted(GATE_MAP.items()) if not p.is_file()]
     expected_skills = 58
@@ -232,12 +232,14 @@ def _cmd_doctor(repo_root: Path, as_json: bool = False) -> int:
     return 0 if report["status"] == "ok" else 1
 
 
-def _scrub_env() -> dict:
+def _scrub_env(repo: Path | None = None) -> dict:
     """Env sanitizado para subprocessos de custódia (A6 banca v16):
     _cmd_check/_cmd_init/_derive_outcome/doctor herdavam PYTHONPATH/GIT_*/
-    PATH integral — sitecustomize plantado fabricava vereditos."""
+    PATH integral — sitecustomize plantado fabricava vereditos.
+    `repo` ancora o filtro de PATH (Delta-F4) — sem ele, entradas de PATH
+    dentro do repo auditado sobrevivem e shims mintam vereditos."""
     from scripts.state_paths import sanitized_child_env
-    e = sanitized_child_env(None)
+    e = sanitized_child_env(repo)
     e["PYTHONUTF8"] = "1"
     e["PYTHONIOENCODING"] = "utf-8"
     return e
@@ -260,7 +262,7 @@ def _cmd_init(repo_root: Path) -> int:
             text=True,
             encoding="utf-8",
             errors="replace",
-        env=_scrub_env())
+        env=_scrub_env(repo_root))
 
     print(f"OK: Suíte Henke inicializada em {repo_root} (.henke/ e docs/designs/ prontos).")
     return 0
@@ -921,10 +923,10 @@ def _cmd_check(
                 text=True,
                 env=_git_env,
             )
-            if git_check.returncode == 0:
+            if git_check.returncode == 0 and git_check.stdout.strip() == "true":
                 # Merge-Audit 3: checkout-index roda filter.*.smudge de .git/config
                 # (RCE no pre-commit). write-tree + archive não passam pelo
-                # machinery de filtros — export-subst/export-ignore apenas.
+                # machinery de filtros de conteúdo.
                 staged_temp_ctx = tempfile.TemporaryDirectory()
                 # Banca-A 6: write-tree escreveria objetos novos em
                 # .git/objects do repo auditado — redireciona para tempdir
@@ -933,8 +935,20 @@ def _cmd_check(
                 obj_dir.mkdir()
                 _wt_env = dict(_git_env)
                 _wt_env["GIT_OBJECT_DIRECTORY"] = str(obj_dir)
-                _wt_env["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = str(
-                    (repo_root / ".git" / "objects").resolve())
+                # Delta-F16: `.git` pode ser arquivo (linked worktree/submodule)
+                # — o dir real de objetos vem do git, não do path presumido.
+                _gdir = subprocess.run(
+                    ["git", "rev-parse", "--git-common-dir"],
+                    cwd=str(repo_root), capture_output=True, text=True,
+                    env=_git_env)
+                if _gdir.returncode == 0 and _gdir.stdout.strip():
+                    _gdir_p = Path(_gdir.stdout.strip())
+                    if not _gdir_p.is_absolute():
+                        _gdir_p = (repo_root / _gdir_p).resolve()
+                    _objects = (_gdir_p / "objects").resolve()
+                else:
+                    _objects = (repo_root / ".git" / "objects").resolve()
+                _wt_env["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = str(_objects)
                 wt_res = subprocess.run(
                     ["git", "-c", "core.fsmonitor=false",
                      "write-tree"],
@@ -953,19 +967,42 @@ def _cmd_check(
                         cwd=str(repo_root),
                         capture_output=True,
                         text=True,
-                        env=_git_env,
+                        # Delta-F1: archive precisa enxergar os objetos
+                        # escritos no tempdir pelo write-tree — mesmo env.
+                        env=_wt_env,
                     )
                     if ar_res.returncode == 0:
                         import zipfile
                         extract_dir = Path(staged_temp_ctx.name) / "tree"
                         extract_dir.mkdir()
+                        extracted: set[str] = set()
                         with zipfile.ZipFile(archive_path) as zf:
                             for info in zf.infolist():
                                 rel = info.filename.lstrip("/")
                                 if ".." in rel.split("/"):
                                     continue  # path traversal não extraído
                                 zf.extract(info, extract_dir)
+                                extracted.add(rel)
                         archive_path.unlink()
+                        # Delta-F2: `export-ignore`/`export-subst` de
+                        # .gitattributes omitiriam/reescreveriam arquivos
+                        # staged — o conjunto extraído TEM que bater com o
+                        # ls-tree do índice (fail-closed em divergência).
+                        lt_res = subprocess.run(
+                            ["git", "ls-tree", "-r", "--name-only", tree],
+                            cwd=str(repo_root), capture_output=True,
+                            text=True, env=_wt_env)
+                        listed = (set(lt_res.stdout.split())
+                                  if lt_res.returncode == 0 else set())
+                        missing = sorted(p for p in listed
+                                         if p + "/" not in extracted
+                                         and p not in extracted)
+                        if lt_res.returncode != 0 or missing:
+                            print("ERRO: snapshot do índice diverge de "
+                                  "ls-tree (export-ignore/export-subst em "
+                                  f".gitattributes? omitidos={missing[:5]})",
+                                  file=sys.stderr)
+                            return 2
                         target_root = extract_dir
                     else:
                         co_res = ar_res
@@ -1093,7 +1130,8 @@ def _cmd_check(
                          target_root, timeout_sec=float(gate_timeout))
                 for _idx, name, script_path, gate_args in uncached
             ]
-            par_results = run_gates_parallel(specs, max_parallel=jobs)
+            par_results = run_gates_parallel(
+                specs, max_parallel=jobs, filter_root=repo_root)
             for (idx, name, script_path, gate_args), gres in zip(uncached, par_results):
                 passed = gres.passed
                 if not passed:
