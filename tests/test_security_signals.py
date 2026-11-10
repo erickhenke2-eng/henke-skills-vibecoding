@@ -56,27 +56,26 @@ class TestSingleSourceOfTruth(unittest.TestCase):
 
 class TestSignalCorpus(unittest.TestCase):
     """Cada sinal precisa casar via _has_signal(_norm(sig)) — um sinal que
-    não casa consigo mesmo é código morto/evasão gratuita."""
-
-    def _assert_self_match(self, sigs, label):
-        dead = []
-        for sig in sigs:
-            norm = security_signals._norm(sig)
-            if not security_signals._has_signal(norm, sig):
-                dead.append(sig)
-        self.assertEqual(dead, [], f"{label}: sinais que não casam: {dead}")
+    não casa consigo mesmo é código morto/evasão gratuita. (assert inline:
+    assertless_scan exige asserção no corpo do teste.)"""
 
     def test_destructive_corpus(self):
-        self._assert_self_match(security_signals.DESTRUCTIVE_SIGNALS,
-                                "destructive")
+        dead = [s for s in security_signals.DESTRUCTIVE_SIGNALS
+                if not security_signals._has_signal(
+                    security_signals._norm(s), s)]
+        self.assertEqual(dead, [], f"destructive mortos: {dead}")
 
     def test_publish_corpus(self):
-        self._assert_self_match(security_signals.PUBLISH_ONLY_SIGNALS,
-                                "publish")
+        dead = [s for s in security_signals.PUBLISH_ONLY_SIGNALS
+                if not security_signals._has_signal(
+                    security_signals._norm(s), s)]
+        self.assertEqual(dead, [], f"publish mortos: {dead}")
 
     def test_metaconfig_corpus(self):
-        self._assert_self_match(security_signals.METACONFIG_SIGNALS,
-                                "metaconfig")
+        dead = [s for s in security_signals.METACONFIG_SIGNALS
+                if not security_signals._has_signal(
+                    security_signals._norm(s), s)]
+        self.assertEqual(dead, [], f"metaconfig mortos: {dead}")
 
     def test_canonical_prompts(self):
         cases = [

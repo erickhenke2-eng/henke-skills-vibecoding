@@ -157,6 +157,31 @@ def _reveal_usersite() -> None:
             continue
 
 
+def _msvcrt_quote(arg: str) -> str:
+    """Cita um argumento no formato MSVCRT/CommandLineToArgvW — spawnv no
+    Windows concatena os args com espaço SEM citar; arg com espaço/tab/
+    aspas precisa vir pré-citado. Regra: `\\` literal; `\\\\` antes de `"`;
+    `\\\"` para aspas literal; string inteira entre aspas quando contém
+    espaço/tab/aspas."""
+    s = str(arg)
+    if s and not any(c in s for c in ' \t"'):
+        return s
+    out = '"'
+    bs = 0
+    for c in s:
+        if c == "\\":
+            bs += 1
+            continue
+        if c == '"':
+            out += "\\" * (2 * bs + 1) + '"'
+            bs = 0
+            continue
+        out += "\\" * bs + c
+        bs = 0
+    out += "\\" * (2 * bs) + '"'
+    return out
+
+
 def ensure_isolated(script_file: str, argv: list) -> None:
     """Garante runtime isolado para o entrypoint `script_file`.
 
@@ -200,7 +225,7 @@ def ensure_isolated(script_file: str, argv: list) -> None:
     child_argv = [str(exe), BOOT_FLAG + extra, script, *list(argv)]
     if os.name == "posix" and hasattr(os, "execv"):
         try:
-            os.execv(str(exe), child_argv)  # não retorna em caso de sucesso
+            os.execv(str(exe), child_argv)  # hazard-ok: SHELL-INJECTION — respawn isolado, argv literal (exe+script), sem shell
         except OSError:
             pass
         else:
@@ -210,7 +235,11 @@ def ensure_isolated(script_file: str, argv: list) -> None:
     p_wait = getattr(os, "P_WAIT", None)
     if spawnv is not None and p_wait is not None:
         try:
-            code = spawnv(p_wait, str(exe), child_argv)
+            # MSVCRT spawnv NÃO cita args com espaço — "--prompt 'audita
+            # a segurança'" chegava quebrado ao filho (regressão canário
+            # M43+). Citação manual regra CommandLineToArgvW (_msvcrt_quote).
+            code = spawnv(p_wait, str(exe),  # hazard-ok: SHELL-INJECTION — respawn isolado no Windows; argv literal citado, sem shell
+                          [_msvcrt_quote(a) for a in child_argv])
             if isinstance(code, int):
                 raise SystemExit(code)
         except OSError:
