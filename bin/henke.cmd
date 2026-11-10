@@ -5,13 +5,15 @@ rem em site-packages - cai no modulo instalado.
 setlocal
 set "HENKE_CLI=%~dp0..\scripts\henke_cli.py"
 
+rem R2-PT-06: -I (isolado) no lancador - ignora PYTHONPATH e user site,
+rem entao sitecustomize.py do repo auditado nunca executa no processo.
 if exist "%HENKE_CLI%" (
   where python >nul 2>nul
   if not errorlevel 1 (
-    python "%HENKE_CLI%" %*
+    python -I "%HENKE_CLI%" %*
     exit /b %ERRORLEVEL%
   )
-  py -3 "%HENKE_CLI%" %*
+  py -3 -I "%HENKE_CLI%" %*
   exit /b %ERRORLEVEL%
 )
 
@@ -19,8 +21,8 @@ rem Instalacao via wheel/pipx: <prefix>\henke_data\bin\henke.cmd com
 rem scripts\ em site-packages - delega ao pacote importavel.
 where python >nul 2>nul
 if not errorlevel 1 (
-  python -m scripts.henke_cli %*
+  python -I -m scripts.henke_cli %*
   exit /b %ERRORLEVEL%
 )
-py -3 -m scripts.henke_cli %*
+py -3 -I -m scripts.henke_cli %*
 exit /b %ERRORLEVEL%

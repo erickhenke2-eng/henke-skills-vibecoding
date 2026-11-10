@@ -14,10 +14,13 @@ _py_works() {
 BIN_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 HENKE_CLI="$BIN_DIR/../scripts/henke_cli.py"
 
+# R2-PT-06: -I (isolado) no LANÇADOR — ignora PYTHONPATH e user site, então
+# um sitecustomize.py do repo auditado nunca executa no processo. Sem isso o
+# startup hostil rodaria antes de qualquer mitigação em-processo.
 if [ -f "$HENKE_CLI" ]; then
-  if _py_works python3; then exec python3 "$HENKE_CLI" "$@"; fi
-  if _py_works python; then exec python "$HENKE_CLI" "$@"; fi
-  if _py_works py; then exec py -3 "$HENKE_CLI" "$@"; fi
+  if _py_works python3; then exec python3 -I "$HENKE_CLI" "$@"; fi
+  if _py_works python; then exec python -I "$HENKE_CLI" "$@"; fi
+  if _py_works py; then exec py -3 -I "$HENKE_CLI" "$@"; fi
   echo "henke: interpretador Python não encontrado" >&2
   exit 127
 fi
@@ -25,8 +28,8 @@ fi
 # Instalação via wheel/pipx: <prefix>/henke_data/bin/henke com scripts/ em
 # site-packages — delega ao pacote importável (mesma resolução do console
 # script `henke` que o pip gera).
-if _py_works python3; then exec python3 -m scripts.henke_cli "$@"; fi
-if _py_works python; then exec python -m scripts.henke_cli "$@"; fi
-if _py_works py; then exec py -3 -m scripts.henke_cli "$@"; fi
+if _py_works python3; then exec python3 -I -m scripts.henke_cli "$@"; fi
+if _py_works python; then exec python -I -m scripts.henke_cli "$@"; fi
+if _py_works py; then exec py -3 -I -m scripts.henke_cli "$@"; fi
 echo "henke: interpretador Python não encontrado" >&2
 exit 127

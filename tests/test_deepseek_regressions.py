@@ -311,6 +311,19 @@ class TestInterpArgvMask(unittest.TestCase):
         self.assertFalse(is_test_cmd("echo \"pytest 10 passed\""))
         self.assertFalse(is_test_cmd("printf 'ok 10 passed\n'"))
 
+    def test_absolute_interpreter_paths_masked(self):
+        """R2-PT-01: `henke exec` grava o interpretador ABSOLUTO no exec_log —
+        o PoC que sobreviveu era `C:\\...\\python.exe -c ... -m pytest`."""
+        self.assertFalse(is_test_cmd(
+            f"{sys.executable} -c \"print('1 passed in 0.01s')\" -m pytest"))
+        self.assertFalse(is_test_cmd(
+            "C:\\Python312\\python.exe -c \"print('1 passed')\" -m unittest"))
+        self.assertFalse(is_test_cmd(
+            "/usr/bin/python3 -c \"print('1 passed')\" -m pytest"))
+        # E runners reais por caminho absoluto continuam detectados.
+        self.assertTrue(is_test_cmd(
+            f"{sys.executable} -m pytest tests/"))
+
     def test_real_runners_still_detected(self):
         self.assertTrue(is_test_cmd("python -m pytest tests/"))
         self.assertTrue(is_test_cmd("python -m unittest discover -s tests"))
@@ -318,6 +331,47 @@ class TestInterpArgvMask(unittest.TestCase):
         self.assertTrue(is_test_cmd("sh -c 'pytest tests/'"))
         self.assertTrue(is_test_cmd("python -c \"x\" && pytest"))
         self.assertTrue(is_test_cmd("echo ok && npm test"))
+
+
+class TestSitecustomizeHijack(unittest.TestCase):
+    """R2-PT-06: sitecustomize via PYTHONPATH que substitui run_incremental_scan
+    no processo pai NÃO pode mais fabricar PASS — o CLI respawna isolado (-I)
+    e o módulo real executa os scanners de verdade."""
+
+    def test_sitecustomize_nao_desliga_gates(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            evil = td / "evil"
+            evil.mkdir()
+            # O ataque do PoC: importa o módulo REAL da suíte e troca a
+            # função in-place — __file__ continua legítimo, então a checagem
+            # de caminho não pega; só o respawn -I resolve.
+            (evil / "sitecustomize.py").write_text(
+                "import scripts.metricas.scan_manifest as _m\n"
+                "class _R:\n"
+                "    exit_code = 0\n"
+                "    full_scan = True\n"
+                "    scanned_files = ()\n"
+                "    reused_files = ()\n"
+                "    invalidated_files = ()\n"
+                "    reasons = ()\n"
+                "_m.run_incremental_scan = lambda *a, **k: _R()\n",
+                encoding="utf-8")
+            repo = td / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text(
+                "import os\nos.system('echo pwned')\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(evil) + os.pathsep + str(SUITE_ROOT)
+            res = subprocess.run(
+                [sys.executable,
+                 str(SUITE_ROOT / "scripts" / "henke_cli.py"),
+                 "check", "--repo", str(repo), "--no-cache"],
+                capture_output=True, text=True, env=env, timeout=180)
+            self.assertNotEqual(
+                res.returncode, 0,
+                "sitecustomize não pode fabricar PASS em repo com os.system: "
+                f"{res.stdout[-400:]} {res.stderr[-300:]}")
 
 
 class TestRouterDestructiveParaphrase(unittest.TestCase):

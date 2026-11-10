@@ -198,12 +198,30 @@ def _strip_interp_argv(full_cmd: str) -> str:
         toks = shlex.split(full_cmd)
     except ValueError:
         toks = full_cmd.split()
+    if "\\" in full_cmd:
+        # shlex POSIX devora '\' fora de aspas: `C:\Python312\python.exe`
+        # virava `C:Python312python.exe` e o basename não casava — re-tokeniza
+        # preservando barras e remove as aspas literais que posix=False
+        # deixa presas aos tokens.
+        try:
+            toks = [
+                t[1:-1] if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'"
+                else t
+                for t in shlex.split(full_cmd, posix=False)]
+        except ValueError:
+            pass
     out: list[str] = []
     i = 0
     while i < len(toks):
-        kind = _interp_kind(toks[i])
+        # R2-PT-01: `henke exec` normaliza o interpretador para caminho
+        # absoluto (C:\...\python.exe) — o fullmatch no token inteiro não o
+        # reconhecia e o `-m pytest` pós-`-c` voltava a mintar crédito.
+        # Compara sempre pelo basename (sep `\` e `/` — o exec_log pode ter
+        # sido gravado em outro SO).
+        base_tok = toks[i].rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+        kind = _interp_kind(base_tok)
         if kind is None:
-            if _PASSTHRU_RE.fullmatch(toks[i]):
+            if _PASSTHRU_RE.fullmatch(base_tok):
                 i += 1
                 while (i < len(toks)
                        and toks[i] not in ("&&", "||", ";", "|")):
@@ -738,4 +756,15 @@ def main():
 
 
 if __name__ == "__main__":
+    # R2-PT-06: sitecustomize via PYTHONPATH roda antes de qualquer
+    # mitigação em-processo e poderia substituir is_test_cmd/verificadores
+    # no pai. Respawna isolado (-I: ignora PYTHONPATH e user site) uma vez.
+    if not sys.flags.isolated and os.environ.get("HENKE_ISOLATED") != "1":
+        import subprocess as _sp
+        _env = os.environ.copy()
+        _env["HENKE_ISOLATED"] = "1"
+        sys.exit(_sp.run(
+            [sys.executable, "-I",
+             str(Path(__file__).resolve()), *sys.argv[1:]],
+            env=_env).returncode)
     main()
