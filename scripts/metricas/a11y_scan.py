@@ -85,6 +85,18 @@ _A11Y_LABEL_ATTR_RE = re.compile(
 _SVG_BLOCK_RE = re.compile(r"<svg\b.*?</svg>", flags=re.S | re.I)
 
 
+def _is_reparse_dir(p: Path) -> bool:
+    """Junction/symlink/reparse — portável py3.11+ (Path.is_junction é 3.12+).
+    Em dúvida, True: diretório que não lemos não é descido."""
+    try:
+        if p.is_symlink():
+            return True
+        st = p.lstat()
+    except OSError:
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
 def _find_sr_only_violations(content: str) -> list[tuple[int, str]]:
     """Retorna lista de (lineno, detail) para violações A11Y-SR-ONLY-DUPLICATE."""
     violations: list[tuple[int, str]] = []
@@ -253,8 +265,7 @@ def scan_a11y_path(target: Path) -> tuple[int, list[tuple[str, str, str]], list[
     for dirpath, dirnames, filenames in os.walk(t):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         dirnames[:] = [d for d in dirnames
-                       if not (Path(dirpath) / d).is_symlink()
-                       and not (Path(dirpath) / d).is_junction()]
+                       if not _is_reparse_dir(Path(dirpath) / d)]
 
         for fn in sorted(filenames):
             fp = Path(dirpath) / fn

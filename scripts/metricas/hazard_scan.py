@@ -81,6 +81,18 @@ SKIP_DIRS = {
 }
 
 
+def _is_reparse_dir(p: Path) -> bool:
+    """Junction/symlink/reparse — portável py3.11+ (Path.is_junction é 3.12+).
+    Em dúvida, True: diretório que não lemos não é descido."""
+    try:
+        if p.is_symlink():
+            return True
+        st = p.lstat()
+    except OSError:
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
 def _is_ci_workflow(path: Path) -> bool:
     posix_low = "/" + path.as_posix().replace("\\", "/").lower().lstrip("/")
     if "/.github/workflows/" in posix_low and posix_low.endswith((".yml", ".yaml")):
@@ -1240,8 +1252,7 @@ def scan_path(target: Path, dist_mode: bool = False,
     for dirpath, dirnames, filenames in os.walk(target):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         dirnames[:] = [d for d in dirnames
-                       if not (Path(dirpath) / d).is_symlink()
-                       and not (Path(dirpath) / d).is_junction()]
+                       if not _is_reparse_dir(Path(dirpath) / d)]
 
         for fn in sorted(filenames):
             p = Path(dirpath) / fn

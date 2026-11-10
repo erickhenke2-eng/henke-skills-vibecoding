@@ -56,14 +56,25 @@ _DOT_PRUNE = {
 }
 
 
+def _is_reparse_dir(p: Path) -> bool:
+    """Junction/symlink/reparse — portável py3.11+ (Path.is_junction é 3.12+).
+    Em dúvida, True: diretório que não lemos não é descido."""
+    try:
+        if p.is_symlink():
+            return True
+        st = p.lstat()
+    except OSError:
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
 def iter_source_files(root: Path, exts=None):
     """os.walk com poda in-place de diretórios mortos (O(N) em arquivos vivos)."""
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [
             d for d in dirnames
             if d not in PRUNE_DIRS and d not in _DOT_PRUNE
-            and not (Path(dirpath) / d).is_symlink()
-            and not (Path(dirpath) / d).is_junction()
+            and not _is_reparse_dir(Path(dirpath) / d)
         ]
         for fn in filenames:
             if exts is None or Path(fn).suffix.lower() in exts:

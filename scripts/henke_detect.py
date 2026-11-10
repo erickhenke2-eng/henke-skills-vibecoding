@@ -99,6 +99,18 @@ _SKIP_DIRS = {
 _MAKE_TARGET_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*:(?![:=])", re.M)
 
 
+def _is_reparse_dir(p: Path) -> bool:
+    """Junction/symlink/reparse — portável py3.11+ (Path.is_junction é 3.12+).
+    Em dúvida, True: diretório que não lemos não é descido."""
+    try:
+        if p.is_symlink():
+            return True
+        st = p.lstat()
+    except OSError:
+        return True
+    return bool(getattr(st, "st_file_attributes", 0) & 0x400)
+
+
 def _empty() -> dict:
     return {"linguagens": [], "framework": None, "test_cmd": None,
             "build_cmd": None, "lint_cmd": None, "source": []}
@@ -310,8 +322,7 @@ def _ext_census(root: Path) -> dict:
         dirnames[:] = [d for d in dirnames
                        if d not in _SKIP_DIRS and not d.startswith(".")]
         dirnames[:] = [d for d in dirnames
-                       if not (Path(dirpath) / d).is_symlink()
-                       and not (Path(dirpath) / d).is_junction()]
+                       if not _is_reparse_dir(Path(dirpath) / d)]
         for fn in filenames:
             lang = _EXT_LANG.get(Path(fn).suffix.lower())
             if lang:

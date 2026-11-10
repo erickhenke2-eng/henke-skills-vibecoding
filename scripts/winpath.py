@@ -295,6 +295,19 @@ def _err_reason(exc: OSError) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def is_reparse_path(path: Path) -> bool:
+    """True se symlink/junction/reparse point — portável py3.11+
+    (``Path.is_junction`` só existe em 3.12+). Em dúvida, True."""
+    try:
+        if path.is_symlink():
+            return True
+        st = path.lstat()
+    except OSError:
+        return True
+    return bool(
+        getattr(st, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def iter_tree(
     root: Path,
     *,
