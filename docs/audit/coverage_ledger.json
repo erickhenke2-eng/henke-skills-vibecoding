@@ -1,0 +1,1562 @@
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "root": "F:/DEV/ACTIVE/henke-skills",
+    "profile": "standard",
+    "tree_hash": "d624ce2ba75c0abaa0eea9b9444cb738a14f7b2eb2e0b3a9311b58d645c99aa8",
+    "total_units": 57,
+    "run_status": "audited"
+  },
+  "critic_passes": [],
+  "findings": [],
+  "units": [
+    {
+      "unit_id": "unit:scripts/henke_cli.py",
+      "path": "scripts/henke_cli.py",
+      "sha256": "b879b1cad33fd5fd5d1f1d603642bfcf69eec56cc45a77c108a265b55bd53b4e",
+      "lines": 2222,
+      "priority": "high",
+      "risk_score": 30,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 6,
+        "max_complexity": 84,
+        "entry_surface": true
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "check agrega exit!=0 quando qualquer portao reprova; exec minta evidencia so via ExecVerdict; classificacao unica is_test_cmd",
+          "result": "tests/test_check_aggregation.py 3t + wave7 check tests + exec flow verde",
+          "method": "local",
+          "assumptions": [
+            {
+              "text": "prompt interativo de stack em repos sem config usa stdin tty",
+              "status": "unenforced"
+            }
+          ]
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_router.py",
+      "path": "scripts/henke_router.py",
+      "sha256": "61264b647f8dc056ff02b8973f725802bb45092cba4fc158f49c7fa3304edfd2",
+      "lines": 664,
+      "priority": "high",
+      "risk_score": 28,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 92,
+        "entry_surface": true
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "modo/auth derivados dos sinais compartilhados; PUBLISH/destrutivo => requires_human_auth; interrogativo trava ANALISAR",
+          "result": "tests/test_router_corpus.py 192 subtests + canarios M43-M74 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/hazard_scan.py",
+      "path": "scripts/metricas/hazard_scan.py",
+      "sha256": "a738de146746f5918033a4bbe208c1bb4936bd3b0a2176b3c0201796ccfef5cd",
+      "lines": 1482,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 133,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "sinks shell/secret/deser/path-traversal detectados; hazard-ok exige RULE+motivo; dogfooding limpo",
+          "result": "canarios M34-M37,M46-M49,M52-M56,M62,M66,M68,M71,M72,M82 + dogfooding 0 findings",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/polyglot.py",
+      "path": "scripts/metricas/polyglot.py",
+      "sha256": "ab71e0da8dca1e3011dd024010820b388af69b8ed1d9c13b2136591bdf42a75e",
+      "lines": 938,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 42,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "masking de strings/comentarios multilinguagem; Go/TS/Rust contam complexidade",
+          "result": "canarios M26-M33,M81 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/scan_manifest.py",
+      "path": "scripts/metricas/scan_manifest.py",
+      "sha256": "da9cf30696ffa1cfcd1395a5f65f4a4e0faa50d60fb944fd03087efaef8a070a",
+      "lines": 647,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 50,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "scan incremental so reaproveita com manifesto valido; exit3=n/a honesto",
+          "result": "tests/test_scan_manifest.py + canario M61 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/run_state.py",
+      "path": "scripts/run_state.py",
+      "sha256": "81c40bdc2ac32b7ab2fcc3757de8bc42a7e457fc086a6e0efc194e67fc46db51",
+      "lines": 1749,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 11,
+        "max_complexity": 76,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "outcome derivado nao aceita forja; sidecar ancora campos; spec_sha256 ausente agora avisa (nao swallow)",
+          "result": "tests/test_run_state_security.py + canarios M78/M84 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/spec_drift.py",
+      "path": "scripts/spec_drift.py",
+      "sha256": "aec529442997606a9f1f3f609cb2a048e362a80d6ec5a80be05e81203e68d276",
+      "lines": 487,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 19,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "mutacao fora de escopo bloqueia; glob irrestrito rejeita; recursivo funciona",
+          "result": "canario 3 (canaries.py) + M76 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/winpath.py",
+      "path": "scripts/winpath.py",
+      "sha256": "81e5e26f31db8c0ec0ae3ce0c926af8f1b18a4617f30b81a74917fc2b4900d11",
+      "lines": 449,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 7,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "juncao Windows via mklink /J unica via; argv fixo",
+          "result": "tests/test_winpath.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/process_supervisor.py",
+      "path": "scripts/process_supervisor.py",
+      "sha256": "061fb3978cec54ad214be8c868e313d388465d55f780b7f99b666c4e8292b5dd",
+      "lines": 535,
+      "priority": "high",
+      "risk_score": 24,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 14,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "supervisao de processo mata arvore no timeout; sentinel com heartbeat",
+          "result": "tests/test_process_supervisor.py + canarios W7-9 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/audit_ledger.py",
+      "path": "scripts/audit_ledger.py",
+      "sha256": "2a9dc9f38035f1b310ae44408eb395d3e397aba60a24fbfb94ea205b37cf784c",
+      "lines": 774,
+      "priority": "high",
+      "risk_score": 23,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 39,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "is_test_cmd e classificador unico; verify cadeia+ancora+evidencia cruzada; basename absoluto e -c payload nao mintam",
+          "result": "tests/test_deepseek_regressions.py (DS-1..16) + canarios M65/M80 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/gate_parallel.py",
+      "path": "scripts/gate_parallel.py",
+      "sha256": "97bbf5df3aea804cb830c21a667362e48cf703ee588db08cdebf1d9f941b310a",
+      "lines": 145,
+      "priority": "high",
+      "risk_score": 23,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 6,
+        "max_complexity": 13,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "paralelo produz vereditos identicos ao sequencial",
+          "result": "tests/test_gate_parallel.py + bench_wave7 verdicts_equal=true",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_clean.py",
+      "path": "scripts/henke_clean.py",
+      "sha256": "e935b0620e3a1bb86f3301bfc8815194cc4af52f1e8d5e15a3385be580e0243b",
+      "lines": 618,
+      "priority": "high",
+      "risk_score": 23,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 19,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "quarentena move candidato com manifesto; dry-run nao muta; segunda perna cross-volume",
+          "result": "tests/test_henke_clean.py + canarios W7-8 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/state_paths.py",
+      "path": "scripts/state_paths.py",
+      "sha256": "b2da2c55d3b872ce7f1b5ddc9dfbe027804cc9813c4fc8e94ee326b2a2e13fa0",
+      "lines": 110,
+      "priority": "high",
+      "risk_score": 22,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 17,
+        "max_complexity": 12,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "sanitized_child_env remove PYTHON*/GIT*/loader/PATH de repo",
+          "result": "tests/test_state_paths.py + _scrub_env callers verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/gate_cache.py",
+      "path": "scripts/gate_cache.py",
+      "sha256": "b6f7f6c3a6e8502c44d7d4e0fa177e3fea0f239e8013c945ddbbf3486220990e",
+      "lines": 659,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 21,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "cache com HMAC por chave; miss em corrompido; teto de RAM 500MB",
+          "result": "tests/test_gate_cache.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/install_hook.py",
+      "path": "scripts/install_hook.py",
+      "sha256": "b8e62e70072f184962de8a368c38a1728a580df6b64cf3aef49edd48f24bebf6",
+      "lines": 252,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 17,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "hook de instalacao valida alvo e nao sobrescreve sem forca",
+          "result": "tests/test_install_hook.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/contract_closure.py",
+      "path": "scripts/metricas/contract_closure.py",
+      "sha256": "72839a6b2502fcd1acdb49ce8fd4df8aec3a1c75caa4eeada1e3436a53ff0a36",
+      "lines": 578,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 46,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "spec sem ponte/arquivo declarado reprova; traversal e var local sem export detectados",
+          "result": "canarios M41,M42,M57,M67,M75 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/mutant_hunt.py",
+      "path": "scripts/metricas/mutant_hunt.py",
+      "sha256": "4e05b48a8466e56966919d907bb1a96cee46b88484e12694e884df0f68281c22",
+      "lines": 692,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 28,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "mutante sobrevivente em teste fraco e flagrado; teste forte mata 100%",
+          "result": "canario M79 verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/mission_classifier.py",
+      "path": "scripts/mission_classifier.py",
+      "sha256": "e8e1572197e22dd17e105dd6fd18843de5e055e90f9f9f4c50c30da8fe7a8fe4",
+      "lines": 785,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 56,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "stacks detectadas/configuradas alimentam portoes ativos",
+          "result": "tests/test_mission_classifier.py verde",
+          "method": "local",
+          "assumptions": [
+            {
+              "text": "prompt interativo de stack novo e caminho humano, nao exaustivamente testado",
+              "status": "unenforced"
+            }
+          ]
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/process_runner.py",
+      "path": "scripts/process_runner.py",
+      "sha256": "a256aa75471d768d7b5d2dd61e9fa9b21997aa6d25b9705dceac261b73f1eba5",
+      "lines": 121,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 17,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "execucao supervisionada captura rc/stdout/timeout sem shell",
+          "result": "tests/test_process_runner.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/canaries_wave7.py",
+      "path": "evals/canaries_wave7.py",
+      "sha256": "879675322df99cf67dfeef9e58c7cce7acbce6aa60367b9955581bc75aefd643",
+      "lines": 194,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 23,
+        "entry_surface": true
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "15 canarios wave7 verdes",
+          "result": "canaries_wave7 executado: 15/15",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_report.py",
+      "path": "scripts/henke_report.py",
+      "sha256": "6b627d37e3ba7b11dc6b72ee090503fb71e0a6db4cc5f8238e06c0b69c138eb1",
+      "lines": 409,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 80,
+        "entry_surface": true
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "relatorio reflete so evidencia custodiada (exec_log/LEDGER)",
+          "result": "tests/test_report.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/install_skills.py",
+      "path": "scripts/install_skills.py",
+      "sha256": "5f1be768f28d2bdc970f310535c5df178995eb3f861fcb0723be5abe37b5b095",
+      "lines": 463,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 59,
+        "entry_surface": true
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "instalador dry-run nao muta; lock impede publish sob lock alheio",
+          "result": "tests/test_install.py + CI dry-run Linux/Windows verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/validate_skills.py",
+      "path": "scripts/validate_skills.py",
+      "sha256": "521e4c1277a768a6dbc83fbc0f4b6b2c9d09392e5a06fb4d395f24469b799837",
+      "lines": 231,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 26,
+        "entry_surface": true
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "dep ausente sai nao-zero com mensagem acionavel; YAML duplicado rejeita",
+          "result": "tests/test_install.py dep-missing + CI step validate_skills verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/ephemeral.py",
+      "path": "scripts/ephemeral.py",
+      "sha256": "8ef872e64825b37cda99ab129132b46643988681c5e9f208e43b1ee9f9fcd821",
+      "lines": 247,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 9,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "workspace efemero com marker; cleanup idempotente",
+          "result": "tests/test_ephemeral.py + W7-10 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/event_store.py",
+      "path": "scripts/event_store.py",
+      "sha256": "4a5cff7fb75001b668b0b47a03513c3a951bcd99d28404ec3286365e87045749",
+      "lines": 281,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 19,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "append encadeado seq+hash sob lock; tip anchor fora do repo pega truncamento; migrate idempotente; rebuild_derived com dedup",
+          "result": "tests/test_event_store.py 6t verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_auto.py",
+      "path": "scripts/henke_auto.py",
+      "sha256": "e6ca6d3e780827476a974129a0aa5bab57368ea054cf0617127f17669280ebfd",
+      "lines": 2157,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 314,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "escopos publish/destructive/metaconfig sempre exigem humano; memoria so p/ driver supervisionado nao-ANALISAR; mint via ExecVerdict unico",
+          "result": "tests/test_auto.py 24t + test_driver_sandbox 7t verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_watch.py",
+      "path": "scripts/henke_watch.py",
+      "sha256": "da89b0820e8a14b7cb65a5f1fbd62bbc91ac89d21bd5f709d5bcf309b9d3effa",
+      "lines": 173,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "watch supervisiona sem vazar estado entre repos",
+          "result": "tests/test_henke_watch.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/a11y_scan.py",
+      "path": "scripts/metricas/a11y_scan.py",
+      "sha256": "f1096de1c439fb191f98e81742c2f2ae2278de2c32c779976ca1f31c348b1e7a",
+      "lines": 343,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 22,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "sr-only duplicado/hidden-interactive/empty-control reprovam; botao legitimo aprova",
+          "result": "canario M77 + dogfooding verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/assertless_scan.py",
+      "path": "scripts/metricas/assertless_scan.py",
+      "sha256": "ac12edd264c08de9dea76842573e8a4215245d1dec392b1fe671abc100051e3e",
+      "lines": 1183,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 53,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "teste sem assercao reprova; tautologia/mock fantasma detectados",
+          "result": "canarios M1,M2,M16,M17,M70,M83 + dogfooding tests/ limpo",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/repo_signals.py",
+      "path": "scripts/repo_signals.py",
+      "sha256": "e78fe3843721de19cc64d29c33378e55d0e5652c776b765176bbc48fa928f9b5",
+      "lines": 504,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 37,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "sinais de repo alimentam classificacao sem executar conteudo do repo",
+          "result": "tests/test_mission_classifier.py + classifier paths verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/report_generator.py",
+      "path": "scripts/report_generator.py",
+      "sha256": "eecaafdb4856109f80a5f90397985660f9ffd1cb0160c4930b933f16549d5605",
+      "lines": 487,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 60,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "geracao de relatorio a partir de run state verificado",
+          "result": "tests/test_report.py verde",
+          "method": "local",
+          "assumptions": [
+            {
+              "text": "cobertura via test_report agregado, nao testes unitarios dedicados",
+              "status": "unenforced"
+            }
+          ]
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/security_signals.py",
+      "path": "scripts/security_signals.py",
+      "sha256": "9499248af60d83a64253f0cf946d2a197436d0a729526be212cd886ece7b69f0",
+      "lines": 314,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 23,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "vocabulario unico router=auto; todo sinal casa _has_signal(_norm(sig)); _norm cobre homoglifo/leet/Zs/Cf",
+          "result": "tests/test_security_signals.py 8t; corpus router 192 subtests verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/canaries.py",
+      "path": "evals/canaries.py",
+      "sha256": "577d7d2e3a22f0bfb66a681e254fc013681d6c4e0f83f666ecee1af186f80ce0",
+      "lines": 209,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 16,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "bateria adversarial executada verde nesta sessao",
+          "result": "evals/canaries.py executado: 5/5",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/canaries_metricas.py",
+      "path": "evals/canaries_metricas.py",
+      "sha256": "ff37f6edabc1251f0ac04dee5266e5c1b613472f32f812c85e4f2f6045f70009",
+      "lines": 1309,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 248,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "84 canarios bilaterais verdes",
+          "result": "canaries_metricas executado: 84/84",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/_paths.py",
+      "path": "scripts/_paths.py",
+      "sha256": "15a863add628c1ee40e5a805209c692f68f604be0a3b3b14a63d32017bc9eba5",
+      "lines": 57,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 7,
+        "max_complexity": 7,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "suite_root resolve checkout e henke_data instalado",
+          "result": "doctor no wheel instalado: 58 skills/14 portoes (prova P1-05)",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_driver_agent.py",
+      "path": "scripts/henke_driver_agent.py",
+      "sha256": "dba2a5fd7eb6e9c7a579b68be9f052d638be23bbe4a5d66159b7fd15742b858b",
+      "lines": 232,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 27,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "presets full-auto recebem envelope sem memory (strip); resultado exige JSON last-line; CLI resolvida fora do repo",
+          "result": "tests/test_driver_sandbox.py strip tests + wave7 verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_gate.py",
+      "path": "scripts/henke_gate.py",
+      "sha256": "a4014a27697431b4fabea1a5f33cb74f5f3c43f994813add86a4c7c3b31435cf",
+      "lines": 421,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 51,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "baseline gates comparam contra captura aprovada",
+          "result": "tests/test_gate.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_gates.py",
+      "path": "scripts/henke_gates.py",
+      "sha256": "c854c5ef21847080e667665f0cff88e5ea91b9c2466ea06217a2000ae0f6bf91",
+      "lines": 678,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 64,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "despacho de portao mantem custodia e veredito",
+          "result": "tests/test_gates.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/coverage_ledger.py",
+      "path": "scripts/metricas/coverage_ledger.py",
+      "sha256": "b6bca0ebee5b07811a86fc993238f76a0586aa6d3d69770c146faf2c7a582bee",
+      "lines": 594,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 104,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "pending reprova; ZERO-AUDITED e OOS>teto reprovam; STALE-HASH pega mutacao; diluicao por dir detectada",
+          "result": "canarios M38-M40,M58,M69 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/metaconfig_diff.py",
+      "path": "scripts/metricas/metaconfig_diff.py",
+      "sha256": "7487f891a5a4aa5db401043fe0ebeb36edd233b1a4319d6f5216d426553f523e",
+      "lines": 432,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 19,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "mutacao de scripts/dependencies/conftest untracked exige auth",
+          "result": "canarios M64,M73 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/bench_corpus.py",
+      "path": "evals/bench_corpus.py",
+      "sha256": "f215e30d789d36c79d045e2e50603e19adacd8a23de31eb24e8bd1ffcc30dd67",
+      "lines": 569,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 59,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "benchmark strict: 23/23 defeitos + 4 controles sem falso-vermelho",
+          "result": "bench_corpus --strict executado: aprovado",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/_isoboot.py",
+      "path": "scripts/_isoboot.py",
+      "sha256": "67926a8709614515b0bf458d6d8d40632bd43c33fee54fd1ef76d951fdb63a8f",
+      "lines": 263,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 21,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "respawn isola startup hostil e prova estrutural (structseq auth + os.sys + orig_argv); POSIX execv / Windows spawnv(P_WAIT) preservam exit code; -S/-P propagam",
+          "result": "tests/test_isoboot_guard.py 15t verde; dogfooding hazard_scan limpo com hazard-ok justificado",
+          "method": "local",
+          "assumptions": [
+            {
+              "text": "startup que substitua builtins e fronteira declarada fora de escopo",
+              "status": "unenforced"
+            }
+          ]
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/gate_pipeline.py",
+      "path": "scripts/gate_pipeline.py",
+      "sha256": "baa019f489a1e721c36f18d0387bdc1b8f3848368a90e06c40bba74d1b07eede",
+      "lines": 187,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 26,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "pipeline de portoes respeita fail-closed e ordem",
+          "result": "tests/test_gates.py + fluxo check verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_detect.py",
+      "path": "scripts/henke_detect.py",
+      "sha256": "4ef457ef4107f9ffecc1b2cfb6b4d6846070185f7bc66bad42f9a60b0aaf026b",
+      "lines": 454,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 26,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "deteccao de ambiente/stack nao executa codigo do repo",
+          "result": "tests/test_detect.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_driver_opencode.py",
+      "path": "scripts/henke_driver_opencode.py",
+      "sha256": "ab0c64c087fbe94d7ce01a3408c7f2767f729d29c0901b1bae197960d2dd4a54",
+      "lines": 177,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "needs_validation",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "adapter opencode honra contrato de envelope",
+          "result": "codigo revisado; sem CLI opencode instalada p/ prova end-to-end",
+          "method": "local",
+          "assumptions": [
+            {
+              "text": "caminho end-to-end com CLI real nao exercitado nesta maquina",
+              "status": "unenforced"
+            }
+          ]
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/fence_check.py",
+      "path": "scripts/metricas/fence_check.py",
+      "sha256": "d560755caffaafd2735d03f08a9d655af0312b60db145a6edfc426f08ac17e94",
+      "lines": 134,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "dependencia outward reprova; inward aprova; edges vazio sai 2",
+          "result": "canarios M7,M8,M15 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/ratchet.py",
+      "path": "scripts/metricas/ratchet.py",
+      "sha256": "020fa52f445163bb19d699c484a12b5e9239948ad482195d971939c9075ec7d1",
+      "lines": 403,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 19,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "arquivo que piorou reprova; que melhorou aprova",
+          "result": "canarios M5,M6 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/tornado_scan.py",
+      "path": "scripts/metricas/tornado_scan.py",
+      "sha256": "aeddf24435340911fc0d5f974a43e4b327f3914584a288ada17ecb42c21e0bc6",
+      "lines": 372,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "amplificacao crescente reprova; estavel aprova",
+          "result": "canarios M9,M10 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/henke_session.py",
+      "path": "scripts/henke_session.py",
+      "sha256": "2292e82bbe828290536f090e012b89cec0817564e978f040301642d4b05592aa",
+      "lines": 190,
+      "priority": "high",
+      "risk_score": 14,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 8,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "sentinel com schema/PID; heartbeat renova expiracao",
+          "result": "tests/test_henke_session.py + W7-9 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/import_graph.py",
+      "path": "scripts/import_graph.py",
+      "sha256": "dae31c9b3cb8840cb62a9bc534451bf2d9740c45782e1f5e1e3f80406eb63a51",
+      "lines": 77,
+      "priority": "high",
+      "risk_score": 14,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 6,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "grafo de imports sem executar modulos",
+          "result": "tests/test_import_graph.py verde",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/crap_score.py",
+      "path": "scripts/metricas/crap_score.py",
+      "sha256": "ea1721886be1d9d4997ef904ba39499fca124f1b626cb4b86282db0461104667",
+      "lines": 217,
+      "priority": "high",
+      "risk_score": 14,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 14,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "funcao complexa sem cobertura reprova; simples coberta aprova",
+          "result": "canarios M3,M4 verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/exec_contract.py",
+      "path": "scripts/exec_contract.py",
+      "sha256": "72cb14d23bd2de2ea5f9ecd525617884644e6d5d7f262ccb59e93432d4050dc4",
+      "lines": 109,
+      "priority": "high",
+      "risk_score": 13,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 9,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "ExecVerdict imutavel; echo/cat nao mintam; rc!=0+placar perfeito zera; zero-tests nunca verde; passed>discovered nega",
+          "result": "tests/test_exec_contract.py 9t verdes",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:.agents/teamwork/explorer_opencode_deepseek/probe_mutants.py",
+      "path": ".agents/teamwork/explorer_opencode_deepseek/probe_mutants.py",
+      "sha256": "006baa2ab8639f8d9747e6be9e67b2358961c5f08c036eaf010c34a42465b437",
+      "lines": 18,
+      "priority": "medium",
+      "risk_score": 10,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 5,
+        "entry_surface": true
+      },
+      "status": "out_of_scope",
+      "reason": "probe exploratorio de banca de revisores, nao e runtime embarcado",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:.agents/teamwork/explorer_opencode_deepseek/probe_tests.py",
+      "path": ".agents/teamwork/explorer_opencode_deepseek/probe_tests.py",
+      "sha256": "3596480d309f1327f0f0ae6adfd5caaeb2e91648fda3d58194a9a22065af7b93",
+      "lines": 54,
+      "priority": "medium",
+      "risk_score": 10,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 5,
+        "entry_surface": true
+      },
+      "status": "out_of_scope",
+      "reason": "probe exploratorio de banca de revisores, nao e runtime embarcado",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/bench_wave7.py",
+      "path": "evals/bench_wave7.py",
+      "sha256": "9ed44c944d41aca4b21576bac034cbd7bad1efae3bfd9085d8d9a180359ddac4",
+      "lines": 112,
+      "priority": "medium",
+      "risk_score": 8,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 3,
+        "entry_surface": true
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "paralelo=sequencial e manifest incremental corretos",
+          "result": "bench_wave7 executado: verdicts_equal=true",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/__init__.py",
+      "path": "evals/__init__.py",
+      "sha256": "32e096b2ab25ac0e24dd5627bc15379873bf810bafce628b2ee7df517f83a947",
+      "lines": 1,
+      "priority": "low",
+      "risk_score": 1,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 1,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "marcador de pacote sem logica executavel",
+          "result": "inspecao: 1 linha",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:scripts/metricas/__init__.py",
+      "path": "scripts/metricas/__init__.py",
+      "sha256": "aebd241b7020f6b33f5e4a2876c5b6dbb6114152aab403807118e4e4be5d0db3",
+      "lines": 2,
+      "priority": "low",
+      "risk_score": 1,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 1,
+        "entry_surface": false
+      },
+      "status": "covered",
+      "reason": "",
+      "checks": [
+        {
+          "agent_id": "devin-remediation-2025",
+          "invariant": "marcador de pacote sem logica executavel",
+          "result": "inspecao: 2 linhas, docstring apenas",
+          "method": "local",
+          "assumptions": []
+        }
+      ],
+      "attempts": [],
+      "prior_status": null
+    }
+  ]
+}
