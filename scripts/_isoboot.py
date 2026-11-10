@@ -179,7 +179,25 @@ def ensure_isolated(script_file: str, argv: list) -> None:
     rs = _real_sys()
     exe = getattr(rs, "executable", None) or sys.executable
     script = os.path.abspath(script_file)
-    child_argv = [str(exe), BOOT_FLAG, script, *list(argv)]
+    # Propaga flags de isolamento AINDA mais fortes do invocador original:
+    # `python -S script.py` (sem site-packages — ex.: teste de dep ausente)
+    # ou `-P` (dir do script fora do path) seriam silenciosamente
+    # ENFRAQUECIDOS para -Es no respawn — degradava o pedido explícito do
+    # chamador e quebrava quem precisa do -S. Lê orig_argv real (nunca
+    # env var) e funde os chars extras no BOOT_FLAG.
+    extra = ""
+    orig = getattr(rs, "orig_argv", None)
+    merged = ""
+    if isinstance(orig, (list, tuple)):
+        for a in orig[1:]:
+            if not isinstance(a, str) or not a.startswith("-") \
+                    or a.startswith("--"):
+                continue
+            merged += a[1:]
+    for ch in ("S", "P"):
+        if ch in merged and ch not in BOOT_FLAG:
+            extra += ch
+    child_argv = [str(exe), BOOT_FLAG + extra, script, *list(argv)]
     if os.name == "posix" and hasattr(os, "execv"):
         try:
             os.execv(str(exe), child_argv)  # não retorna em caso de sucesso

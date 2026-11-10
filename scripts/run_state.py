@@ -1198,8 +1198,15 @@ def init_run(
             if _sd_mod is not None:
                 _spec.loader.exec_module(_sd_mod)  # type: ignore[union-attr]
             compute_spec_hash = getattr(_sd_mod, "compute_spec_hash", None)
-        except Exception:
+        except (ImportError, AttributeError, OSError) as _sd_exc:
             compute_spec_hash = None  # type: ignore[assignment]
+            # P2: spec_sha256=None é ancoragem degradada — antes o swallow
+            # silencioso deixava spec trocável entre init e approve sem
+            # nenhum rastro. Avisa (o drift gate ainda cobre o conteúdo).
+            if spec_path:
+                print(f"AVISO: spec_drift indisponível ({_sd_exc}) — "
+                      f"spec_sha256 não ancorado para '{spec_path}'.",
+                      file=sys.stderr)
         if compute_spec_hash is not None:  # type: ignore[truthy-function]
             try:
                 spec_sha256 = compute_spec_hash(Path(spec_path))
