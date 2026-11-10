@@ -326,83 +326,19 @@ def _audit_ledger_mod():
 
 
 def is_test_command(cmd_tokens: list[str], cmd_str: str) -> bool:
-    # A13 (banca v16): mint×audit divergentes wedgiavam o LEDGER —
-    # audit_ledger.is_test_cmd é a fonte única de verdade.
+    """P1-02: classificador ÚNICO — audit_ledger.is_test_cmd via path
+    explícito. O fallback local (~75 linhas de heurística própria) era a
+    segunda fonte que o audit flagou: classificadores divergentes mintavam
+    num caminho e não no outro. _al indisponível → False (nunca minta,
+    fail-closed; o caller zera contagens de qualquer forma).
+    `cmd_tokens` permanece na assinatura p/ compat dos call-sites."""
+    del cmd_tokens  # classificação é por cmd_str — tokens eram do fallback
     _al = _audit_ledger_mod()
     if _al is not None and hasattr(_al, "is_test_cmd"):
-        return bool(_al.is_test_cmd(cmd_str))
-    """Verifica se o comando executado é de fato um runner de testes legítimo."""
-    tokens = list(cmd_tokens)
-    # Desenrola wrappers comuns de shell como cmd.exe /c ou bash -c
-    while tokens:
-        first_stem = Path(tokens[0]).stem.lower()
-        if first_stem == "cmd" and len(tokens) > 2 and tokens[1].lower() in ("/c", "/k"):
-            tokens = tokens[2:]
-            continue
-        if first_stem in ("bash", "sh", "zsh") and len(tokens) > 2 and tokens[1] in ("-c", "-ec"):
-            tokens = tokens[2:]
-            continue
-        break
-
-    if not tokens:
-        return False
-
-    exe = Path(tokens[0]).name.lower()
-    stem = Path(tokens[0]).stem.lower()
-
-    # Comandos utilitários comuns que recebem 'test' como argumento nunca são test runners
-    if stem in _NON_TEST_CMDS or exe in _NON_TEST_CMDS:
-        return False
-
-    # Runners diretos
-    if stem in ("pytest", "jest", "vitest", "mocha", "ctest", "ava", "tape"):
-        return True
-
-    # Python executando unittest / pytest ou script de testes
-    if stem in ("python", "python3", "py"):
-        toks_lower = [t.lower() for t in tokens[1:]]
-        for idx, t in enumerate(toks_lower):
-            if t == "-m" and idx + 1 < len(toks_lower):
-                mod = toks_lower[idx + 1]
-                if mod in ("unittest", "pytest"):
-                    return True
-            if Path(t).stem in ("pytest", "unittest"):
-                return True
-            if (
-                t.startswith("tests/")
-                or t.startswith("tests\\")
-                or t.startswith("test/")
-                or t.startswith("test\\")
-                or t.endswith("_test.py")
-                or Path(t).name.startswith("test_")
-            ):
-                return True
-
-    # Subcomandos específicos: cargo test, go test, dotnet test
-    if stem == "cargo" and any(t.lower() == "test" for t in tokens[1:]):
-        return True
-    if stem == "go" and any(t.lower() == "test" for t in tokens[1:]):
-        return True
-    if stem == "dotnet" and any(t.lower() == "test" for t in tokens[1:]):
-        return True
-
-    # Gerenciadores de pacote: npm test, yarn test, pnpm test, bun test.
-    # Mesma borda do audit_ledger (A2 v15): 'npm run test:unit' é teste,
-    # 'npm run latest'/'attest' NÃO é — wedge nas duas direções eliminado.
-    if stem in ("npm", "pnpm", "yarn", "bun") and any(
-            re.fullmatch(r"t|test(?:[.:_/-].*)?|teste\w*", t.lower())
-            for t in tokens[1:]):
-        return True
-
-    # NPX com test runner
-    if stem == "npx" and any(t.lower() in ("jest", "vitest", "mocha", "playwright", "cypress") for t in tokens[1:]):
-        return True
-
-    # Fallback via regex de comando caso o executável não seja comando utilitário
-    sub_cmd_str = " ".join(tokens)
-    if _TEST_CMD_RE.search(sub_cmd_str):
-        return True
-
+        try:
+            return bool(_al.is_test_cmd(cmd_str))
+        except Exception:
+            return False
     return False
 
 
