@@ -26,6 +26,7 @@ os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")  # CWD-poisonin
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 
 for _s in (sys.stdout, sys.stderr, sys.stdin):
@@ -76,12 +77,16 @@ def _pid_alive(pid: int) -> bool:
             if h:
                 ctypes.windll.kernel32.CloseHandle(h)
                 return True
-            return False
+            # M1 (banca v15): ERROR_ACCESS_DENIED(5) = processo existe mas
+            # sem acesso — VIVO, não stale. 87 (param inválido) = morto.
+            return ctypes.GetLastError() == 5
         except (AttributeError, OSError, TypeError, ValueError):
             return True  # indeterminado → não quebra lock de vivo
     try:
         os.kill(pid, 0)
         return True
+    except PermissionError:
+        return True  # M1 (banca v15): EPERM = existe, só sem sinal
     except OSError:
         return False
 
@@ -108,6 +113,7 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
             # arquivo recém-criado (ainda sem pid, janela open→write) NÃO é
             # stale — só quebra com pid morto OU conteúdo inválido e velho.
             _stale = False
+            _stat = None  # M11 (banca v15): stat falho deixava unbound
             try:
                 _stat = lock_path.stat()
                 _raw = lock_path.read_text(encoding="utf-8", errors="replace")
@@ -129,9 +135,16 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
             if _stale:
                 try:
                     _st2 = lock_path.stat()
-                    # não deleta lock recriado por outro entre stat e unlink
-                    if ((_st2.st_ino, _st2.st_ctime_ns, _st2.st_size)
-                            == (_stat.st_ino, _stat.st_ctime_ns, _stat.st_size)):
+                    # não deleta lock recriado por outro entre stat e unlink.
+                    # M8 (banca v15): FS sem inode (FAT/WebDAV → st_ino=0)
+                    # confundia locks distintos — compara conteúdo também.
+                    _same = ((_st2.st_ino, _st2.st_ctime_ns, _st2.st_size)
+                             == (_stat.st_ino, _stat.st_ctime_ns, _stat.st_size))
+                    if _stat is not None and _stat.st_ino == 0:
+                        _same = _same and (
+                            lock_path.read_text(
+                                encoding="utf-8", errors="replace") == _raw)
+                    if _stat is not None and _same:
                         lock_path.unlink()
                 except OSError:
                     pass
@@ -146,9 +159,16 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
     finally:
         os.close(fd)
         try:
-            # A1 (banca v14): unlink incondicional deletava o lock VIVO do
-            # sucessor — só remove se o inode ainda é o nosso.
-            if lock_path.stat().st_ino == _our_ino:
+            # A1 v14 + M8 v15: unlink só se o inode é o nosso — em FS com
+            # st_ino=0, compara o CONTEÚDO (pid=) como fallback.
+            _cur = lock_path.stat().st_ino
+            if _our_ino == 0:
+                _mine = (lock_path.read_text(
+                    encoding="utf-8", errors="replace").strip()
+                    == f"pid={os.getpid()}")
+            else:
+                _mine = _cur == _our_ino
+            if _mine:
                 lock_path.unlink()
         except OSError:
             pass
@@ -192,6 +212,12 @@ def _config_dir() -> Path:
         )
         if _poisoned:
             cfg = (Path.home() / "AppData" / "Roaming" / "henke") if os.name == "nt" else (Path.home() / ".config" / "henke")
+            # M7 (banca v15): home é repo (dotfiles) ou HOME envenenado — o
+            # "fallback" era o MESMO path dentro do repo. Re-valida.
+            _cfg2 = cfg.resolve()
+            if _repo is not None and (_cfg2 == _repo or _repo in _cfg2.parents):
+                # fail-closed: usa tempdir do sistema, nunca dentro do repo
+                cfg = Path(tempfile.gettempdir()) / f"henke-{os.getlogin() if os.name != 'nt' else 'u'}"
     except OSError:
         pass
     return cfg
@@ -877,6 +903,17 @@ def verify_run_file(run_path: Path) -> tuple[bool, list[str]]:
     # Confinamento a evidence/<run_id>/: evidência de OUTRA run não prova esta
     # (reuso cross-run), e o mesmo arquivo não pode ser saída de dois portões.
     evidence_root = (p.parent.parent / "evidence" / run_id).resolve()
+    # M10 (banca v15): '.henke/evidence' symlink commitável redirecionava a
+    # cópia de custódia para fora do repo — o resolve dos DOIS lados casava
+    # e a evidência vivia fora da custódia.
+    try:
+        _ev_parent = (p.parent.parent / "evidence")
+        if _ev_parent.is_symlink() or evidence_root.parent.parent != p.parent.parent:
+            tampered.append(
+                "EVIDENCE-UNANCHORED: '.henke/evidence' é symlink/junction "
+                "ou resolve fora do repo — custódia inválida")
+    except OSError:
+        tampered.append("EVIDENCE-UNANCHORED: evidence não resolvível")
     # Manifesto LOCAL de vereditos: prova que `record_gate` DESTA máquina
     # registrou CADA entrada — run plantada por clone não tem manifesto.
     # Bidirecional (banca v9 — C1/C2): exit_code e flag manual ancorados,
@@ -1045,13 +1082,19 @@ def init_run(
     head_start = _git_head(repo_root)
     spec_sha256 = None
     if spec_path:
+        # M4 (banca v15): `from spec_drift import` resolvia módulo PLANTADO
+        # no CWD → spec_sha forjado ancorado. Carrega por path explícito.
         try:
-            from scripts.spec_drift import compute_spec_hash
-        except ImportError:
-            try:
-                from spec_drift import compute_spec_hash
-            except ImportError:
-                compute_spec_hash = None  # type: ignore[assignment]
+            import importlib.util as _ilu
+            _sd_p = Path(__file__).resolve().with_name("spec_drift.py")
+            _spec = _ilu.spec_from_file_location(
+                "henke_spec_drift", str(_sd_p))
+            _sd_mod = _ilu.module_from_spec(_spec) if _spec else None
+            if _sd_mod is not None:
+                _spec.loader.exec_module(_sd_mod)  # type: ignore[union-attr]
+            compute_spec_hash = getattr(_sd_mod, "compute_spec_hash", None)
+        except Exception:
+            compute_spec_hash = None  # type: ignore[assignment]
         if compute_spec_hash is not None:  # type: ignore[truthy-function]
             try:
                 spec_sha256 = compute_spec_hash(Path(spec_path))

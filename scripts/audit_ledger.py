@@ -22,6 +22,20 @@ HAZARDOUS_PATTERNS = [
     (r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f\b", "Tentativa de remoção recursiva forçada (rm -rf)"),
     (r"\brm\s+-[a-zA-Z]*f[a-zA-Z]*r\b", "Tentativa de remoção recursiva forçada (rm -fr)"),
     (r"\bgit\s+push\b.*(?:--force|-f\b)", "Comando 'git push --force' destrutivo proibido em ledger"),
+    # M3 (banca v15): args interpostos entre binário e subcomando evadiam
+    # `git\s+push` — `git -C . push -f`, `git -c x=y push`, `push -fu` bundle.
+    (r"\bgit\b[^|;&]*\bpush\b[^|;&]*(?:--force|-\w*f\b|-f\w*\b)",
+     "git push forçado (args interpostos/bundle) proibido"),
+    (r"\b(?:npm|pnpm|yarn|bun)\b[^|;&]*\bpublish\b|\bnpx\b[^|;&]*\bpublish\b",
+     "Comando de publicação (publish, args interpostos) proibido em ledger"),
+    (r"\b(?:cargo|poetry|uv)\s+publish\b|\bgem\s+push\b|\bdotnet\s+nuget\s+push\b",
+     "Publicação de pacote (cargo/poetry/uv/gem/dotnet) proibida"),
+    (r"\bfind\b[^|;&]*-delete\b|\b(?:mkfs|fdisk|wipefs|shred|sfdisk)\b|"
+     r"\brobocopy\b[^|;&]*/mir\b|\bcipher\b[^|;&]*/w\b",
+     "Comando destrutivo de disco/arquivos proibido"),
+    (r"\b(?:certutil|bitsadmin|msbuild|msiexec|installutil|regsvcs)\b[^|;&]*"
+     r"(?:-urlcache|/transfer|/i\b[^|;&]*http|http)",
+     "LOLBin de download/execução proibido"),
     (r"\b(?:npm|pnpm|yarn)\s+publish\b", "Comando de publicação (publish) proibido em ledger"),
     (r"\b(?:pip|twine)\s+upload\b", "Comando de upload de pacote proibido em ledger"),
     (r"\bchmod\s+(?:-R\s+)?777\b", "Permissão insegura 777 detectada"),
@@ -84,12 +98,16 @@ def _npm_script_name(cmd: str) -> str | None:
             toks[0], re.IGNORECASE):
         return None
     toks = toks[1:]
-    while toks and toks[0].startswith("-"):
-        flag = toks.pop(0)
-        if flag in _NPM_FLAGS_TAKING_ARG and toks:
-            toks.pop(0)  # argumento separado da flag
+    def _skip_flags(t: list) -> None:
+        while t and t[0].startswith("-"):
+            flag = t.pop(0)
+            if flag in _NPM_FLAGS_TAKING_ARG and t:
+                t.pop(0)  # argumento separado da flag
+    _skip_flags(toks)
     if toks and toks[0] == "run":
         toks.pop(0)
+        # M2 (banca v15): `npm run -s build` — flags também depois de 'run'.
+        _skip_flags(toks)
     return toks[0] if toks else None
 # M8 (banca v13): shapes de teste fora do regex declaravam testes sem nenhum
 # registro exigido — cobre `npm run test`, runners via npx/deno/dotnet/ctest.
@@ -109,12 +127,18 @@ def is_test_cmd(full_cmd: str) -> bool:
         return True
     # A5 (banca v14): `npm -w pkg test`/`npm t` — script resolvido via
     # tokenizer (regex não cobria flag+arg nem o alias `t`).
+    # A1 (banca v15): 'latest'/'attest'/'pretest' casavam como script-teste —
+    # borda estrita: t|test|test:NOME|teste* prefixo de token.
     script = _npm_script_name(full_cmd)
     if script is not None:
-        return script == "t" or script.startswith("test")
-    # ava/tape/`python tests/x.py`/`python test_foo.py` (henke_cli aceita).
+        return bool(re.fullmatch(r"t|test(?:[.:_/-].*)?|teste\w*", script))
+    # ava/tape como EXECUTÁVEL (1º token) + `python tests/x.py`/`test_*.py`/
+    # `*_test.py` (henke_cli aceita — A2 v15: divergência = wedge).
+    toks = full_cmd.strip().split()
+    if toks and toks[0].lower() in ("ava", "tape"):
+        return True
     return bool(re.search(
-        r"\b(?:ava|tape)\b|\bpython[\d.]*\s+(?:tests?[\\/]|test_\w+\.py)",
+        r"\bpython[\d.]*\s+(?:tests?[\\/]|test_\w+\.py|\w+_test\.py)",
         full_cmd, re.IGNORECASE))
 
 

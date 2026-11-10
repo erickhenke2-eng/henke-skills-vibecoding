@@ -399,13 +399,22 @@ def _cmd_exec(
     # criava duplicata e o CreateProcess lia a ORIGINAL envenenada.
     _raw_env = (os.environ.items() if os.name != "nt"
                 else ((k.upper(), v) for k, v in os.environ.items()))
+    # A3 (banca v15): loader hooks de OUTROS toolchains também mintavam
+    # saída "honesta" — NODE_PATH/GOFLAGS/RUSTC_*/JAVA_*/PHPRC/etc.
     child_env = {k: v for k, v in _raw_env
                  if not (k.startswith("GIT_") or k.startswith("PYTEST_")
                          or k.startswith("COVERAGE_") or k.startswith("PYTHON")
                          or k.startswith("LD_") or k.startswith("DYLD_")
-                         or k in ("NODE_OPTIONS", "VIRTUAL_ENV", "BASH_ENV",
-                                  "ENV", "ZDOTDIR", "PERL5OPT", "PERL5LIB",
-                                  "RUBYOPT", "RUBYLIB", "DOTNET_STARTUP_HOOKS"))}
+                         or k.startswith("NPM_CONFIG_") or k.startswith("npm_config_")
+                         or k in ("NODE_OPTIONS", "NODE_PATH", "VIRTUAL_ENV",
+                                  "BASH_ENV", "ENV", "ZDOTDIR", "PERL5OPT",
+                                  "PERL5LIB", "PERL5DB", "RUBYOPT", "RUBYLIB",
+                                  "BUNDLE_GEMFILE", "DOTNET_STARTUP_HOOKS",
+                                  "DOTNET_ADDITIONAL_DEPS", "GOFLAGS",
+                                  "RUSTC_WRAPPER", "RUSTFLAGS", "JAVA_TOOL_OPTIONS",
+                                  "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH",
+                                  "MAVEN_OPTS", "GRADLE_OPTS", "SBT_OPTS",
+                                  "PHPRC", "PHP_INI_SCAN_DIR", "PWD", "OLDPWD"))}
     _rr: Path | None = None
     try:
         _rr = repo_root.resolve()
@@ -437,15 +446,22 @@ def _cmd_exec(
             except OSError:
                 pass
             exec_tokens[0] = resolved
-        elif (os.name == "nt"
+        elif (os.name == "nt" and not resolved
               and exec_tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls")):
             # A6 (banca v14): `cmd /c` re-parseia o rabo — `echo ok & calc`
             # executava o segundo comando mesmo com builtin "inocente".
-            if any(re.search(r"[&|<>^]", str(t)) for t in exec_tokens):
+            if any(re.search(r"[&|<>^%\"]", str(t)) for t in exec_tokens):
                 print("ERRO: metacaractere de shell (&|<>) em comando builtin "
                       "— recusado (cmd /c re-parseia o rabo).", file=sys.stderr)
                 return 2
             exec_tokens = ["cmd.exe", "/c"] + exec_tokens
+        elif os.name == "nt" and not resolved:
+            # A6 (banca v15): CreateProcess busca pelo PATH do PAI, não pelo
+            # env sanitizado — which-miss executava o plantado via PATH pai.
+            print(f"ERRO: '{exec_tokens[0]}' não resolve no PATH sanitizado "
+                  "— recusado (binário poderia ser plantado no repo).",
+                  file=sys.stderr)
+            return 2
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
     # F-07 (banca v8): CWD poisoning — binário plantado no worktree não pode
@@ -501,13 +517,20 @@ def _cmd_exec(
                 # ponta com uma execução legítima e tornaria a história
                 # fabricada "ancorada" para sempre. Log fora do caminho
                 # canônico não tem âncora: verifica-se só a cadeia interna.
+                # M4 (banca v15): fallback não-qualificado resolvia
+                # `audit_ledger.py` PLANTADO no sys.path → verify fake.
+                # Carrega por path explícito (mesma regra do _rs_tip).
                 try:
-                    from scripts.audit_ledger import verify_log_chain as _vlc
-                except ImportError:
-                    try:
-                        from audit_ledger import verify_log_chain as _vlc  # type: ignore
-                    except ImportError:
-                        _vlc = None  # type: ignore[assignment]
+                    import importlib.util as _ilu
+                    _al_p = Path(__file__).resolve().with_name("audit_ledger.py")
+                    _spec = _ilu.spec_from_file_location(
+                        "henke_audit_ledger", str(_al_p))
+                    _al_mod = _ilu.module_from_spec(_spec) if _spec else None
+                    if _al_mod is not None:
+                        _spec.loader.exec_module(_al_mod)  # type: ignore[union-attr]
+                    _vlc = getattr(_al_mod, "verify_log_chain", None)
+                except Exception:
+                    _vlc = None  # type: ignore[assignment]
                 # A4 (banca v10): import falho no caminho CANÔNICO não pode
                 # pular a checagem em silêncio — fail closed.
                 if _is_canonical and _vlc is None:
@@ -596,7 +619,9 @@ def _cmd_exec(
                 # Atualiza .henke/LEDGER.json apenas quando o COMANDO é de testes —
                 # qualquer saída contendo "N tests" (ex.: um README impresso por cat)
                 # não pode entrar no ledger sem ser um runner real (ALTO-6 banca).
-                if _ledger_pre is not None:
+                # M6 (banca v15): entrada {tests:0} era gravada ANTES do check
+                # `discovered<=0` — run 0-testes envenenava o ledger pra sempre.
+                if _ledger_pre is not None and discovered > 0:
                     ledger_item = {
                         "cmd": cmd_str,
                         "exit": res.returncode,
@@ -664,8 +689,14 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
             args = [str(repo_root / "tests")]
         else:
             args = [str(repo_root)]
+    # A5 (banca v15): env herdado integral — PYTHONPATH=<repo> fazia o portão
+    # importar sitecustomize.py plantado. Strip de loader hooks.
+    _ge = {k: v for k, v in os.environ.items()
+           if not (k.upper().startswith(("PYTHON", "LD_", "DYLD_", "GIT_",
+                                         "NODE_", "BASH_ENV", "ZDOTDIR"))
+                   or k in ("VIRTUAL_ENV", "ENV"))}
     res = subprocess.run([sys.executable, str(script_path), *args],
-                         cwd=str(repo_root))
+                         cwd=str(repo_root), env=_ge)
     return res.returncode
 
 
