@@ -373,6 +373,43 @@ class TestSitecustomizeHijack(unittest.TestCase):
                 "sitecustomize não pode fabricar PASS em repo com os.system: "
                 f"{res.stdout[-400:]} {res.stderr[-300:]}")
 
+    def test_sentinel_controlado_nao_pula_respawn(self):
+        """R3-PT-06: HENKE_ISOLATED=1 (env ou sitecustomize) não pode mais
+        pular o respawn — o guard usa só sys.flags.isolated."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            evil = td / "evil"
+            evil.mkdir()
+            (evil / "sitecustomize.py").write_text(
+                "import os\n"
+                "os.environ['HENKE_ISOLATED'] = '1'\n"
+                "import scripts.metricas.scan_manifest as _m\n"
+                "class _R:\n"
+                "    exit_code = 0\n"
+                "    full_scan = True\n"
+                "    scanned_files = ()\n"
+                "    reused_files = ()\n"
+                "    invalidated_files = ()\n"
+                "    reasons = ()\n"
+                "_m.run_incremental_scan = lambda *a, **k: _R()\n",
+                encoding="utf-8")
+            repo = td / "repo"
+            repo.mkdir()
+            (repo / "app.py").write_text(
+                "import os\nos.system('echo pwned')\n", encoding="utf-8")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(evil) + os.pathsep + str(SUITE_ROOT)
+            env["HENKE_ISOLATED"] = "1"  # variante por env direto também
+            res = subprocess.run(
+                [sys.executable,
+                 str(SUITE_ROOT / "scripts" / "henke_cli.py"),
+                 "check", "--repo", str(repo), "--no-cache"],
+                capture_output=True, text=True, env=env, timeout=180)
+            self.assertNotEqual(
+                res.returncode, 0,
+                "HENKE_ISOLATED=1 não pode pular o respawn isolado: "
+                f"{res.stdout[-400:]} {res.stderr[-300:]}")
+
 
 class TestRouterDestructiveParaphrase(unittest.TestCase):
     """PT-10: paráfrases destrutivas exigem EXECUTAR + human_auth + matriz."""

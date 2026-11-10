@@ -934,4 +934,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # R3-PT-06: respawn isolado — sitecustomize via PYTHONPATH não pode
+    # patchar o roteamento/auth no processo pai; o filho -I sai isolado.
+    if not sys.flags.isolated:
+        sys.exit(subprocess.run(
+            [sys.executable, "-I",
+             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
     main()

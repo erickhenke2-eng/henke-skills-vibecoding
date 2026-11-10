@@ -2207,15 +2207,12 @@ if __name__ == "__main__":
     # INICIALIZAÇÃO do interpretador — antes de _drop_repo_syspath e da
     # checagem de __file__ — e pode substituir run_incremental_scan/
     # scanner_specs no processo pai (PoC: check retornava PASS em repo
-    # com os.system). A única fronteira confiável é respawnar isolado:
-    # -I implica -E (ignora PYTHONPATH) e -s (ignora user site dir), então
-    # o sitecustomize hostil nunca entra no sys.path. Sentinel evita loop.
-    if not sys.flags.isolated and os.environ.get("HENKE_ISOLATED") != "1":
-        _env = os.environ.copy()
-        _env["HENKE_ISOLATED"] = "1"
-        _rc = subprocess.run(
+    # com os.system). Respawna isolado: -I implica -E (ignora PYTHONPATH)
+    # e -s (ignora user site). O filho -I já sai com sys.flags.isolated
+    # verdadeiro — o guard é auto-limite, sem sentinel de ambiente (um
+    # sitecustomize hostil poderia defini-la, R3-PT-06).
+    if not sys.flags.isolated:
+        sys.exit(subprocess.run(
             [sys.executable, "-I",
-             str(Path(__file__).resolve()), *sys.argv[1:]],
-            env=_env).returncode
-        sys.exit(_rc)
+             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
     sys.exit(main())

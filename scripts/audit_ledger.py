@@ -758,13 +758,11 @@ def main():
 if __name__ == "__main__":
     # R2-PT-06: sitecustomize via PYTHONPATH roda antes de qualquer
     # mitigação em-processo e poderia substituir is_test_cmd/verificadores
-    # no pai. Respawna isolado (-I: ignora PYTHONPATH e user site) uma vez.
-    if not sys.flags.isolated and os.environ.get("HENKE_ISOLATED") != "1":
+    # no pai. Respawna isolado (-I: ignora PYTHONPATH e user site); o filho
+    # sai com sys.flags.isolated — auto-limite, sem sentinel (R3-PT-06).
+    if not sys.flags.isolated:
         import subprocess as _sp
-        _env = os.environ.copy()
-        _env["HENKE_ISOLATED"] = "1"
         sys.exit(_sp.run(
             [sys.executable, "-I",
-             str(Path(__file__).resolve()), *sys.argv[1:]],
-            env=_env).returncode)
+             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
     main()

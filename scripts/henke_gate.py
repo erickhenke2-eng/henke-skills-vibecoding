@@ -22,6 +22,12 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
+# R3-PT-06: sob `python -I` o dir do script não entra em sys.path (-P
+# implícito) — garante a raiz da suíte para `scripts.state_paths` resolver.
+_PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(_PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PKG_ROOT))
+
 for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
         try:
@@ -397,4 +403,10 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # R3-PT-06: respawn isolado — sitecustomize via PYTHONPATH não pode
+    # patchar o portão no processo pai; o filho -I sai com flags.isolated.
+    if not sys.flags.isolated:
+        sys.exit(subprocess.run(
+            [sys.executable, "-I",
+             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
     sys.exit(main())

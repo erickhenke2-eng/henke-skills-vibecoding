@@ -660,4 +660,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # R3-PT-06: respawn isolado — sitecustomize via PYTHONPATH não pode
+    # patchar os portões no processo pai; o filho -I sai com flags.isolated.
+    if not sys.flags.isolated:
+        raise SystemExit(subprocess.run(
+            [sys.executable, "-I",
+             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
     raise SystemExit(main())

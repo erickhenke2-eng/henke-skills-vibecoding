@@ -2307,4 +2307,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # R2/R3-PT-06: respawn isolado — sitecustomize via PYTHONPATH não pode
+    # patchar verificadores no pai; o filho -I sai com flags.isolated.
+    if not sys.flags.isolated:
+        sys.exit(subprocess.run(
+            [sys.executable, "-I",
+             str(Path(__file__).resolve()), *sys.argv[1:]]).returncode)
     sys.exit(main())
