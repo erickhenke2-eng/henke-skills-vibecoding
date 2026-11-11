@@ -993,6 +993,12 @@ def scan_file(path: Path, extra_exts: set | None = None,
               ) -> tuple[int, list[tuple[str, str, str, str]], bool]:
     """Escaneia um arquivo de código ou manifesto IaC/Cloud. Retorna (1 se escaneado, findings, skipped_oversize)."""
     ext = path.suffix.lower()
+    # banca r4 — F1: .pyw é source Python que o Windows importa/executa. Todo o
+    # despacho abaixo era `ext == ".py"`; sem `is_python`, .pyw caía no perfil
+    # C-like (sem _PY_SHELL_RE / _SQL_INTERP_PY_RE / _py_ast_findings e sem
+    # mascarar `#`, deixando um comentário `# resolve(` suprimir findings e `//`
+    # apagar a cauda da linha).
+    is_python = ext in (".py", ".pyw")
     is_cfg = _is_config_file(path)
     allowed = SCAN_EXTS | (extra_exts or set())
     if ext not in allowed and not is_cfg:
@@ -1065,7 +1071,7 @@ def scan_file(path: Path, extra_exts: set | None = None,
         else:
             no_comments = _strip_hash_comments(raw)
     else:
-        no_comments = _strip_py_comments(raw) if ext == ".py" else _pg.mask_comments_only(raw, ext)
+        no_comments = _strip_py_comments(raw) if is_python else _pg.mask_comments_only(raw, ext)
 
     for label, pat in _SECRET_PATTERNS:
         for m in pat.finditer(no_comments):
@@ -1095,7 +1101,7 @@ def scan_file(path: Path, extra_exts: set | None = None,
         _scan_config_file(path, no_comments, suppressed, add)
         return 1, findings, False
 
-    sql_pats = (_SQL_INTERP_PY_RE, _SQL_CONCAT_RE) if ext == ".py" else (_SQL_INTERP_JS_RE, _SQL_CONCAT_RE, _SQL_SPRINTF_RE)
+    sql_pats = (_SQL_INTERP_PY_RE, _SQL_CONCAT_RE) if is_python else (_SQL_INTERP_JS_RE, _SQL_CONCAT_RE, _SQL_SPRINTF_RE)
     for sp in sql_pats:
         for m in sp.finditer(no_comments):
             lineno = no_comments.count("\n", 0, m.start()) + 1
@@ -1121,13 +1127,13 @@ def scan_file(path: Path, extra_exts: set | None = None,
         add("JWT-NONE-OR-UNVERIFIED", lineno, f"line:{lineno}", f"JWT verification disabled or 'none' algorithm allowed ({m.group(0).strip()})")
 
     # --- PASS 1: Código mascarado (strings e comentários vazios) ---
-    masked = _pg.mask_py(raw) if ext == ".py" else _pg.mask_c_like(raw, ext)
+    masked = _pg.mask_py(raw) if is_python else _pg.mask_c_like(raw, ext)
 
     for m in _FRAME_INTROSPECTION_RE.finditer(masked):
         lineno = masked.count("\n", 0, m.start()) + 1
         add("FRAME-INTROSPECTION", lineno, f"line:{lineno}", "frame/stack introspection or Error().stack parsing")
 
-    if ext == ".py":
+    if is_python:
         for m in _PY_SHELL_RE.finditer(masked):
             lineno = masked.count("\n", 0, m.start()) + 1
             add("SHELL-INJECTION", lineno, f"line:{lineno}", "subprocess with shell=True or os.system")
@@ -1213,7 +1219,7 @@ def scan_file(path: Path, extra_exts: set | None = None,
 
     # Escopo intraprocedural por função e código top-level
     nc_lines_full = no_comments.splitlines(keepends=True)
-    if ext == ".py":
+    if is_python:
         fn_iter = []
         py_lines = masked.splitlines(keepends=True)
         top_level_lines = list(py_lines)
@@ -1263,8 +1269,8 @@ def scan_file(path: Path, extra_exts: set | None = None,
         if top_level_body.strip() or top_level_nc_body.strip():
             fn_iter.append(("<top-level>", 1, len(c_lines), top_level_body, top_level_nc_body))
 
-    # --- Pass AST (.py): aliases de import que o regex não resolve ---
-    if ext == ".py":
+    # --- Pass AST (.py/.pyw): aliases de import que o regex não resolve ---
+    if is_python:
         for rule, line_no, scope, msg in _py_ast_findings(raw, path_str):
             add(rule, line_no, scope, msg)
 

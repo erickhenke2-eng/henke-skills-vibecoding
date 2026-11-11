@@ -15,6 +15,11 @@ _UNITTEST_RAN_RE = re.compile(r"Ran\s+(\d+)\s+tests?\s+in\s+", flags=re.I)
 _UNITTEST_FAIL_RE = re.compile(r"FAILED\s*\(([^)]+)\)", flags=re.I)
 # banca r4 — H10: skipped aparece em "OK (skipped=N)" / "FAILED (..., skipped=N)".
 _UNITTEST_SKIP_RE = re.compile(r"\bskipped=(\d+)", flags=re.I)
+# banca r4 — F2: "expected failures" (xfail que falhou = conhecido-quebrado,
+# não executa asserção que passa) e "unexpected successes" (xfail que passou;
+# unittest conta como FALHA e sai != 0).
+_UNITTEST_XFAIL_RE = re.compile(r"expected\s+failures=(\d+)", flags=re.I)
+_UNITTEST_USUCCESS_RE = re.compile(r"unexpected\s+successes=(\d+)", flags=re.I)
 _JEST_VITEST_RE = re.compile(
     r"Tests:\s*(?:(\d+)\s+failed\s*[|,]\s*)?(?:(\d+)\s+skipped\s*[|,]\s*)?(\d+)\s+passed",
     flags=re.I,
@@ -42,14 +47,19 @@ def parse_test_runner_output(stdout: str, stderr: str) -> tuple[int, int]:
         ran = int(m_ut[-1].group(1))
         failed_count = 0
         for m_f in _UNITTEST_FAIL_RE.finditer(combined):
-            for num in re.findall(r"(?:failures|errors)=(\d+)", m_f.group(1), flags=re.I):
+            # lookbehind barra "expected failures=" de contar como failures=.
+            for num in re.findall(r"(?<!expected )(?:failures|errors)=(\d+)", m_f.group(1), flags=re.I):
                 failed_count += int(num)
         # banca r4 — H10: "Ran N" inclui os pulados, mas skip não executa
         # asserção — suíte 100% skip é vitória por tautologia. Pulados saem
         # dos descobertos E dos passados.
         skipped = sum(int(n) for n in _UNITTEST_SKIP_RE.findall(combined))
-        discovered = max(0, ran - skipped)
-        passed = max(0, discovered - failed_count)
+        # banca r4 — F2: expected failures fora dos descobertos (irmão do skip);
+        # unexpected successes contam como falha (unittest sai != 0 neles).
+        xfail = sum(int(n) for n in _UNITTEST_XFAIL_RE.findall(combined))
+        usucc = sum(int(n) for n in _UNITTEST_USUCCESS_RE.findall(combined))
+        discovered = max(0, ran - skipped - xfail)
+        passed = max(0, discovered - failed_count - usucc)
         return discovered, passed
 
     # 2. Jest / Vitest ("Tests: 1 failed, 4 passed, 5 total" ou "Tests: 5 passed")
