@@ -412,11 +412,18 @@ def compute_cache_key(
             # ao materializar o patch — --no-ext-diff E --no-textconv, mais
             # timeout contra diff gigante/lock (DoS).
             _gc = ["git", "-c", "core.fsmonitor=false", "-c", "diff.external="]
-            res_head = subprocess.run([*_gc, "rev-parse", "HEAD"], cwd=str(repo), capture_output=True, text=True, env=_ge, timeout=30)
+            # banca r4 — H18: `text=True` sem encoding decodifica a saída do
+            # git com o locale (cp1252 no Windows); um diff com bytes fora do
+            # cp1252 (ex.: "Á" = 0xC3 0x81) estourava UnicodeDecodeError,
+            # engolido pelo `except Exception` abaixo, colapsando git_state
+            # para "NOGIT" — a chave de cache perdia TODO o sinal do git em
+            # silêncio. git emite UTF-8; decodifica UTF-8 explícito (mesma
+            # família do fix já aplicado em ls-tree no --staged).
+            res_head = subprocess.run([*_gc, "rev-parse", "HEAD"], cwd=str(repo), capture_output=True, encoding="utf-8", errors="replace", env=_ge, timeout=30)
             head_str = res_head.stdout.strip() if res_head.returncode == 0 else ""
-            res_st = subprocess.run([*_gc, "status", "--porcelain"], cwd=str(repo), capture_output=True, text=True, env=_ge, timeout=30)
+            res_st = subprocess.run([*_gc, "status", "--porcelain"], cwd=str(repo), capture_output=True, encoding="utf-8", errors="replace", env=_ge, timeout=30)
             st_str = res_st.stdout if res_st.returncode == 0 else ""
-            res_diff = subprocess.run([*_gc, "diff", "--no-ext-diff", "--no-textconv", "HEAD"], cwd=str(repo), capture_output=True, text=True, env=_ge, timeout=60)
+            res_diff = subprocess.run([*_gc, "diff", "--no-ext-diff", "--no-textconv", "HEAD"], cwd=str(repo), capture_output=True, encoding="utf-8", errors="replace", env=_ge, timeout=60)
             diff_str = res_diff.stdout if res_diff.returncode == 0 else ""
             git_state = f"{head_str}:{hashlib.sha256((st_str + chr(10) + diff_str).encode('utf-8')).hexdigest()}"
         except Exception:

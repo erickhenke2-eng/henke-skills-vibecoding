@@ -65,7 +65,10 @@ import polyglot as _pg  # noqa: E402
 from henke.state_paths import sanitized_child_env  # noqa: E402
 
 MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB cap (evita bundles/minified)
-SCAN_EXTS = {".py", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts",
+# banca r4 — H4: `.pyw` é source Python que o Windows IMPORTA (importlib
+# SOURCE_SUFFIXES inclui .pyw) e executa; fora de SCAN_EXTS, um payload em
+# evil.pyw passava sem varredura enquanto `import evil` o executava.
+SCAN_EXTS = {".py", ".pyw", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts",
              ".jsx", ".rs", ".go", ".vue", ".svelte"}
 CONFIG_PATTERNS = (
     "*.tf", "*.tfvars", "Dockerfile*", "docker-compose*.yml", "docker-compose*.yaml",
