@@ -81,6 +81,14 @@ def run_process(
     # é usado INTEGRALMENTE; sem env, herda só um baseline escovado.
     if env is not None:
         child_env = dict(env)
+        # env integral e o contrato (DS-6), mas no Windows o processo-filho
+        # morre no boot sem o plumbing do SO — Python <=3.10 falha com rc=1
+        # mesmo para `-c "import os"` sem SystemRoot. setdefault (caller
+        # pode sobrescrever); PATH fica fora — e vetor de envenenamento.
+        if sys.platform == "win32":
+            for k in ("SystemRoot", "windir", "ComSpec", "PATHEXT"):
+                if k in os.environ:
+                    child_env.setdefault(k, os.environ[k])
     else:
         from henke.state_paths import sanitized_child_env
         child_env = sanitized_child_env(
