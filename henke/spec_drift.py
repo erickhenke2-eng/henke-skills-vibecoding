@@ -194,7 +194,7 @@ def _git_paths_z(git_root: Path, *args: str) -> list[str]:
     return [p for p in res.stdout.decode("utf-8", errors="replace").split("\0") if p]
 
 
-def get_touched_files(git_root: Path, against: str | None = None, active_spec: Path | None = None) -> set[str]:
+def get_touched_files(git_root: Path, against: str | None = None, active_spec: Path | None = None, *, staged_only: bool = False) -> set[str]:
     """Obtém a lista de arquivos modificados e untracked no repositório."""
     # Ref-âncora validada AQUI também: o files_changed_audit chama esta função
     # direto com a âncora do sidecar — `--cached`/`--output=...` injetado no
@@ -232,19 +232,29 @@ def get_touched_files(git_root: Path, against: str | None = None, active_spec: P
             "invisíveis ao diff — " + ", ".join(sorted(blind)[:10])
         )
 
-    touched = set()
+    if staged_only:
+        # Snapshot do índice: nunca mistura arquivos unstaged com o commit.
+        # --against compara o índice ao commit âncora, inclusive diferenças
+        # já commitadas após a aprovação da spec.
+        diff_args = ["diff", "--cached", "--name-only", "-z"]
+        if against:
+            diff_args.append(against)
+        touched = set(_git_paths_z(git_root, *diff_args))
+    else:
+        touched = set()
 
     # 1+2. Modificados e staged (diff worktree + --cached), NUL-safe
-    diff_args = ["diff", "--name-only", "-z"]
-    if against:
-        diff_args.append(against)
-    touched.update(_git_paths_z(git_root, *diff_args))
-    touched.update(_git_paths_z(git_root, "diff", "--cached", "--name-only", "-z"))
+    if not staged_only:
+        diff_args = ["diff", "--name-only", "-z"]
+        if against:
+            diff_args.append(against)
+        touched.update(_git_paths_z(git_root, *diff_args))
+        touched.update(_git_paths_z(git_root, "diff", "--cached", "--name-only", "-z"))
 
-    # 3. Untracked: `status --porcelain -z` emite '<XY> <path>\0' sem C-quoting
-    for entry in _git_paths_z(git_root, "status", "--porcelain", "-z", "-uall"):
-        if entry.startswith("??"):
-            touched.add(entry[3:])
+        # Untracked não pertence ao índice, portanto só no modo worktree.
+        for entry in _git_paths_z(git_root, "status", "--porcelain", "-z", "-uall"):
+            if entry.startswith("??"):
+                touched.add(entry[3:])
 
     # Exclusões estritas (S3): APENAS artefatos transitórios de runtime da run.
     # A spec ativa NÃO é excluída — adulterá-la para ampliar escopo é exatamente o
@@ -368,7 +378,8 @@ def check_spec_drift(
     spec_path: Path,
     expected_hash: str | None = None,
     against: str | None = None,
-    git_root: Path | None = None
+    git_root: Path | None = None,
+    staged_only: bool = False,
 ) -> tuple[bool, list[str]]:
     if not spec_path.is_file():
         return False, [f"Arquivo de especificação não encontrado: '{spec_path}'"]
@@ -433,7 +444,7 @@ def check_spec_drift(
             "âncora do diff corrompida ou inválida (fail-closed)."
         ]
 
-    touched = get_touched_files(git_root, against=against, active_spec=spec_path)
+    touched = get_touched_files(git_root, against=against, active_spec=spec_path, staged_only=staged_only)
     unauthorized = []
     for f in sorted(touched):
         if not is_path_in_scope(f, declared_scope):
@@ -452,6 +463,7 @@ def main():
     parser.add_argument("--expected-hash", type=str, help="Hash SHA256 esperado da spec pré-aprovada")
     parser.add_argument("--against", type=str, default=None, help="Commit/Ref do git para comparação do diff")
     parser.add_argument("--repo", type=Path, default=None, help="Raiz do repositório Git")
+    parser.add_argument("--staged-index", action="store_true", help="Verifica apenas arquivos preparados no índice Git")
     try:
         args = parser.parse_args()
     except SystemExit:
@@ -472,7 +484,7 @@ def main():
     # F2 (opus v15): RuntimeError de timeout/OSError do git virava traceback
     # exit 1 (código de veredito-vermelho) — erro de infra sai como 2.
     try:
-        ok, errors = check_spec_drift(spec_path, expected_hash=args.expected_hash, against=args.against, git_root=git_root)
+        ok, errors = check_spec_drift(spec_path, expected_hash=args.expected_hash, against=args.against, git_root=git_root, staged_only=args.staged_index)
     except RuntimeError as exc:
         print(f"ERRO: spec drift indisponível: {exc}", file=sys.stderr)
         sys.exit(2)
