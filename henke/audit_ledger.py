@@ -475,9 +475,21 @@ def _verify_log_chain_core(raw_lines: list[str], log_p: Path) -> tuple[list[str]
             _has_decision and ehash_r == cand_pipe_v2)
         _legacy = not _has_decision and ehash_r == cand_pipe
         if not (_covers or _legacy):
-            errors.append(
-                f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash adulterado na linha {idx} de '{log_p.name}'."
-            )
+            if _has_decision and ehash_r == cand_pipe:
+                # Registro escrito por produtor v1: campos de decisão
+                # presentes mas fora do hash — indistinguível de forjado.
+                # Recuperação: apagar exec_log + tip em exec-tips/ e
+                # reexecutar os comandos sob produtor v3.
+                errors.append(
+                    f"UNVERIFIED_EXECUTION_EVIDENCE: linha {idx} de '{log_p.name}' "
+                    "usa cadeia v1 (campos de decisão não autenticados) — "
+                    "regenere o exec_log apagando o arquivo e a âncora "
+                    "exec-tips correspondente."
+                )
+            else:
+                errors.append(
+                    f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash adulterado na linha {idx} de '{log_p.name}'."
+                )
             continue
 
         last_ehash = ehash_r
@@ -590,8 +602,11 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
                 continue
             # banca r5 — P1: 'passed' decide elegibilidade — o cruzamento
             # exige identidade com o log, senão uma edição do ledger (0→1)
-            # virava verde com cadeia íntegra.
-            if e_passed is not None and vrec.get("testes_passados") != e_passed:
+            # virava verde com cadeia íntegra. Revisão: se o log registra
+            # 'passed', OMITI-LO no ledger também é adulteração — entrada
+            # que declara testes não pode calar o placar observado.
+            if vrec.get("testes_passados") is not None \
+                    and vrec["testes_passados"] != e_passed:
                 continue
             if e_sha is not None and vrec["stdout_sha256"] != str(e_sha).strip():
                 continue

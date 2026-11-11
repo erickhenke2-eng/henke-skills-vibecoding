@@ -98,9 +98,12 @@ def _lstat(path):
 # --------------------------------------------------------------------------
 
 _RESERVED_NAMES = frozenset(
-    {"CON", "PRN", "AUX", "NUL"}
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
     | {f"COM{i}" for i in range(1, 10)}
     | {f"LPT{i}" for i in range(1, 10)}
+    # Windows mapeia superscripts ¹²³ para COM1-3/LPT1-3 no namespace de
+    # devices DOS (quirk documentado) — sem eles `COM¹` evadia a checagem.
+    | {"COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"}
 )
 
 
@@ -373,7 +376,10 @@ def iter_tree(
             )
             continue
         dir_real = os.path.normcase(os.path.realpath(dir_s))
-        if dir_real != root_real and not dir_real.startswith(root_real + os.sep):
+        # rstrip evita sep duplo quando root já é raiz de filesystem
+        # (`F:\`/`/`) — startswith em "F:\\" nunca casaria filho algum.
+        if (dir_real != root_real
+                and not dir_real.startswith(root_real.rstrip(os.sep) + os.sep)):
             yield TreeEntry(
                 Path(dir_s), rel_prefix or ".", "error", 0, 0,
                 "diretório resolve fora da raiz (escape físico)",

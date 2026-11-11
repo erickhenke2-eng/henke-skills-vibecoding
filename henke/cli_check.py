@@ -393,15 +393,15 @@ def _cmd_check(
                         # staged nunca era escaneado (exit 0 falso-verde).
                         # Repo hostil forja o índice no Linux, onde `:` é legal.
                         if os.name == "nt":
+                            # is_reserved_component replica a normalização
+                            # Win32 (strip espaço/ponto, stem pré-1º ponto) —
+                            # `nul `/`con `/`aux .txt` evadiriam split(".")[0].
+                            from henke.winpath import (
+                                is_reserved_component as _is_rsv)
                             _nt_bad = sorted(
                                 p for p in listed
                                 if re.search(r'[:*?"<>|\x00-\x1f]', p)
-                                or any(seg.split(".")[0].upper() in
-                                       {"CON", "PRN", "AUX", "NUL",
-                                        "COM1", "COM2", "COM3", "COM4", "COM5",
-                                        "COM6", "COM7", "COM8", "COM9",
-                                        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
-                                        "LPT6", "LPT7", "LPT8", "LPT9"}
+                                or any(_is_rsv(seg)
                                        for seg in p.split("/") if seg))
                             if _nt_bad:
                                 print("ERRO: índice contém paths que não "

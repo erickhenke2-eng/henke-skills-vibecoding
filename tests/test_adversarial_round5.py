@@ -68,26 +68,58 @@ class TestPassedTamper(unittest.TestCase):
                 for e in self._chain_errors([rec_bad2])),
             "edição de evidence_reason sobreviveu com entry_hash válido")
 
+        # Registro v1 (hash legado de 5 campos COM campos de decisão —
+        # assinatura de log pré-fix): rejeitado com diagnóstico próprio,
+        # não com 'adulterado' genérico.
+        rec_v1 = dict(rec)
+        rec_v1["entry_hash"] = hashlib.sha256(
+            f"{prev}|{rec['cmd']}|{rec['exit']}|{rec['testes_descobertos']}|"
+            f"{rec['stdout_sha256']}".encode()).hexdigest()
+        errs_v1 = self._chain_errors([rec_v1])
+        self.assertTrue(any("cadeia v1" in e for e in errs_v1), errs_v1)
+
     def test_ledger_edit_passed_fails_crosscheck(self):
+        from unittest.mock import patch
+        from henke import rs_custody
+
         prev = "0" * 64
         rec = _entry(prev, 0, "")
+        rec["cmd"] = "python test_suite.py"  # runner reconhecido (is_test_cmd)
         rec["entry_hash"] = _pipe(prev, rec)
-        with tempfile.TemporaryDirectory() as td:
-            hd = Path(td) / ".henke"
+        with tempfile.TemporaryDirectory() as td, \
+                tempfile.TemporaryDirectory() as prof:
+            repo = Path(td)
+            hd = repo / ".henke"
             hd.mkdir()
             log_p = hd / "exec_log.jsonl"
             log_p.write_text(json.dumps(rec) + "\n", encoding="utf-8")
-            # ledger declara passed=1 mas o log gravou 0 — divergência
-            entry = {"cmd": "python tests.py", "exit": 0,
-                     "testes_descobertos": 1, "testes_passados": 1,
-                     "stdout_sha256": "a" * 64}
-            ok, errors, _ = audit_ledger.audit_ledger_content(
-                [entry], exec_log_path=log_p, require_exec_log=True)
-            self.assertFalse(ok)
-            self.assertTrue(any("UNVERIFIED_EXECUTION_EVIDENCE" in e
-                                for e in errors), errors)
+            # Âncora de ponta real — sem ela a auditoria falha por motivo
+            # errado (âncora ausente), não pela adulteração.
+            with patch.dict(os.environ, {"APPDATA": prof}):
+                rs_custody.record_exec_tip(repo, rec["entry_hash"])
+                entry = {"cmd": "python test_suite.py", "exit": 0,
+                         "testes_descobertos": 1, "testes_passados": 1,
+                         "stdout_sha256": "a" * 64}
+                ok, errors, _ = audit_ledger.audit_ledger_content(
+                    [entry], exec_log_path=log_p, require_exec_log=True)
+                self.assertFalse(ok)
+                self.assertTrue(
+                    any("sem registro correspondente íntegro" in e
+                        for e in errors), errors)
+                # Variante da revisão: OMITIR 'passed' no ledger é
+                # adulteração equivalente — não pode casar com log que
+                # registrou o placar.
+                entry_omit = dict(entry)
+                del entry_omit["testes_passados"]
+                ok2, errors2, _ = audit_ledger.audit_ledger_content(
+                    [entry_omit], exec_log_path=log_p, require_exec_log=True)
+                self.assertFalse(ok2)
+                self.assertTrue(
+                    any("sem registro correspondente íntegro" in e
+                        for e in errors2), errors2)
 
 
+@unittest.skipUnless(os.name == "nt", "ADS/device names são semântica NTFS")
 class TestStagedNonMaterializableNames(unittest.TestCase):
     """`:` em nome vira ADS no NTFS — o blob nunca materializa e nunca é
     escaneado (forjável no Linux, onde `:` é legal). Device names idem."""
@@ -121,8 +153,15 @@ class TestStagedNonMaterializableNames(unittest.TestCase):
         self.assertEqual(rc, 2, "nome com `:` (ADS) passou como staged válido")
 
     def test_device_name_fails_closed(self):
-        rc = self._stage_collision(["aux"])
-        self.assertEqual(rc, 2, "nome de dispositivo passou como staged válido")
+        # Revisão adversarial: `nul `/`con `/`aux .txt` evadiam a checagem
+        # por split(".")[0] cru; CONIN$/CONOUT$ e superscripts COM¹-³ eram
+        # ausentes do set — todos materializam devices no Windows.
+        for name in ("aux", "nul ", "con ", "aux .txt",
+                     "CONOUT$", "COM¹", "sub/LPT2/x.py"):
+            with self.subTest(name=name):
+                rc = self._stage_collision([name])
+                self.assertEqual(rc, 2,
+                                 f"nome de dispositivo {name!r} passou staged")
 
 
 class TestSupervisorDeadline(unittest.TestCase):
@@ -173,23 +212,28 @@ class TestIterTreeJunctionSwap(unittest.TestCase):
             outside.mkdir()
             (outside / "external.txt").write_text("outside\n")
 
-            # Troca o diretório real por junction ANTES do iter_tree pop —
-            # mesmo efeito do swap entre stat e scandir.
+            it = iter_tree(repo)
+            first = next(it)
+            self.assertEqual((first.relative_path, first.kind),
+                             ("queued", "directory"))
+            # Troca o diretório por junction exatamente na janela TOCTOU:
+            # o stat de descoberta já passou, o pop da fila ainda não
+            # aconteceu (o yield suspendeu o gerador entre os dois).
             (repo / "queued").rmdir()
             subprocess.run(  # hazard-ok: SHELL-INJECTION — mklink /J é a única via de junction no Windows; argv fixo, sem shell=True
                 ["cmd", "/c", "mklink", "/J",
                  str(repo / "queued"), str(outside)],
                 check=True, capture_output=True)
 
-            emitted = list(iter_tree(repo))
-            kinds = {(e.relative_path, e.kind, e.reason) for e in emitted}
+            rest = list(it)
+            kinds = {(e.relative_path, e.kind, e.reason) for e in rest}
             self.assertFalse(
-                any(e.relative_path == "queued/external.txt"
-                    and e.kind == "file" for e in emitted),
+                any(e.kind == "file" and "external" in e.relative_path
+                    for e in rest),
                 f"arquivo externo emitido como conteúdo do repo: {kinds}")
             self.assertTrue(
                 any(e.relative_path == "queued"
-                    and e.kind in ("skipped", "error") for e in emitted),
+                    and e.kind in ("skipped", "error") for e in rest),
                 f"troca por junction não reportada: {kinds}")
 
 
