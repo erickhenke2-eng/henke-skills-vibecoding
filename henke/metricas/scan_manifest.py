@@ -460,6 +460,7 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
         # 2. Snapshot: enumeração + hashes estáveis (winpath, sem links).
         files_now: dict[str, dict] = {}
         unstable = False
+        depth_truncated = False
         for entry in winpath.iter_tree(repo, prune_names=frozenset({
             ".git", ".hg", "node_modules", "dist", "build", "out", "target",
             "vendor", ".venv", "venv", "coverage", ".next", ".nuxt",
@@ -469,6 +470,15 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
             if entry.kind == "error":
                 unstable = True
                 reasons.append(f"tree_error:{entry.relative_path}:{entry.reason}")
+                continue
+            # banca r4 — H1: `iter_tree` para de descer em max_depth e emite
+            # skipped/max_depth. Tratar como `continue` silencioso deixava um
+            # diretório não-atravessado (que pode conter arquivos elegíveis)
+            # sair verde — o scanner standalone (os.walk sem limite) escaneia
+            # os mesmos arquivos e reprova. Árvore truncada não é veredito.
+            if entry.kind == "skipped" and entry.reason == "max_depth":
+                depth_truncated = True
+                reasons.append(f"max_depth_truncated:{entry.relative_path}")
                 continue
             if entry.kind != "file" or not _eligible(spec, entry.relative_path, mod):
                 continue
@@ -616,6 +626,11 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
         if any(e.get("status") == "skipped_oversize"
                for e in new_entries.values()):
             reasons.append("oversize_present:not_a_verdict")
+            exit_code = 2
+        # banca r4 — H1: diretório não-atravessado por max_depth é lacuna de
+        # cobertura, nunca PASS (mesma classe do oversize acima).
+        if depth_truncated:
+            reasons.append("depth_truncated:not_a_verdict")
             exit_code = 2
         return IncrementalScanResult(
             spec.scanner_id, exit_code, tuple(all_findings),

@@ -13,6 +13,13 @@ from henke.cli_kernel import _PYTEST_FAIL_RE
 _PYTEST_RE = re.compile(r"(?i)\b(\d+)\s+passed\b")
 _UNITTEST_RAN_RE = re.compile(r"Ran\s+(\d+)\s+tests?\s+in\s+", flags=re.I)
 _UNITTEST_FAIL_RE = re.compile(r"FAILED\s*\(([^)]+)\)", flags=re.I)
+# banca r4 — H10: skipped aparece em "OK (skipped=N)" / "FAILED (..., skipped=N)".
+_UNITTEST_SKIP_RE = re.compile(r"\bskipped=(\d+)", flags=re.I)
+# banca r4 — F2: "expected failures" (xfail que falhou = conhecido-quebrado,
+# não executa asserção que passa) e "unexpected successes" (xfail que passou;
+# unittest conta como FALHA e sai != 0).
+_UNITTEST_XFAIL_RE = re.compile(r"expected\s+failures=(\d+)", flags=re.I)
+_UNITTEST_USUCCESS_RE = re.compile(r"unexpected\s+successes=(\d+)", flags=re.I)
 _JEST_VITEST_RE = re.compile(
     r"Tests:\s*(?:(\d+)\s+failed\s*[|,]\s*)?(?:(\d+)\s+skipped\s*[|,]\s*)?(\d+)\s+passed",
     flags=re.I,
@@ -30,30 +37,44 @@ def parse_test_runner_output(stdout: str, stderr: str) -> tuple[int, int]:
     """Extrai deterministicamente (testes_descobertos, testes_passados) da saída de um test runner."""
     combined = (stdout or "") + "\n" + (stderr or "")
 
-    # 1. Jest / Vitest ("Tests: 1 failed, 4 passed, 5 total" ou "Tests: 5 passed")
+    # 1. Python unittest ("Ran N tests in X.XXXs" — usa a última ocorrência).
+    # banca r4 — H12: verificado ANTES do Jest. Um teste pode IMPRIMIR
+    # "Tests: N passed" na saída; o regex do Jest, rodando primeiro sobre
+    # stdout+stderr, casaria essa linha e inflaria a contagem de uma run
+    # unittest. "Ran N tests in" é assinatura inequívoca de unittest.
+    m_ut = list(_UNITTEST_RAN_RE.finditer(combined))
+    if m_ut:
+        ran = int(m_ut[-1].group(1))
+        failed_count = 0
+        for m_f in _UNITTEST_FAIL_RE.finditer(combined):
+            # lookbehind barra "expected failures=" de contar como failures=.
+            for num in re.findall(r"(?<!expected )(?:failures|errors)=(\d+)", m_f.group(1), flags=re.I):
+                failed_count += int(num)
+        # banca r4 — H10: "Ran N" inclui os pulados, mas skip não executa
+        # asserção — suíte 100% skip é vitória por tautologia. Pulados saem
+        # dos descobertos E dos passados.
+        skipped = sum(int(n) for n in _UNITTEST_SKIP_RE.findall(combined))
+        # banca r4 — F2: expected failures fora dos descobertos (irmão do skip);
+        # unexpected successes contam como falha (unittest sai != 0 neles).
+        xfail = sum(int(n) for n in _UNITTEST_XFAIL_RE.findall(combined))
+        usucc = sum(int(n) for n in _UNITTEST_USUCCESS_RE.findall(combined))
+        discovered = max(0, ran - skipped - xfail)
+        passed = max(0, discovered - failed_count - usucc)
+        return discovered, passed
+
+    # 2. Jest / Vitest ("Tests: 1 failed, 4 passed, 5 total" ou "Tests: 5 passed")
     m_jv = _JEST_VITEST_RE.search(combined)
     if m_jv:
         failed = int(m_jv.group(1) or 0)
         passed = int(m_jv.group(3) or 0)
         return passed + failed, passed
 
-    # 2. Cargo test ("test result: ok. 12 passed; 0 failed")
+    # 3. Cargo test ("test result: ok. 12 passed; 0 failed")
     m_cargo = list(_CARGO_TEST_RE.finditer(combined))
     if m_cargo:
         passed = sum(int(m.group(1)) for m in m_cargo)
         failed = sum(int(m.group(2)) for m in m_cargo)
         return passed + failed, passed
-
-    # 3. Python unittest ("Ran N tests in X.XXXs" — usa a última ocorrência)
-    m_ut = list(_UNITTEST_RAN_RE.finditer(combined))
-    if m_ut:
-        ran = int(m_ut[-1].group(1))
-        failed_count = 0
-        for m_f in _UNITTEST_FAIL_RE.finditer(combined):
-            for num in re.findall(r"(?:failures|errors)=(\d+)", m_f.group(1), flags=re.I):
-                failed_count += int(num)
-        passed = max(0, ran - failed_count)
-        return ran, passed
 
     # 4. Canários Henke ("5/5 canários aprovados")
     m_can = _CANARY_RE.search(combined)

@@ -374,7 +374,7 @@ def find_comment_spans(text: str, lang: str = "") -> list[CommentSpan]:
         return -1
 
     i, n = 0, len(text)
-    is_hash_lang = lang in ("py", "python", "tf", "tfvars", "toml", "yaml", "yml", "dockerfile", "sh", "bash")
+    is_hash_lang = lang in ("py", "pyw", "python", "tf", "tfvars", "toml", "yaml", "yml", "dockerfile", "sh", "bash")
     # H1 (banca v15): '//'/'/*'/'<!--' rodavam em TODAS as langs — o '//' de
     # uma URL num .yml abria CommentSpan contendo um marker de supressão e
     # calava o finding da própria linha. C-like só nas langs c-like.
