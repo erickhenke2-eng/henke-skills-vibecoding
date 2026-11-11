@@ -104,6 +104,11 @@ _HENKE_CUSTODY = frozenset({
     ".henke/POLICY.json", ".henke/PROJECT.json", ".henke/fence.json",
     ".henke/ratchet-baseline.tsv", ".henke/gate-baseline.json",
     ".henke/coverage-ledger.json",
+    # banca-v18 (rev C-N): adulterar a evidência de auditoria é metaconfig.
+    # `exec_log.jsonl`/`events.jsonl` ficam de fora de propósito — já têm
+    # âncora/verificação própria (hash-chain em audit_ledger.verify_exec_log
+    # e event_store), e listá-los aqui duplicaria autoridade.
+    ".henke/LEDGER.json", ".henke/CONFIG.json",
 })
 
 

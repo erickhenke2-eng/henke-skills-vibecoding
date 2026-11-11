@@ -141,6 +141,25 @@ _URL_CRED_RE = re.compile(
     r"(?:https?|postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|"
     r"amqps?|ldaps?|ssh|git\+https?|ftps?)://"
     r"([A-Za-z0-9._%-]+):([^/\s'\"@]{3,})@([A-Za-z0-9.-]+)")
+# banca-v18 (rev C-N): dois tiers de keywords. _SQL_KW_CRUD = os 4 verbos
+# originais — o concat exige-os ancorados no início da string (mesmo perfil
+# de FP de sempre). _SQL_KW_WIDE = tokens inequivocamente SQL — UNION SELECT
+# fora do início, DDL/DCL e perigosas — seguros em QUALQUER posição porque
+# cada forma carrega seu próprio qualificador (ON/USING/prefixo de proc),
+# evitando o inglês ("grant them access", "exec summary", "execute the plan").
+# Residuais documentados: `EXEC proc` sem prefixo/parêns e `REPLACE INTO t`
+# sem `(cols)`.
+_SQL_KW_CRUD = (
+    r"SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+"
+)
+_SQL_KW_WIDE = (
+    r"UNION\s+SELECT|DROP\s+TABLE|ALTER\s+TABLE|TRUNCATE\s+TABLE"
+    r"|PRAGMA\s+\w+|GRANT\s+[\w,\s]+?\s+ON\b|REPLACE\s+INTO\s+\w+\s*\("
+    r"|MERGE\s+INTO\s+\w+\s+USING\b"
+    r"|EXEC\s*\(|EXEC\s+@\w|EXEC\s+(?:xp_\w*|sp_\w*|usp_\w*|dbo\.|sys\.|master\.\.)"
+    r"|EXECUTE\s+IMMEDIATE"
+)
+_SQL_KW = _SQL_KW_CRUD + "|" + _SQL_KW_WIDE
 _SQL_INTERP_PY_RE = re.compile(
     # A1 (banca v16): SQL canônica tem `'` dentro da f-string —
     # `WHERE n='{x}'` quebrava o [^'"]*; tail tolera ' e cobre .format/%(.
@@ -150,20 +169,31 @@ _SQL_INTERP_PY_RE = re.compile(
     # %"..."%arg — a canônica SQLi `"...%s" % uid` agora casa.
     # +revisão cega: `[^'"]*` antes do `\{` barrava a aspa interna —
     # `WHERE n='{x}'` (canônico A1-v16) evadia. `[^"]*` tolera ' no conteúdo.
+    # banca-v18 (rev C-N): `.format_map(`, named-format `%(nome)s`, e
+    # concat implícita f-string+f-string (`f"SELECT..." f"WHERE x='{v}'"` —
+    # o 2º literal não tem keyword mas interpola). Residual documentado:
+    # concat implícita literal-para+f (`"..." f"...{v}"`) não coberta.
     r"""(?ix)(?:
-         \bf['"]{1,3}[^"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^"]*\{[^}]+\}
-       | ['"]{1,3}[^"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^"]*['"]{1,3}\s*\.format\s*\(
-       | ['"]{1,3}[^"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^"]*%[sd][^'"]*['"]{1,3}\s*%\s*[\w(]
+         \bf['"]{1,3}[^"]*\b(?:""" + _SQL_KW + r""")[^"]*\{[^}]+\}
+       | \bf['"]{1,3}[^"]*\b(?:""" + _SQL_KW + r""")[^"]*['"]{1,3}\s+f['"]{1,3}[^"]*\{[^}]*\}
+       | ['"]{1,3}[^"]*\b(?:""" + _SQL_KW + r""")[^"]*['"]{1,3}\s*\.format(?:_map)?\s*\(
+       | ['"]{1,3}[^"]*\b(?:""" + _SQL_KW + r""")[^"]*%\(\w+\)[a-zA-Z][^'"]*['"]{1,3}\s*%\s*[\w({]
+       | ['"]{1,3}[^"]*\b(?:""" + _SQL_KW + r""")[^"]*%[sd][^'"]*['"]{1,3}\s*%\s*[\w(]
        )""",
 )
 _SQL_INTERP_JS_RE = re.compile(
-    r"""(?ix)`[^`]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^`]*\$\{[^}]+\}[^`]*`"""
+    r"""(?ix)`[^`]*\b(?:""" + _SQL_KW + r""")[^`]*\$\{[^}]+\}[^`]*`"""
 )
 _SQL_CONCAT_RE = re.compile(
-    r"""(?ix)['"]\s*(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*['"]\s*\+\s*[A-Za-z_$]"""
+    # banca-v18 (rev C-N): dois caminhos — CRUD ancorado no início (perfil
+    # original) OU token inequivocamente-SQL em qualquer posição da string
+    # (`[^'"]*?\b` cobre "WHERE a=1 UNION SELECT ..."). Operando parentizado
+    # `+ (var)` — `(` que não abre literal é suspeita.
+    r"""(?ix)['"](?:\s*(?:""" + _SQL_KW_CRUD + r""")|[^'"]*?\b(?:""" + _SQL_KW_WIDE
+    + r"""))[^'"]*['"]\s*\+\s*(?:[A-Za-z_$]|\((?!\s*['"]))"""
 )
 _SQL_SPRINTF_RE = re.compile(
-    r"""(?ix)\bfmt\.Sprintf\s*\(\s*['"`][^'"`]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"`]*%[svq]"""
+    r"""(?ix)\bfmt\.Sprintf\s*\(\s*['"`][^'"`]*\b(?:""" + _SQL_KW + r""")[^'"`]*%[svq]"""
 )
 
 # Regras de Pass 1 (código mascarado)
@@ -711,6 +741,23 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
     # (banca v7 — A5): `Loader=SafeLoader` só isenta se o nome resolve de
     # fato para um loader seguro.
     loader_map: dict[str, str] = {}
+    # banca-v18 (rev C-N): `sh = partial(subprocess.run, shell=True)` —
+    # partial pré-configura kwargs do sink; `sh(cmd)` herda shell=True.
+    partial_map: dict[str, tuple[str, list]] = {}
+
+    def _partial_sink(call) -> tuple[str, list] | None:
+        """Se `call` é `partial(<sink>, **kwargs)` resolvido, devolve
+        (sink, keywords)."""
+        if not isinstance(call, ast.Call) or not call.args:
+            return None
+        f = resolve(call.func)
+        if f not in ("partial", "functools.partial"):
+            return None
+        sink = resolve(call.args[0])
+        if sink in _AST_SHELL_FUNCS or sink in _AST_SUBPROC_SHELL_KW:
+            return sink, list(call.keywords)
+        return None
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             bound = resolve(node.value)
@@ -724,6 +771,9 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
                                     _AST_SUBPROC_SHELL_KW, _AST_EXEC_BUILTINS):
                             if bound in _ss or bound.rsplit(".", 1)[-1] in _ss:
                                 aliases.setdefault(t.id, bound)
+                        ps = _partial_sink(node.value)
+                        if ps is not None:
+                            partial_map[t.id] = ps
         elif isinstance(node, ast.ClassDef) and node.bases:
             loader_map[node.name] = resolve(node.bases[0])
 
@@ -755,6 +805,18 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
             continue
         line = node.lineno
         scope = f"line:{line}"
+        call_keywords = node.keywords
+        # banca-v18 (rev C-N): `sh(cmd)` onde `sh = partial(sink, shell=True)`
+        # herda sink+kwargs do partial; `partial(sink, kw=...)(cmd)` idem.
+        if isinstance(node.func, ast.Name) and node.func.id in partial_map:
+            name, _pkw = partial_map[node.func.id]
+            call_keywords = list(node.keywords) + _pkw
+        elif (isinstance(node.func, ast.Call)
+              and resolve(node.func.func) in ("partial", "functools.partial")):
+            _ps = _partial_sink(node.func)
+            if _ps is not None:
+                name, _pkw = _ps
+                call_keywords = list(node.keywords) + _pkw
         if name in _AST_SHELL_FUNCS or name.startswith("os.spawn"):
             out.append(("SHELL-INJECTION", line, scope, f"shell invocation via {name}() (AST)"))
             continue
@@ -780,7 +842,7 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
                 out.append(("SHELL-INJECTION", line, scope,
                             f"{name}() executes shell binary {node.args[0].value!r} directly (AST)"))
                 continue
-            for kw in node.keywords:
+            for kw in call_keywords:
                 if kw.arg == "shell":
                     if isinstance(kw.value, ast.Constant) and not kw.value.value:
                         break  # shell=False explícito — seguro

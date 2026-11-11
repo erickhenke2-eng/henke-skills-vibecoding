@@ -8,7 +8,13 @@ Mede, no repositório atual:
   C) TIA: custo de discovery+seleção vs suíte completa (reportado, não executa
      a suíte — mede somente a seleção e informa).
 
-Imprime um relatório determinístico com tempos em ms e razões. Exit 0 sempre.
+Imprime um relatório determinístico com tempos em ms e razões. Exit 0 sempre,
+EXCETO com `--strict` (modo CI, equivalente ao bench_corpus): veredito real —
+exit 1 se o paralelo degradar, os vereditos divergirem, o scanner incremental
+errar, ou o grafo TIA vier vazio; exit 2 só em erro de uso/execução.
+
+banca-v18 (rev C-N): antes `main()` retornava 0 incondicional — um step de CI
+que não podia falhar.
 """
 import json
 import subprocess
@@ -50,6 +56,10 @@ def bench_gates(repo: Path) -> dict:
         "parallel4_ms": par_ms,
         "speedup": round(seq_ms / max(par_ms, 1), 2),
         "verdicts_equal": [r.exit_code for r in seq] == [r.exit_code for r in par],
+        # banca-v18 (rev C-N): exit 2/125 ou output_error = gate não mediu —
+        # a medição como um todo é inválida (veredito --strict depende disso).
+        "gate_errors": [r.name for r in seq
+                        if r.output_error or r.exit_code in (2, 125)],
     }
 
 
@@ -90,11 +100,39 @@ def bench_tia(repo: Path) -> dict:
     }
 
 
+# banca-v18 (rev C-N): checks de veredito do modo --strict. Cada um declara
+# o invariante medido — o bench só reprova o que o número realmente violou.
+_STRICT_CHECKS = (
+    # (nome, descrição do invariante, avaliador(report)->bool)
+    ("verdicts_equal",
+     "gates paralelos divergiram do sequencial",
+     lambda r: r["gates"]["verdicts_equal"] is True),
+    ("gates_ran",
+     "algum gate errou (exit 2/125/drain) — medição inválida",
+     lambda r: not r["gates"]["gate_errors"]),
+    ("parallel_nondegraded",
+     "paralelo (jobs=4) degradou >25% vs sequencial",
+     lambda r: r["gates"]["parallel4_ms"] <= r["gates"]["sequential_ms"] * 1.25),
+    ("manifest_incremental_ok",
+     "scan incremental a11y terminou em erro (exit 2)",
+     lambda r: 2 not in r["manifest_a11y"]["exit_codes"]),
+    ("incremental_nondegraded",
+     "scan incremental degradou >50% vs full",
+     lambda r: r["manifest_a11y"]["incremental_ms"]
+     <= max(r["manifest_a11y"]["full_ms"] * 1.5, 1)),
+    ("tia_graph_built",
+     "grafo TIA veio vazio num repo não-vazio",
+     lambda r: r["tia"]["nodes"] > 0 or r["tia"]["unresolved"] == 0),
+)
+
+
 def main() -> int:
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", type=Path, default=ROOT)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--strict", action="store_true",
+                    help="CI: exit 1 se algum invariante medido violar")
     args = ap.parse_args()
     repo = args.repo.resolve()
 
@@ -104,7 +142,18 @@ def main() -> int:
         "manifest_a11y": bench_manifest(repo),
         "tia": bench_tia(repo),
     }
+    if args.strict:
+        # veredito real: cada violação sai nomeada no relatório (banca-v18).
+        violations = [f"{name} — {why}" for name, why, chk in _STRICT_CHECKS
+                      if not chk(report)]
+        report["strict"] = {"verdict": "failed" if violations else "verified",
+                            "violations": violations}
     print(json.dumps(report, indent=2, ensure_ascii=False))
+    if args.strict:
+        if violations:
+            print("--strict: reprovado — " + "; ".join(violations), file=sys.stderr)
+            return 1
+        print("--strict: nenhum invariante violado — aprovado.", file=sys.stderr)
     return 0
 
 
