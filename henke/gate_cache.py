@@ -24,9 +24,11 @@ import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
+import contextlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from henke.state_paths import cache_root, secret_dir, secret_key_name, state_dir  # noqa: E402
+from henke.rs_io import _file_lock  # noqa: E402
 
 
 def _henke_dir(repo_path: Path) -> Path:
@@ -116,6 +118,36 @@ def trim_working_set() -> bool:
 
 _CACHE_LOCK = threading.RLock()
 _IN_MEMORY_CACHE: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+
+
+def _reap_own_lock_orphan(path: Path) -> None:
+    """Remove `<path>.lock` se for órfão com o NOSSO pid (seguro apenas sob
+    `_CACHE_LOCK`): se o unlink do release do _file_lock falha transitorio
+    (AV/indexer segurando handle no Windows), o .lock sobra com pid vivo —
+    nunca "stale" — e todo esperante morre de TimeoutError (mesmo wedge
+    que o event_store mitigou em `_reap_self_lock_orphan`)."""
+    lock_path = Path(str(Path(path).resolve()) + ".lock")
+    try:
+        if lock_path.read_text(
+                encoding="utf-8", errors="replace").strip() == (
+                f"pid={os.getpid()}"):
+            lock_path.unlink()
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def _consolidated_lock(target: Path):
+    """`_CACHE_LOCK` (threads) + reap de órfão same-pid + `_file_lock`
+    (processos) — a unidade de exclusão para o read-modify-write do
+    consolidated."""
+    with _CACHE_LOCK:
+        _reap_own_lock_orphan(target)
+        try:
+            with _file_lock(target):
+                yield
+        finally:
+            _reap_own_lock_orphan(target)
 _LAST_REPO_ROOT: Optional[Path] = None
 
 _IGNORED_DIRS = {
@@ -490,7 +522,23 @@ def get_cached_gate(
     # Check disk cache
     cache_dir = cache_root(repo_path)
 
-    # 1. Check consolidated gate_cache.json if present
+    # banca-v19 (rev FV-2): precedência invertida — o gate_file
+    # INDIVIDUAL é a autoridade atômica por chave (1 arquivo, 1 chave,
+    # 1 write atômico, sempre escrito ANTES do consolidated no store).
+    # Consolidated-first servia veredito STALE na janela crash-entre-
+    # writes (gate_file novo + consolidated velho). Consolidated fica
+    # como fallback para entradas legadas sem gate_file.
+    gate_file = cache_dir / "gates" / _safe_key_filename(key)
+    gate_entry = _read_json_safe(gate_file)
+    if gate_entry is not None and isinstance(gate_entry, dict) and _verify_entry_hmac(secret, key, gate_entry):
+        gate_entry["last_accessed"] = datetime.now(timezone.utc).isoformat()
+        gate_entry["access_count"] = gate_entry.get("access_count", 0) + 1
+        with _CACHE_LOCK:
+            _IN_MEMORY_CACHE[key] = gate_entry
+            _IN_MEMORY_CACHE.move_to_end(key)
+        return dict(gate_entry)
+
+    # 2. Fallback: consolidated gate_cache.json (schema flat ou wrapped)
     consolidated_file = cache_dir / "gate_cache.json"
     consolidated = _read_json_safe(consolidated_file)
     # banca-v18 (rev D-F4): event_store.rebuild_derived escreve o MESMO
@@ -507,17 +555,6 @@ def get_cached_gate(
                 _IN_MEMORY_CACHE[key] = item
                 _IN_MEMORY_CACHE.move_to_end(key)
             return dict(item)
-
-    # 2. Check individual key file .henke/cache/gates/<key>.json
-    gate_file = cache_dir / "gates" / _safe_key_filename(key)
-    gate_entry = _read_json_safe(gate_file)
-    if gate_entry is not None and isinstance(gate_entry, dict) and _verify_entry_hmac(secret, key, gate_entry):
-        gate_entry["last_accessed"] = datetime.now(timezone.utc).isoformat()
-        gate_entry["access_count"] = gate_entry.get("access_count", 0) + 1
-        with _CACHE_LOCK:
-            _IN_MEMORY_CACHE[key] = gate_entry
-            _IN_MEMORY_CACHE.move_to_end(key)
-        return dict(gate_entry)
 
     return None
 
@@ -557,18 +594,28 @@ def store_cached_gate(
         gate_file = cache_dir / "gates" / _safe_key_filename(key)
         _atomic_write_file(gate_file, json.dumps(entry, ensure_ascii=False, indent=2))
 
-        # 2. Update consolidated gate_cache.json atomically
+        # 2. Update consolidated gate_cache.json atomically.
+        # banca-v19 (rev A-4): o ciclo leitura-modificação-escrita rodava
+        # SEM lock interprocessos — gates paralelos (run_gates_parallel
+        # jobs=4) sobrescreviam via os.replace e PERDIAM vereditos de
+        # processos irmãos. Lock por arquivo cobre a transação inteira.
+        # _CACHE_LOCK primeiro: serializa threads DESTE processo fora do
+        # FS — sem ele, threads competindo no .lock criavam um zumbi
+        # pending-delete no Windows (stat/read_text das esperas mantém
+        # handle aberto, o unlink nunca se materializa) e TODAS estouravam
+        # o timeout de 10s.
         consolidated_file = cache_dir / "gate_cache.json"
-        consolidated = _read_json_safe(consolidated_file) or {}
-        # banca-v18 (rev D-F4): se o arquivo está no schema wrapped do
-        # event_store, mescla dentro de "entries" preservando o wrapper —
-        # um escritor flat produzia híbrido {"schema":2,"entries":{…},"<key>":{…}}.
-        if (isinstance(consolidated, dict)
-                and isinstance(consolidated.get("entries"), dict)):
-            consolidated["entries"][key] = entry
-        else:
-            consolidated[key] = entry
-        _atomic_write_file(consolidated_file, json.dumps(consolidated, ensure_ascii=False, indent=2))
+        with _consolidated_lock(consolidated_file):
+            consolidated = _read_json_safe(consolidated_file) or {}
+            # banca-v18 (rev D-F4): se o arquivo está no schema wrapped do
+            # event_store, mescla dentro de "entries" preservando o wrapper —
+            # um escritor flat produzia híbrido {"schema":2,"entries":{…},"<key>":{…}}.
+            if (isinstance(consolidated, dict)
+                    and isinstance(consolidated.get("entries"), dict)):
+                consolidated["entries"][key] = entry
+            else:
+                consolidated[key] = entry
+            _atomic_write_file(consolidated_file, json.dumps(consolidated, ensure_ascii=False, indent=2))
     except Exception:
         # banca-v18 (rev B-F11): falha de persistência deixava o veredito
         # NOVO só em memória enquanto o STALE assinado ficava em disco —
@@ -578,6 +625,24 @@ def store_cached_gate(
             _IN_MEMORY_CACHE.pop(key, None)
         try:
             gate_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+        # banca-v19 (rev FV-2): o stale sobrevivia no CONSOLIDATED — lido
+        # PRIMEIRO com HMAC válido, o veredito velho era servido sem re-rodar
+        # o portão. Remove a chave lá também, sob o mesmo par de locks
+        # (_CACHE_LOCK p/ threads, _file_lock p/ processos).
+        try:
+            consolidated_file = cache_dir / "gate_cache.json"
+            with _consolidated_lock(consolidated_file):
+                cons = _read_json_safe(consolidated_file)
+                if isinstance(cons, dict):
+                    tgt = cons.get("entries") if isinstance(
+                        cons.get("entries"), dict) else cons
+                    if key in tgt:
+                        del tgt[key]
+                        _atomic_write_file(
+                            consolidated_file,
+                            json.dumps(cons, ensure_ascii=False, indent=2))
         except OSError:
             pass
 
@@ -605,9 +670,12 @@ def enforce_ram_limit(
         repo_path = _discover_repo_root(Path(repo_root) if repo_root else None)
         cache_dir = cache_root(repo_path)
         consolidated_file = cache_dir / "gate_cache.json"
-        consolidated = _read_json_safe(consolidated_file) or {}
 
-        with _CACHE_LOCK:
+        # banca-v19 (rev A-4): mesmo race do store — leitura do
+        # consolidated fora de lock + regrava perdendo updates de
+        # processos irmãos. Transação inteira sob os dois locks.
+        with _consolidated_lock(consolidated_file):
+            consolidated = _read_json_safe(consolidated_file) or {}
             if limit_mb <= 0.0:
                 evicted_keys = list(_IN_MEMORY_CACHE.keys())
                 evicted_count = len(evicted_keys)

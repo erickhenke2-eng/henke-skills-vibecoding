@@ -81,11 +81,18 @@ def _pid_alive(pid: int) -> bool:
                 OverflowError):
             return True  # indeterminado → não quebra lock de vivo
     try:
-        os.kill(pid, 0)
+        # banca-v19 (rev A-2): o range check ficou só no ramo nt — no
+        # POSIX, os.kill(10**20,0) → OverflowError (não é OSError) crashava
+        # _file_lock; e os.kill(0,0) sinaliza o PRÓPRIO grupo → retornava
+        # vivo, lock stale eterno. Mesma faixa válida nas duas plataformas.
+        _pid_i = int(pid)
+        if not 0 < _pid_i < 2**32:
+            return False
+        os.kill(_pid_i, 0)
         return True
     except PermissionError:
         return True  # M1 (banca v15): EPERM = existe, só sem sinal
-    except OSError:
+    except (OSError, OverflowError, TypeError, ValueError):
         return False
 
 

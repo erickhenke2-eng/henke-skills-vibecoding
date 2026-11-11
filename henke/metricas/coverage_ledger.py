@@ -71,6 +71,79 @@ VALID_UNIT_STATUS = ("pending", "covered", "finding_confirmed", "needs_validatio
 VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
 VALID_ASSUMPTION_STATUS = ("enforced", "unenforced", "unknown")
 
+# banca-v19 (rev FV-1): veredito de check exige token POSITIVO explícito
+# e nenhum token de falha — blocklist exata evadia "reprovado", "0", "❌".
+_RES_POS = re.compile(
+    r"\b(pass(ed|ou)?|ok|true|verified|verificado|verificada|success|"
+    r"succeeded|sucesso|aprovado|aprovada|clean|limpo|confirmed|confirmado|"
+    r"confirmada|válid|valid|green|yes|sim|conforme|satisfied)\b")
+_RES_NEG = re.compile(
+    r"\b(fail|falh|reprov|violat|inconclusive|denied|timeout|errors?|"
+    r"não|not\b|❌|✗|✖|×)\b")
+
+# banca-v18 (residual 5): critic_passes teatral — `[{"agent":"a"}]`, `[""]`
+# e `[{"note":"ok"}]` sem substância mintiam o gate --require-critic/deep.
+# Cada entrada exige (agent|auditor) + round + (scope|findings OU
+# rationale >= 20 chars); placeholders óbvios não valem como substância.
+_CRITIC_PLACEHOLDERS = frozenset({
+    "", "ok", "none", "teste", "test", "x", "n/a", "na", "-", "...",
+    "todo", "wip", "lorem", "pass", "passed", "yes", "sim", "null",
+    "placeholder", "tbd",
+    # NOTA: dígitos ("0"/"1"/"2") NÃO são placeholder — `round: 1` é round
+    # legítimo; quem quis evadir usa "ok"/"x", não numeração sequencial.
+})
+_CRITIC_AGENT_FIELDS = ("agent", "auditor", "author", "revisor")
+_CRITIC_ROUND_FIELDS = ("round", "pass", "passo", "iteration", "rodada")
+_CRITIC_SCOPE_FIELDS = ("scope", "findings", "summary", "result", "notes",
+                        "escopo", "achados")
+_CRITIC_RATIONALE_FIELDS = ("rationale", "justification", "justificativa",
+                            "reason", "motivo", "analysis")
+
+
+def _critic_field_values(cp: dict, names) -> list:
+    """Valores não-vazios de qualquer alias do campo (str, lista, escalar)."""
+    vals = []
+    for n in names:
+        v = cp.get(n)
+        if isinstance(v, str) and v.strip():
+            vals.append(v.strip())
+        elif isinstance(v, (list, tuple, set)) and len(v) > 0:
+            vals.append(v)
+        elif (v is not None and not isinstance(v, (dict, bool, list, tuple, set))
+              and str(v).strip()):
+            # escalar não-string (round numérico etc.) conta como valor
+            vals.append(str(v).strip())
+    return vals
+
+
+def _critic_substantive(vals) -> bool:
+    """True se algum valor tem substância real (não-placeholder)."""
+    for v in vals:
+        if isinstance(v, str):
+            if v.strip().lower() not in _CRITIC_PLACEHOLDERS:
+                return True
+        else:  # lista/tupla/set não-vazia é substância (findings[])
+            return True
+    return False
+
+
+def _critic_entry_valid(cp) -> bool:
+    """True quando a entrada de critic_passes tem substância mínima real."""
+    if not isinstance(cp, dict):
+        return False
+    if not _critic_substantive(_critic_field_values(cp, _CRITIC_AGENT_FIELDS)):
+        return False
+    if not _critic_substantive(_critic_field_values(cp, _CRITIC_ROUND_FIELDS)):
+        return False
+    if _critic_substantive(_critic_field_values(cp, _CRITIC_SCOPE_FIELDS)):
+        return True
+    # alternativa: rationale textual com >=20 chars e não-placeholder
+    for v in _critic_field_values(cp, _CRITIC_RATIONALE_FIELDS):
+        if isinstance(v, str) and len(v.strip()) >= 20 \
+                and v.strip().lower() not in _CRITIC_PLACEHOLDERS:
+            return True
+    return False
+
 
 def _file_sha256_and_lines(path: Path) -> tuple[str, int]:
     raw = path.read_bytes()
@@ -277,12 +350,15 @@ def verify_ledger(
                 # truthiness — "failed"/"violated" é truthy e mintava check
                 # válido: a invariante REPROVANDO contava como cobertura.
                 _res = str(chk.get("result", "")).strip().lower()
-                if _res in ("fail", "failed", "violated", "error", "false",
-                            "no", "n/a", "none", "inconclusive"):
+                # banca-v19 (rev FV-1): lista exata evadia "reprovado",
+                # "failed — timeout", "0", "❌". Agora exige token
+                # positivo E ausência de token de falha (fail-closed).
+                if not (_RES_POS.search(_res) and not _RES_NEG.search(_res)):
                     errors.append(f"FAILED-RESULT [{uid}]: check com result "
-                                  f"'{_res}' não pode contar como evidência "
-                                  "de cobertura — invariante reprovada é "
-                                  "finding, não covered")
+                                  f"'{_res}' não expressa veredito positivo "
+                                  "limpo — resultado não-afirmativo ou com "
+                                  "marca de falha não é evidência de "
+                                  "cobertura")
                 if chk.get("method") not in ("source", "local"):
                     errors.append(f"INVALID-METHOD [{uid}]: check.method deve ser 'source' ou 'local'")
                 assumptions = chk.get("assumptions", [])
@@ -311,16 +387,11 @@ def verify_ledger(
                     continue
                 if not chk.get("agent_id") or not chk.get("invariant") or not chk.get("result"):
                     errors.append(f"INCOMPLETE-CHECK [{uid}]: check exige 'agent_id', 'invariant' e 'result'")
-                # banca-v18 (rev B-F7): `result` era validado só por
-                # truthiness — "failed"/"violated" é truthy e mintava check
-                # válido: a invariante REPROVANDO contava como cobertura.
-                _res = str(chk.get("result", "")).strip().lower()
-                if _res in ("fail", "failed", "violated", "error", "false",
-                            "no", "n/a", "none", "inconclusive"):
-                    errors.append(f"FAILED-RESULT [{uid}]: check com result "
-                                  f"'{_res}' não pode contar como evidência "
-                                  "de cobertura — invariante reprovada é "
-                                  "finding, não covered")
+                # banca-v19 (rev A-5): a regra de polaridade NÃO se aplica
+                # aqui — em finding_confirmed/needs_validation, result
+                # "violated"/"failed" É a evidência do finding (a
+                # invariante reprovou). Exigir positivo travaria o
+                # registro honesto de finding confirmado.
                 if chk.get("method") not in ("source", "local"):
                     errors.append(f"INVALID-METHOD [{uid}]: check.method deve ser 'source' ou 'local'")
                 assumptions = chk.get("assumptions", [])
@@ -483,13 +554,22 @@ def verify_ledger(
     critic_passes = data.get("critic_passes", [])
     # banca-v18 (rev B-F8): `isinstance(list) and len>0` aceitava [null],
     # [{}] e ["x"] — critic teatral satisfazia --require-critic/deep.
-    # O produtor (cli_banca consolidate) grava dict {agent, round, scope};
-    # exige pelo menos agent+round não-vazios.
-    has_critic = (isinstance(critic_passes, list)
-                  and len(critic_passes) > 0
-                  and all(isinstance(cp, dict) and cp.get("agent")
-                          and cp.get("round")
-                          for cp in critic_passes))
+    # residual 5: agent+round sem substância ({"agent":"a","round":"r1"}) e
+    # placeholders ("ok"/"x"/"none"/"teste") AINDA mintavam o gate — cada
+    # entrada exige agent/auditor + round + (scope/findings OU rationale
+    # >=20 chars) não-placeholder. Entrada teatral é evidência fabricada:
+    # reprova por entrada, em qualquer profile.
+    if not isinstance(critic_passes, list):
+        errors.append("INVALID-CRITIC-PASSES: 'critic_passes' não é lista")
+        critic_passes = []
+    for _cpi, _cp in enumerate(critic_passes):
+        if not _critic_entry_valid(_cp):
+            errors.append(
+                f"INVALID-CRITIC-PASS: critic_passes[{_cpi}] sem substância — "
+                "exige agent/auditor + round + (scope/findings ou "
+                "rationale>=20 chars) não-placeholder")
+    has_critic = (len(critic_passes) > 0
+                  and all(_critic_entry_valid(cp) for cp in critic_passes))
     outcome = "verified" if not errors else "failed"
     if not errors and (profile == "deep" or require_critic) and not has_critic:
         outcome = "partial"

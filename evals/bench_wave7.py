@@ -122,7 +122,10 @@ _STRICT_CHECKS = (
      <= max(r["manifest_a11y"]["full_ms"] * 1.5, 1)),
     ("tia_graph_built",
      "grafo TIA veio vazio num repo não-vazio",
-     lambda r: r["tia"]["nodes"] > 0 or r["tia"]["unresolved"] == 0),
+     # banca-v19 (rev FV-3): `or unresolved == 0` aprovava o grafo
+     # totalmente vazio (0 nós, 0 não-resolvidos) — exatamente a falha
+     # que o nome do invariante diz reprovar.
+     lambda r: r["tia"]["nodes"] > 0),
 )
 
 

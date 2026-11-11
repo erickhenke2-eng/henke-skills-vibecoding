@@ -744,6 +744,12 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
     # banca-v18 (rev C-N): `sh = partial(subprocess.run, shell=True)` —
     # partial pré-configura kwargs do sink; `sh(cmd)` herda shell=True.
     partial_map: dict[str, tuple[str, list]] = {}
+    # banca-v18 (residual 3): partial também congela sinks NÃO-shell —
+    # `p = partial(pickle.loads); p(blob)` deserializa igual à chamada
+    # direta. Desserialização/eval/yaml propagam como o sink original.
+    _PARTIAL_DESER_SINKS = (_AST_DESER_FUNCS | _AST_YAML_LOAD
+                            | _AST_YAML_ALWAYS_UNSAFE | _AST_EXEC_BUILTINS
+                            | {"numpy.load"})
 
     def _partial_sink(call) -> tuple[str, list] | None:
         """Se `call` é `partial(<sink>, **kwargs)` resolvido, devolve
@@ -754,7 +760,9 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
         if f not in ("partial", "functools.partial"):
             return None
         sink = resolve(call.args[0])
-        if sink in _AST_SHELL_FUNCS or sink in _AST_SUBPROC_SHELL_KW:
+        if (sink in _AST_SHELL_FUNCS or sink in _AST_SUBPROC_SHELL_KW
+                or sink in _PARTIAL_DESER_SINKS
+                or sink.rsplit(".", 1)[-1] in _AST_EXEC_BUILTINS):
             return sink, list(call.keywords)
         return None
 
@@ -888,10 +896,12 @@ def _py_ast_findings(raw: str, path_str: str) -> list[tuple[str, int, str, str]]
             # Só isenta com loader comprovadamente seguro no kwarg — nome EXATO
             # do loader via AST ('NotSafeLoader' contém 'SafeLoader' por
             # substring, e mencionar SafeLoader num comentário não torna a
-            # chamada segura — F2 banca v6).
+            # chamada segura — F2 banca v6). call_keywords inclui kwargs
+            # pré-configurados por partial (residual 3): `partial(yaml.load,
+            # Loader=SafeLoader)` é de fato seguro.
             safe_loader = any(
                 kw.arg in ("Loader", "loader") and _loader_is_safe(kw.value)
-                for kw in node.keywords
+                for kw in call_keywords
             )
             if safe_loader:
                 continue

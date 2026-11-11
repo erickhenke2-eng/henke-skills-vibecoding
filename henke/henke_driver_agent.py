@@ -200,9 +200,34 @@ def main() -> int:
                 if not re.search(r'[ \t"]', t):
                     return re.sub(r'([&|<>^%"])', r'^\1', t)
                 return t
+            # banca-v18 (residual 4): `%VAR%` DENTRO de aspas expande no
+            # re-parse do cmd /c — a aspa NÃO protege `%` (provado: token
+            # `"...%X%..."` expande X; e um valor de VAR com `"`/`&` sai da
+            # aspa e vira comando). `^%` dentro de aspas é literal e
+            # corromperia o argv do filho — não existe escape possível.
+            # Token que receberá aspas (contém espaço/tab/aspas) e traz `%`
+            # é recusado fail-closed, como o shim-plantado: driver falha,
+            # nunca executa comando com expansão não confiável. `%` solto em
+            # token citado também pode fechar par com `%` de OUTRO token —
+            # varredura é sobre cada token citado, sem exceção.
+            _bad_pct = [a for a in argv
+                        if "%" in a and re.search(r'[ \t"]', a)]
+            if _bad_pct:
+                print(json.dumps({
+                    "files_changed": [],
+                    "notes": "argv com `%` em token citado expande no re-parse "
+                             f"do cmd /c (sem escape possível) — recusado: "
+                             f"{_bad_pct[0][:80]!r}",
+                }))
+                return 2
             inner = subprocess.list2cmdline(
                 [_cmd_arg_escape(a) for a in argv])
-            cmdline = f'cmd.exe /d /s /c "{inner}"'
+            # /v:off desliga delayed expansion independente do registry
+            # (HKCU/HKLM Command Processor\DelayedExpansion) — `!X!` também
+            # expande dentro de aspas e NÃO tem escape confiável nem dentro
+            # nem fora (`^!` ainda expande com /v:on); desligar é a única
+            # neutralização estrutural.
+            cmdline = f'cmd.exe /d /s /v:off /c "{inner}"'
         try:
             res = subprocess.run(
                 cmdline if cmdline is not None else argv,
