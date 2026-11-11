@@ -21,6 +21,7 @@ from henke.cli_kernel import (
     _atomic_write_json,
     _now_iso,
 )
+from henke.state_paths import sanitized_child_env
 
 
 def _cmd_exec(
@@ -41,42 +42,26 @@ def _cmd_exec(
 
     cmd_str = " ".join(cmd_tokens).strip()
     exec_tokens = list(cmd_tokens)
-    # M5/H3 (banca v13): PYTHONPATH/PYTEST_*/NODE_OPTIONS/GIT_* hereditários
-    # subvertiam o tooling que produz evidência; PATH com '.', entrada do repo
-    # ou CWD implícito (which() em py<3.12) resolvia binário plantado.
-    # A3 (banca v14): Windows entrega a chave como 'Path' — escrever 'PATH'
-    # criava duplicata e o CreateProcess lia a ORIGINAL envenenada.
-    _raw_env = (os.environ.items() if os.name != "nt"
-                else ((k.upper(), v) for k, v in os.environ.items()))
-    # A3 (banca v15): loader hooks de OUTROS toolchains também mintavam
-    # saída "honesta" — NODE_PATH/GOFLAGS/RUSTC_*/JAVA_*/PHPRC/etc.
-    child_env = {k: v for k, v in _raw_env
-                 if not (k.startswith("GIT_") or k.startswith("PYTEST_")
-                         or k.startswith("COVERAGE_") or k.startswith("PYTHON")
-                         or k.startswith("LD_") or k.startswith("DYLD_")
-                         or k.startswith("NPM_CONFIG_") or k.startswith("npm_config_")
-                         or k in ("NODE_OPTIONS", "NODE_PATH", "VIRTUAL_ENV",
-                                  "BASH_ENV", "ENV", "ZDOTDIR", "PERL5OPT",
-                                  "PERL5LIB", "PERL5DB", "RUBYOPT", "RUBYLIB",
-                                  "BUNDLE_GEMFILE", "DOTNET_STARTUP_HOOKS",
-                                  "DOTNET_ADDITIONAL_DEPS", "GOFLAGS",
-                                  "RUSTC_WRAPPER", "RUSTFLAGS", "JAVA_TOOL_OPTIONS",
-                                  "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH",
-                                  "MAVEN_OPTS", "GRADLE_OPTS", "SBT_OPTS",
-                                  "PHPRC", "PHP_INI_SCAN_DIR", "PWD", "OLDPWD"))}
+    # M5/H3 (banca v13) + Delta-F5: fonte única — sanitized_child_env cobre
+    # GIT_*/loader-hooks de todos os toolchains (PYTHON*/NODE_*/JAVA_*/
+    # DOTNET_*/GOFLAGS/RUST*/CARGO_/GEM_HOME/PERL5/PHP/BUNDLE_/PSModulePath/
+    # ComSpec/PATHEXT/CDPATH...) e o PATH sem entradas do repo. A lista local
+    # divergia do helper canônico (AUD-02: PSModulePath/ComSpec/CARGO_ etc.
+    # escapavam por aqui).
+    child_env = sanitized_child_env(repo_root)
+    # Extras do exec — o que o helper genérico ainda mantém: PYTEST_*/
+    # COVERAGE_* mintam evidência de runner; PWD/OLDPWD enganam tools que
+    # leem cwd por env; RUBYLIB/CLASSPATH são loader-hooks de runtime.
+    child_env = {
+        k: v for k, v in child_env.items()
+        if not (k.upper().startswith(("PYTEST_", "COVERAGE_"))
+                or k.upper() in ("PWD", "OLDPWD", "RUBYLIB", "CLASSPATH"))
+    }
     _rr: Path | None = None
     try:
         _rr = repo_root.resolve()
-        _safe_path = os.pathsep.join(
-            d for d in os.environ.get("PATH", "").split(os.pathsep)
-            if d.strip() and not (
-                lambda _rd: _rd == _rr or _rr in _rd.parents
-            )((repo_root / d).resolve() if not Path(d).is_absolute() else Path(d).resolve()))
-        # A3 (banca v14): PATH vazio de efeito = herda envenenado — sempre
-        # escreve (vazio é melhor que envenenado).
-        child_env["PATH"] = _safe_path
     except (OSError, ValueError):
-        pass
+        _rr = None
     if exec_tokens:
         # A2 (banca v14): recusa repo-resident era Windows-only — execvp no
         # POSIX resolvia o plantado por PATH. `which` roda em toda plataforma.

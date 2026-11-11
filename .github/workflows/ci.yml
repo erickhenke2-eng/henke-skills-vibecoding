@@ -46,8 +46,11 @@ jobs:
       - name: Executar Validador Estrito da Suíte
         run: python henke/validate_skills.py
 
-      - name: Executar Bateria Completa de Testes Unitários
-        run: python -m unittest discover -s tests -p "test_*.py"
+      - name: Executar Bateria Completa de Testes Unitários (sob coverage)
+        run: |
+          python -m coverage run --include="henke/*" -m unittest discover -s tests -p "test_*.py"
+          python -m coverage report -m --skip-empty
+          python -m coverage json -o cov.json
 
       - name: Executar Bateria de Canários Adversariais (Evals)
         run: python evals/canaries.py
