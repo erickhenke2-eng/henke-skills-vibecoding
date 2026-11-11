@@ -168,7 +168,7 @@ class TestIterTreeJunctionSwap(unittest.TestCase):
             # Troca o diretório real por junction ANTES do iter_tree pop —
             # mesmo efeito do swap entre stat e scandir.
             (repo / "queued").rmdir()
-            subprocess.run(
+            subprocess.run(  # hazard-ok: SHELL-INJECTION — mklink /J é a única via de junction no Windows; argv fixo, sem shell=True
                 ["cmd", "/c", "mklink", "/J",
                  str(repo / "queued"), str(outside)],
                 check=True, capture_output=True)
