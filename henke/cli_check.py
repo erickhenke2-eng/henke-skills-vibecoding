@@ -369,7 +369,7 @@ def _cmd_check(
                             ["git", "ls-tree", "-rz", "--name-only", tree],
                             cwd=str(repo_root), capture_output=True,
                             text=True, env=_wt_env)
-                        listed = (set(p for p in lt_res.stdout.split("\\0") if p)
+                        listed = (set(p for p in lt_res.stdout.split("\0") if p)
                                   if lt_res.returncode == 0 else set())
                         missing = sorted(p for p in listed
                                          if p + "/" not in extracted
