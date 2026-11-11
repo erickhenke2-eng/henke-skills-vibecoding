@@ -27,7 +27,8 @@ def _entry(prev: str, passed: int, entry_hash: str) -> dict:
 def _pipe(prev: str, rec: dict) -> str:
     return hashlib.sha256(
         f"{prev}|{rec['cmd']}|{rec['exit']}|{rec['testes_descobertos']}|"
-        f"{rec['testes_passados']}|{rec['stdout_sha256']}".encode()).hexdigest()
+        f"{rec['testes_passados']}|{rec['stdout_sha256']}|"
+        f"{rec['evidence_reason']}".encode()).hexdigest()
 
 
 class TestPassedTamper(unittest.TestCase):
@@ -59,6 +60,13 @@ class TestPassedTamper(unittest.TestCase):
             any("entry_hash adulterado" in e
                 for e in self._chain_errors([rec_bad])),
             "edição de passed sobreviveu com entry_hash válido")
+
+        rec_bad2 = dict(rec, evidence_reason="forged_ok")
+        rec_bad2["entry_hash"] = rec["entry_hash"]
+        self.assertTrue(
+            any("entry_hash adulterado" in e
+                for e in self._chain_errors([rec_bad2])),
+            "edição de evidence_reason sobreviveu com entry_hash válido")
 
     def test_ledger_edit_passed_fails_crosscheck(self):
         prev = "0" * 64

@@ -459,8 +459,9 @@ def _verify_log_chain_core(raw_lines: list[str], log_p: Path) -> tuple[list[str]
         # o pipe legado não os hasheava e uma edição de 'passed' sobrevivia
         # com cadeia válida. Legado só aceita registro SEM esses campos.
         passed_r = rec.get("testes_passados")
+        reason_r = rec.get("evidence_reason")
         cand_pipe_v2 = hashlib.sha256(
-            f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{passed_r}|{sha_r}".encode("utf-8")
+            f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{passed_r}|{sha_r}|{reason_r}".encode("utf-8")
         ).hexdigest()
         body_no_ehash = {k: v for k, v in rec.items() if k != "entry_hash"}
         cand_json1 = hashlib.sha256(
