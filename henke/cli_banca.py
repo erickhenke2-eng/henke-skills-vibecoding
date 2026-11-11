@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -50,10 +51,26 @@ _FRONTS = {
 }
 
 
-def _run_gate(script: Path, args: list[str], out_file: Path | None) -> int:
-    res = subprocess.run(
-        [sys.executable, "-Es", str(script), *args],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+def _gate_env(repo: Path):
+    # +revisão cega: subprocessos do dossier herdam env cru — usa o
+    # sanitizador canônico como os outros portões.
+    try:
+        from henke.state_paths import sanitized_child_env
+        return sanitized_child_env(repo)
+    except Exception:
+        return None
+
+
+def _run_gate(script: Path, args: list[str], out_file: Path | None,
+              repo: Path) -> int:
+    try:
+        res = subprocess.run(
+            [sys.executable, "-Es", str(script), *args],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=600, env=_gate_env(repo))
+    except subprocess.TimeoutExpired:
+        print(f"ERRO: portão '{script.name}' excedeu 600s.", file=sys.stderr)
+        return 2
     text = res.stdout + res.stderr
     if out_file is not None:
         out_file.write_text(text, encoding="utf-8")
@@ -67,18 +84,26 @@ def _cmd_dossier(repo: Path, out_dir: Path) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     rc_metrics = _run_gate(
         _PKG / "repo_signals.py", ["metrics", "--root", str(repo)],
-        out_dir / "metrics.tsv")
+        out_dir / "metrics.tsv", repo)
     _run_gate(_METRICAS / "hazard_scan.py", [str(repo)],
-              out_dir / "hazards.txt")
-    log = subprocess.run(
-        ["git", "-C", str(repo), "log", "--oneline", "-20"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
-    (out_dir / "gitlog.txt").write_text(
-        log.stdout or "(sem histórico git)", encoding="utf-8")
+              out_dir / "hazards.txt", repo)
+    # +revisão cega: git log com a mesma higiene dos portões (fsmonitor/
+    # diff.external/attr-file/lfs off, env sanitizado, timeout).
+    try:
+        log = subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "-c", "core.attributesFile=" + os.devnull,
+             "-C", str(repo), "log", "--oneline", "-20"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=30, env=_gate_env(repo))
+        log_text = log.stdout or "(sem histórico git)"
+    except (subprocess.TimeoutExpired, OSError):
+        log_text = "(git log indisponível)"
+    (out_dir / "gitlog.txt").write_text(log_text, encoding="utf-8")
     _run_gate(
         _METRICAS / "coverage_ledger.py",
         ["init", "--root", str(repo), "--out", str(out_dir / "ledger.json")],
-        None)
+        None, repo)
     print(json.dumps({
         "dossier": str(out_dir), "repo": str(repo),
         "artifacts": sorted(p.name for p in out_dir.iterdir()),
@@ -130,8 +155,18 @@ def _cmd_consolidate(ledger_path: Path, critic_passes: list[str],
         print("ERRO: --critic <nome> obrigatório (>=1 passe adversarial).",
               file=sys.stderr)
         return 2
-    data = json.loads(ledger_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"ERRO: ledger malformado ({exc}).", file=sys.stderr)
+        return 2
+    if not isinstance(data, dict):
+        print("ERRO: ledger não é objeto JSON.", file=sys.stderr)
+        return 2
     passes = data.setdefault("critic_passes", [])
+    if not isinstance(passes, list):
+        print("ERRO: 'critic_passes' no ledger não é lista.", file=sys.stderr)
+        return 2
     for name in critic_passes:
         passes.append({"agent": name, "round": "cross-exam",
                        "scope": "banca adversarial"})

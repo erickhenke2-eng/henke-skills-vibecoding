@@ -60,7 +60,7 @@ _SCOPE_HEAD_RE = re.compile(
     # passavam como escopo autorizado.
     r"(?m)^## 4\.\s+(?![^\n]*\b(?:fora|non-|not\s|out\s+of|exclu|proibid|"
     r"n[aã]o|negad|forbid|denied|restrit|unauthor|off.?\s?limit|vedad|"
-    r"forbid|barrad|impedid))Escopo\b[^\n]*?\n"
+    r"barrad|impedid))Escopo\b[^\n]*?\n"
     r"(.*?)(?=\n#{1,6} |\Z)", flags=re.S)
 
 
@@ -203,11 +203,18 @@ def get_touched_files(git_root: Path, against: str | None = None, active_spec: P
     if against:
         if against.startswith("-"):
             raise ValueError(f"ref '--against' inválida (parece flag): {against!r}")
-        vres = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"{against}^{{commit}}"],
-            cwd=str(git_root), capture_output=True, timeout=30,
-            env=_GIT_ENV_F(git_root),
-        )
+        # +revisão cega: TimeoutExpired vazava traceback exit 1 (veredito
+        # vermelho) — mesma classe F36 v11 do _git_paths_z. RuntimeError→2.
+        try:
+            vres = subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet",
+                 f"{against}^{{commit}}"],
+                cwd=str(git_root), capture_output=True, timeout=30,
+                env=_GIT_ENV_F(git_root),
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise RuntimeError(
+                f"git rev-parse falhou ({type(exc).__name__})") from exc
         if vres.returncode != 0:
             raise ValueError(f"ref '--against' não resolve para commit: {against!r}")
 

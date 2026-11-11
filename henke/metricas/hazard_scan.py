@@ -148,10 +148,12 @@ _SQL_INTERP_PY_RE = re.compile(
     # abertura (`"..."` segue sempre char não-word) — %s-era inalcançável.
     # Três formas explícitas: f-string com {...}, str.format, e interpolação
     # %"..."%arg — a canônica SQLi `"...%s" % uid` agora casa.
+    # +revisão cega: `[^'"]*` antes do `\{` barrava a aspa interna —
+    # `WHERE n='{x}'` (canônico A1-v16) evadia. `[^"]*` tolera ' no conteúdo.
     r"""(?ix)(?:
-         \bf['"]{1,3}[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*\{[^}]+\}
-       | ['"]{1,3}[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*['"]{1,3}\s*\.format\s*\(
-       | ['"]{1,3}[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*%[sd][^'"]*['"]{1,3}\s*%\s*[\w(]
+         \bf['"]{1,3}[^"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^"]*\{[^}]+\}
+       | ['"]{1,3}[^"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^"]*['"]{1,3}\s*\.format\s*\(
+       | ['"]{1,3}[^"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^"]*%[sd][^'"]*['"]{1,3}\s*%\s*[\w(]
        )""",
 )
 _SQL_INTERP_JS_RE = re.compile(

@@ -117,9 +117,13 @@ def append_event(repo_root: Path | str, kind: str,
 
     from henke.run_state import _file_lock
     with _file_lock(path):
-        # BANCA-B4: append não pode estender cadeia corrompida — verificar
-        # integridade+âncora ANTES de continuar (extensão "lavava" reescrita).
-        if path.is_file() and path.stat().st_size > 0:
+        # BANCA-B4 (+revisão cega): append não pode estender cadeia corrompida.
+        # O gate anterior só verificava arquivo existente-não-vazio — deletar/
+        # zerar o log com âncora viva lavava a reescrita. Verifica SEMPRE que
+        # âncora existe ou o log tem conteúdo.
+        _has_tip = load_tip(repo) is not None
+        _has_log = path.is_file() and path.stat().st_size > 0
+        if _has_tip or _has_log:
             _pre_errors = verify(repo)
             if _pre_errors:
                 raise ValueError(
@@ -180,11 +184,11 @@ def verify(repo_root: Path | str) -> list[str]:
         prev = str(ev["entry_hash"])
         last_hash = str(ev["entry_hash"])
     tip = load_tip(repo)
-    if tip is not None and last_hash != tip:
+    if tip is not None and last_hash is None:
+        errors.append("âncora existe mas log está vazio — log apagado")
+    elif tip is not None and last_hash != tip:
         errors.append(
             "âncora de ponta diverge do log — reescrita/truncamento de rabo")
-    elif tip is not None and last_hash is None:
-        errors.append("âncora existe mas log está vazio — log apagado")
     elif tip is None and last_hash is not None:
         # BANCA-B4: log com eventos mas sem âncora — âncora apagada permite
         # reescrever o histórico inteiro como cadeia auto-consistente.

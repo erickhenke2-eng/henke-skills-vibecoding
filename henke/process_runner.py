@@ -87,6 +87,10 @@ def run_process(
             Path(cwd) if cwd is not None else None)
     child_env.setdefault("PYTHONUTF8", "1")
     child_env.setdefault("PYTHONIOENCODING", "utf-8")
+    # +revisão cega: which-miss deixava CreateProcess buscar no CWD (=repo)
+    # — binário plantado `foo.exe` no worktree executava. Mesma trava do
+    # cli_exec (F-07 v8): proíbe current-dir na resolução.
+    child_env.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
 
     # Resolução de binário e comandos internos no Windows (sem shell=True).
     # Delta-F9: `which` usava o PATH do PAI (os.environ) — um binário

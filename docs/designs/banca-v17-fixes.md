@@ -50,7 +50,6 @@ orquestra as fases mecânicas do Protocolo Goldfish Todos-contra-Todos
 - `tests/test_isoboot_guard.py`
 - `.github/workflows/ci.yml`
 - `docs/designs/banca-v17-fixes.md`
-- `docs/designs/auditoria-fixes-2025.md`
 
 ## 5. Pontes de Contrato
 

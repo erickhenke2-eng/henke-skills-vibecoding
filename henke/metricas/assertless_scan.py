@@ -780,6 +780,13 @@ def _dead_assert_ids(stmts):
     def _false_const(t):
         if isinstance(t, ast.Constant):
             return not bool(t.value)
+        # +revisão cega: TYPE_CHECKING é False em runtime — bloco só existe
+        # pro type-checker; assert dentro nunca executa.
+        if isinstance(t, ast.Name) and t.id == "TYPE_CHECKING":
+            return True
+        if (isinstance(t, ast.Attribute) and t.attr == "TYPE_CHECKING"
+                and isinstance(t.value, ast.Name) and t.value.id == "typing"):
+            return True
         if (isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not)
                 and isinstance(t.operand, ast.Constant)):
             return bool(t.operand.value)
@@ -810,7 +817,9 @@ def _dead_assert_ids(stmts):
         if isinstance(s, ast.Expr) and isinstance(s.value, ast.Call):
             f = s.value.func
             attr = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
-            return attr in ("skip", "skipTest", "xfail", "skipif")
+            # +revisão cega: pytest.fail()/sys.exit() também terminam o bloco.
+            return attr in ("skip", "skipTest", "xfail", "skipif",
+                            "fail", "exit")
         return False
 
     def _mark_dead(block):
@@ -846,6 +855,9 @@ def _dead_assert_ids(stmts):
                     _walk(getattr(s, field, []) or [])
                 for h in getattr(s, "handlers", []) or []:
                     _walk(h.body)
+                # +revisão cega: match-statement guarda corpos em `cases`.
+                for c in getattr(s, "cases", []) or []:
+                    _walk(c.body)
             if _terminating(s):
                 terminated = True
 

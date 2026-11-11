@@ -101,19 +101,26 @@ def _cmd_exec(
             # resolvia contra cwd=repo_root e executava o binário plantado,
             # ainda logado como comando auditado. Caminho explícito (ou
             # absoluto) para dentro do repo é recusado em toda plataforma.
-            _tok = Path(exec_tokens[0])
-            _cand = _tok if _tok.is_absolute() else (
-                (_rr / _tok) if _rr is not None else _tok)
-            try:
-                _cr = _cand.resolve()
-                if _rr is not None and (_cr == _rr or _rr in _cr.parents):
-                    print(
-                        f"ERRO: '{exec_tokens[0]}' resolve para caminho dentro "
-                        f"do repo ({_cr}) — recusado (repo-resident exec).",
-                        file=sys.stderr)
-                    return 2
-            except OSError:
-                pass
+            # +revisão cega: bare-name (`pytest` ausente) não é caminho —
+            # só checa tokens com separador/ponto (fail-open do diagnóstico).
+            _tok_s = exec_tokens[0]
+            if (os.sep in _tok_s or "/" in _tok_s
+                    or _tok_s.startswith(".") or Path(_tok_s).is_absolute()):
+                _tok = Path(_tok_s)
+                _cand = _tok if _tok.is_absolute() else (
+                    (_rr / _tok) if _rr is not None else _tok)
+                try:
+                    _cr = _cand.resolve()
+                    if (_cr.exists() and _rr is not None
+                            and (_cr == _rr or _rr in _cr.parents)):
+                        print(
+                            f"ERRO: '{exec_tokens[0]}' resolve para caminho "
+                            f"dentro do repo ({_cr}) — recusado "
+                            "(repo-resident exec).",
+                            file=sys.stderr)
+                        return 2
+                except OSError:
+                    pass
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
     # F-07 (banca v8): CWD poisoning — binário plantado no worktree não pode
