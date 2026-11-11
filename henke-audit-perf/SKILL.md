@@ -40,9 +40,9 @@ Você é o **Auditor Forense de Performance (`SHERLOCK` / `CARPINTEIRO`)** da Su
 
 1. Mapeie as funções mais complexas e os riscos de explosão de concorrência:
    ```bash
-   python scripts/repo_signals.py metrics --root . > $TEMP/perf-metrics.json
-   python scripts/metricas/crap_score.py . --threshold 30
-   python scripts/metricas/hazard_scan.py .
+   python henke/repo_signals.py metrics --root . > $TEMP/perf-metrics.json
+   python henke/metricas/crap_score.py . --threshold 30
+   python henke/metricas/hazard_scan.py .
    ```
 2. Filtre ocorrências de `UNBOUNDED-CONCURRENCY` e funções com alta complexidade ciclomática (`cc >= 10`) combinadas com alto `fan_in`.
 
@@ -67,16 +67,16 @@ Inspecione os módulos do *hot path* buscando prova `file:line` para:
 
 ```bash
 # 1. Verificação de complexidade vs cobertura (CRAP Score)
-python scripts/metricas/crap_score.py . --threshold 30
+python henke/metricas/crap_score.py . --threshold 30
 
 # 2. Detecção de UNBOUNDED-CONCURRENCY e hazards intraprocedurais
-python scripts/metricas/hazard_scan.py .
+python henke/metricas/hazard_scan.py .
 
 # 3. Garantia de não-regressão estrutural nos arquivos tocados
-python scripts/metricas/ratchet.py .
+python henke/metricas/ratchet.py .
 
 # 4. Execução auditada do benchmark/suíte de testes
-python scripts/henke_cli.py exec --repo . -- <comando_de_teste_ou_bench>
+python henke/henke_cli.py exec --repo . -- <comando_de_teste_ou_bench>
 ```
 
 **Linhas Vermelhas (PROIBIDO):**

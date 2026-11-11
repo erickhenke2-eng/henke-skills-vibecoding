@@ -26,8 +26,8 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.henke_cli import main as henke_cli_main
-from scripts.install_hook import (
+from henke.henke_cli import main as henke_cli_main
+from henke.install_hook import (
     HENKE_HOOK_MARKER,
     HOOK_SCRIPT_TEMPLATE,
     discover_hooks_dir,
@@ -322,14 +322,14 @@ class TestWave7HookFlags(unittest.TestCase):
     """Bilateral: staged parcial e ausência de atalhos de watch (Wave 7)."""
 
     def test_hook_always_staged_no_cache_full(self):
-        from scripts.install_hook import get_hook_template, HENKE_HOOK_MARKER
+        from henke.install_hook import get_hook_template, HENKE_HOOK_MARKER
         from pathlib import Path as _P
-        tpl = get_hook_template(_P("scripts/henke_cli.py"), _P(sys.executable))
+        tpl = get_hook_template(_P("henke/henke_cli.py"), _P(sys.executable))
         self.assertIn("--staged --no-cache --full", tpl)
         self.assertIn(HENKE_HOOK_MARKER, tpl)
         self.assertNotIn("henke watch", tpl.lower())
         self.assertNotIn("henke_cli.py\" watch", tpl.lower())
 
     def test_static_template_strict(self):
-        from scripts.install_hook import HOOK_SCRIPT_TEMPLATE
+        from henke.install_hook import HOOK_SCRIPT_TEMPLATE
         self.assertIn("--staged --no-cache --full", HOOK_SCRIPT_TEMPLATE)

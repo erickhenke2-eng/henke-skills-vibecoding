@@ -1,4 +1,4 @@
-"""Testes do portão mecânico de custódia (scripts/henke_gate.py).
+"""Testes do portão mecânico de custódia (henke/henke_gate.py).
 
 Cobre o caminho permitido (baseline do usuário preservado + mutações só no
 escopo) e o proibido (mutação inexplicada, commit não autorizado, histórico
@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("henke_gate", ROOT / "scripts" / "henke_gate.py")
+spec = importlib.util.spec_from_file_location("henke_gate", ROOT / "henke" / "henke_gate.py")
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
@@ -50,31 +50,31 @@ class GateTests(unittest.TestCase):
     def test_clean_task_within_scope_approved(self):
         """Caminho permitido: baseline limpo + arquivos novos dentro do escopo."""
         baseline = gate.capture_baseline(self.repo)
-        (self.repo / "scripts").mkdir()
-        (self.repo / "scripts" / "novo.py").write_text("x = 1\n")
+        (self.repo / "henke").mkdir()
+        (self.repo / "henke" / "novo.py").write_text("x = 1\n")
         (self.repo / "main.py").write_text("print(2)\n")
-        violations, _ = gate.check_baseline(baseline, self.repo, ["scripts/*", "main.py"], False)
+        violations, _ = gate.check_baseline(baseline, self.repo, ["henke/*", "main.py"], False)
         self.assertEqual(violations, [])
 
     def test_mutation_outside_scope_blocked(self):
         baseline = gate.capture_baseline(self.repo)
         (self.repo / "main.py").write_text("print(2)\n")
-        violations, _ = gate.check_baseline(baseline, self.repo, ["scripts/*"], False)
+        violations, _ = gate.check_baseline(baseline, self.repo, ["henke/*"], False)
         self.assertTrue(any("fora do escopo" in v for v in violations), violations)
 
     def test_untracked_outside_scope_blocked(self):
         baseline = gate.capture_baseline(self.repo)
         (self.repo / "stray.txt").write_text("x")
-        violations, _ = gate.check_baseline(baseline, self.repo, ["scripts/*"], False)
+        violations, _ = gate.check_baseline(baseline, self.repo, ["henke/*"], False)
         self.assertTrue(any("stray.txt" in v for v in violations), violations)
 
     def test_preexisting_dirt_preserved_passes(self):
         (self.repo / "main.py").write_text("print(2)\n")  # sujeira do usuário
         (self.repo / "draft.md").write_text("rascunho\n")  # untracked do usuário
         baseline = gate.capture_baseline(self.repo)
-        (self.repo / "scripts").mkdir()
-        (self.repo / "scripts" / "novo.py").write_text("x = 1\n")
-        violations, _ = gate.check_baseline(baseline, self.repo, ["scripts/*"], False)
+        (self.repo / "henke").mkdir()
+        (self.repo / "henke" / "novo.py").write_text("x = 1\n")
+        violations, _ = gate.check_baseline(baseline, self.repo, ["henke/*"], False)
         self.assertEqual(violations, [])
 
     def test_user_dirt_modified_by_task_blocked(self):
@@ -148,7 +148,7 @@ class GateTests(unittest.TestCase):
     def test_cli_exit_codes(self):
         """--help sai 2 (portão sem veredito nunca é verde — banca v10 A1);
         baseline+check via CLI retornam 0/1 nos caminhos certos."""
-        script = ROOT / "scripts" / "henke_gate.py"
+        script = ROOT / "henke" / "henke_gate.py"
         help_res = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(help_res.returncode, 2)
         self.assertIn("usage:", (help_res.stdout or "") + (help_res.stderr or ""))
@@ -158,16 +158,16 @@ class GateTests(unittest.TestCase):
             cwd=self.repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         self.assertEqual(res.returncode, 0, res.stderr)
-        (self.repo / "scripts").mkdir()
-        (self.repo / "scripts" / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        (self.repo / "henke").mkdir()
+        (self.repo / "henke" / "ok.py").write_text("x = 1\n", encoding="utf-8")
         ok = subprocess.run(
-            [sys.executable, str(script), "check", "--baseline", str(out), "--scope", "scripts/*"],
+            [sys.executable, str(script), "check", "--baseline", str(out), "--scope", "henke/*"],
             cwd=self.repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         self.assertEqual(ok.returncode, 0, (ok.stdout or "") + (ok.stderr or ""))
         (self.repo / "violacao.txt").write_text("fora\n", encoding="utf-8")
         bad = subprocess.run(
-            [sys.executable, str(script), "check", "--baseline", str(out), "--scope", "scripts/*"],
+            [sys.executable, str(script), "check", "--baseline", str(out), "--scope", "henke/*"],
             cwd=self.repo, capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         self.assertEqual(bad.returncode, 1, (bad.stdout or "") + (bad.stderr or ""))

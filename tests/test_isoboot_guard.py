@@ -1,4 +1,4 @@
-"""Guarda de isolamento (scripts/_isoboot.py) — cobertura adversarial.
+"""Guarda de isolamento (henke/_isoboot.py) — cobertura adversarial.
 
 Critério de aceite da auditoria (item 1): nenhum `check`/`exec` em repo
 hostil retorna 0 — cobre sentinel de ambiente, sitecustomize, usercustomize,
@@ -20,9 +20,9 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts import _isoboot  # noqa: E402
+from henke import _isoboot  # noqa: E402
 
-ENTRYPOINT_DIRS = (SUITE_ROOT / "scripts", SUITE_ROOT / "scripts" / "metricas")
+ENTRYPOINT_DIRS = (SUITE_ROOT / "henke", SUITE_ROOT / "henke" / "metricas")
 
 
 def _entrypoint_files() -> list[Path]:
@@ -94,7 +94,7 @@ class TestIsolatedRuntimeCheck(unittest.TestCase):
     def test_es_child_isolated(self):
         code = (
             "import sys; sys.path.insert(0, r'%s'); "
-            "from scripts import _isoboot; "
+            "from henke import _isoboot; "
             "print('ISO' if _isoboot.isolated_runtime() else 'PLAIN')"
         ) % str(SUITE_ROOT).replace("\\", "\\\\")
         res = subprocess.run([sys.executable, "-Es", "-c", code],
@@ -104,7 +104,7 @@ class TestIsolatedRuntimeCheck(unittest.TestCase):
     def test_I_child_isolated(self):
         code = (
             "import sys; sys.path.insert(0, r'%s'); "
-            "from scripts import _isoboot; "
+            "from henke import _isoboot; "
             "print('ISO' if _isoboot.isolated_runtime() else 'PLAIN')"
         ) % str(SUITE_ROOT).replace("\\", "\\\\")
         res = subprocess.run([sys.executable, "-I", "-c", code],
@@ -129,7 +129,7 @@ class TestAdversarialRespawn(unittest.TestCase):
         (evil / "sitecustomize.py").write_text(
             sitecustomize_body
             or (
-                "import scripts.metricas.scan_manifest as _m\n"
+                "import henke.metricas.scan_manifest as _m\n"
                 "class _R:\n"
                 "    exit_code = 0\n    full_scan = True\n    scanned_files = ()\n"
                 "    reused_files = ()\n    invalidated_files = ()\n    reasons = ()\n"
@@ -143,7 +143,7 @@ class TestAdversarialRespawn(unittest.TestCase):
         env = os.environ.copy()
         env.update(extra_env or {})
         cmd = argv0 or [sys.executable,
-                        str(SUITE_ROOT / "scripts" / "henke_cli.py"),
+                        str(SUITE_ROOT / "henke" / "henke_cli.py"),
                         "check", "--repo", str(repo), "--no-cache"]
         return subprocess.run(cmd, capture_output=True, text=True, env=env,
                               timeout=240)
@@ -220,7 +220,7 @@ class TestAdversarialRespawn(unittest.TestCase):
             usite = ubase / ("Python%s%s" % sys.version_info[:2]) / "site-packages"
             usite.mkdir(parents=True)
             (usite / "usercustomize.py").write_text(
-                "import scripts.metricas.scan_manifest as _m\n"
+                "import henke.metricas.scan_manifest as _m\n"
                 "class _R:\n"
                 "    exit_code = 0\n    full_scan = True\n    scanned_files = ()\n"
                 "    reused_files = ()\n    invalidated_files = ()\n    reasons = ()\n"
@@ -273,7 +273,7 @@ class TestAdversarialRespawn(unittest.TestCase):
                 "PYTHONPATH": str(evil) + os.pathsep + str(SUITE_ROOT),
                 "HENKE_ISOLATED": "1",
             }
-            script = str(SUITE_ROOT / "scripts" / "henke_cli.py")
+            script = str(SUITE_ROOT / "henke" / "henke_cli.py")
             if os.name == "nt":
                 argv0 = ["cmd", "/c", sys.executable, script, "check",
                          "--repo", str(repo), "--no-cache"]

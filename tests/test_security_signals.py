@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "henke"))
 
 import henke_auto  # noqa: E402
 import henke_router  # noqa: E402
@@ -15,7 +15,7 @@ import security_signals  # noqa: E402
 
 
 class TestSingleSourceOfTruth(unittest.TestCase):
-    # NB: import dual (scripts.X vs X) cria dois objetos-módulo iguais —
+    # NB: import dual (henke.X vs X) cria dois objetos-módulo iguais —
     # provamos identidade semântica (igualdade + __module__), não `is`.
     def test_router_uses_shared_module(self):
         self.assertEqual(tuple(henke_router.DESTRUCTIVE_SIGNALS),

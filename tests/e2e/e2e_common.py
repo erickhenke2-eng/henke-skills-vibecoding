@@ -18,28 +18,8 @@ import time
 from typing import Any, Optional
 
 SUITE_ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS_DIR = SUITE_ROOT / "scripts"
+SCRIPTS_DIR = SUITE_ROOT / "henke"
 CLI_PATH = SCRIPTS_DIR / "henke_cli.py"
-
-# Feature availability checks
-HAS_MISSION_CLASSIFIER = (SCRIPTS_DIR / "mission_classifier.py").is_file()
-HAS_PROCESS_RUNNER = (SCRIPTS_DIR / "process_runner.py").is_file()
-HAS_INSTALL_HOOK = (SCRIPTS_DIR / "install_hook.py").is_file()
-HAS_GATE_CACHE = (SCRIPTS_DIR / "gate_cache.py").is_file()
-HAS_REPORT_GENERATOR = (SCRIPTS_DIR / "report_generator.py").is_file()
-
-
-def is_cli_subcmd_available(subcmd: str) -> bool:
-    """Checks whether the CLI supports a given subcommand."""
-    try:
-        content = CLI_PATH.read_text(encoding="utf-8", errors="replace")
-        return f'add_parser("{subcmd}"' in content or f"add_parser('{subcmd}'" in content
-    except Exception:
-        return False
-
-
-CLI_HAS_INSTALL_HOOK = is_cli_subcmd_available("install-hook")
-CLI_HAS_REPORT = is_cli_subcmd_available("report")
 
 
 def load_module_from_path(module_name: str, path: Path):

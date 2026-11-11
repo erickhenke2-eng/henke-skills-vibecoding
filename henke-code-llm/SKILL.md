@@ -66,16 +66,16 @@ Você é o **Engenheiro de Sistemas LLM & Guardrails (`CARPINTEIRO`)** da Suíte
 
 ```bash
 # 1. Varredura de segredos hardcoded (API keys), concorrência sem semáforo e XSS
-python scripts/metricas/hazard_scan.py .
+python henke/metricas/hazard_scan.py .
 
 # 2. Verificação de fechamento bilateral do schema/contrato
-python scripts/metricas/contract_closure.py --repo . --spec docs/designs/<feature>.md --require-touched
+python henke/metricas/contract_closure.py --repo . --spec docs/designs/<feature>.md --require-touched
 
 # 3. Verificação contra testes teatrais sem asserção real
-python scripts/metricas/assertless_scan.py tests
+python henke/metricas/assertless_scan.py tests
 
 # 4. Execução auditada dos testes determinísticos
-python scripts/henke_cli.py exec --repo . -- <cmd_teste>
+python henke/henke_cli.py exec --repo . -- <cmd_teste>
 ```
 
 **Linhas Vermelhas (PROIBIDO):**

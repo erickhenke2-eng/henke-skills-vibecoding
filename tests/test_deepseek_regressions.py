@@ -21,9 +21,9 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.audit_ledger import is_test_cmd
-from scripts.henke_auto import _child_env, _tracked_dirty_snapshot
-from scripts.henke_clean import (
+from henke.audit_ledger import is_test_cmd
+from henke.henke_auto import _child_env, _tracked_dirty_snapshot
+from henke.henke_clean import (
     CleanCandidate,
     _tree_sha256,
     _tree_size,
@@ -31,8 +31,8 @@ from scripts.henke_clean import (
     purge_expired_batch,
     quarantine,
 )
-from scripts.run_state import _git_ignored_hashes
-from scripts.test_impact import select_tests
+from henke.run_state import _git_ignored_hashes
+from henke.test_impact import select_tests
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -199,7 +199,7 @@ class TestPurgeRefusesUnverified(unittest.TestCase):
             manifest["items"][0]["verified"] = False
             # re-assina para exercitar o caminho verified=False (e não o
             # bloqueio de manifesto adulterado, coberto em test_henke_clean)
-            from scripts.henke_clean import _manifest_hmac
+            from henke.henke_clean import _manifest_hmac
             manifest["hmac"] = _manifest_hmac(repo, manifest)
             mpath.write_text(json.dumps(manifest), encoding="utf-8")
             future = datetime.now(timezone.utc) + timedelta(days=8)
@@ -221,7 +221,7 @@ class TestStagedSnapshotRealIndex(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if not k.startswith("GIT_")}
         return subprocess.run(
-            [sys.executable, str(SUITE_ROOT / "scripts" / "henke_cli.py"),
+            [sys.executable, str(SUITE_ROOT / "henke" / "henke_cli.py"),
              "check", "--repo", str(repo), "--staged", "--jobs", "1"],
             capture_output=True, text=True, env=env, timeout=180)
 
@@ -261,7 +261,7 @@ class TestSanitizedChildEnvPath(unittest.TestCase):
     """Delta-F4/F5: filtro de PATH do helper canônico remove dirs do repo."""
 
     def test_path_inside_repo_removed(self):
-        from scripts.state_paths import sanitized_child_env
+        from henke.state_paths import sanitized_child_env
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td).resolve()
             planted = repo / "bin"
@@ -281,7 +281,7 @@ class TestBaseFlagInjection(unittest.TestCase):
     """Delta já cobria: --base que começa com '-' nunca chega ao argv do git."""
 
     def test_flag_like_base_rejected(self):
-        from scripts.test_impact import GitDiscoveryError
+        from henke.test_impact import GitDiscoveryError
         with tempfile.TemporaryDirectory() as td:
             repo = Path(td)
             _init_repo(repo)
@@ -347,7 +347,7 @@ class TestSitecustomizeHijack(unittest.TestCase):
             # função in-place — __file__ continua legítimo, então a checagem
             # de caminho não pega; só o respawn -I resolve.
             (evil / "sitecustomize.py").write_text(
-                "import scripts.metricas.scan_manifest as _m\n"
+                "import henke.metricas.scan_manifest as _m\n"
                 "class _R:\n"
                 "    exit_code = 0\n"
                 "    full_scan = True\n"
@@ -365,7 +365,7 @@ class TestSitecustomizeHijack(unittest.TestCase):
             env["PYTHONPATH"] = str(evil) + os.pathsep + str(SUITE_ROOT)
             res = subprocess.run(
                 [sys.executable,
-                 str(SUITE_ROOT / "scripts" / "henke_cli.py"),
+                 str(SUITE_ROOT / "henke" / "henke_cli.py"),
                  "check", "--repo", str(repo), "--no-cache"],
                 capture_output=True, text=True, env=env, timeout=180)
             self.assertNotEqual(
@@ -383,7 +383,7 @@ class TestSitecustomizeHijack(unittest.TestCase):
             (evil / "sitecustomize.py").write_text(
                 "import os\n"
                 "os.environ['HENKE_ISOLATED'] = '1'\n"
-                "import scripts.metricas.scan_manifest as _m\n"
+                "import henke.metricas.scan_manifest as _m\n"
                 "class _R:\n"
                 "    exit_code = 0\n"
                 "    full_scan = True\n"
@@ -402,7 +402,7 @@ class TestSitecustomizeHijack(unittest.TestCase):
             env["HENKE_ISOLATED"] = "1"  # variante por env direto também
             res = subprocess.run(
                 [sys.executable,
-                 str(SUITE_ROOT / "scripts" / "henke_cli.py"),
+                 str(SUITE_ROOT / "henke" / "henke_cli.py"),
                  "check", "--repo", str(repo), "--no-cache"],
                 capture_output=True, text=True, env=env, timeout=180)
             self.assertNotEqual(
@@ -415,7 +415,7 @@ class TestRouterDestructiveParaphrase(unittest.TestCase):
     """PT-10: paráfrases destrutivas exigem EXECUTAR + human_auth + matriz."""
 
     def test_destructive_variants_locked(self):
-        from scripts.henke_router import route_request
+        from henke.henke_router import route_request
         for p in ("faz reset no branch main para o commit abc1234",
                   "empurra com force para o main",
                   "git checkout HEAD~1 -- .",
@@ -504,7 +504,7 @@ class TestInstallHookHooksPathEscape(unittest.TestCase):
             repo.mkdir()
             _init_repo(repo)
             _git(repo, "config", "core.hooksPath", "../hooks_fora")
-            from scripts.install_hook import install_hook
+            from henke.install_hook import install_hook
             ok, msg = install_hook(repo)
             self.assertFalse(ok, "hooksPath fora do repo deve ser recusado")
             self.assertFalse((Path(td) / "hooks_fora").exists(),
@@ -528,7 +528,7 @@ class TestYamlHashInsideString(unittest.TestCase):
                 encoding="utf-8")
             res = subprocess.run(
                 [sys.executable,
-                 str(SUITE_ROOT / "scripts" / "metricas" / "hazard_scan.py"),
+                 str(SUITE_ROOT / "henke" / "metricas" / "hazard_scan.py"),
                  str(wf / "ci.yml")],
                 capture_output=True, text=True)
             self.assertEqual(res.returncode, 1,
@@ -542,7 +542,7 @@ class TestHazardOkReason(unittest.TestCase):
     def _run(self, target: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable,
-             str(SUITE_ROOT / "scripts" / "metricas" / "hazard_scan.py"),
+             str(SUITE_ROOT / "henke" / "metricas" / "hazard_scan.py"),
              str(target)],
             capture_output=True, text=True)
 

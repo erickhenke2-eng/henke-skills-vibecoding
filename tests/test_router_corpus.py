@@ -26,7 +26,7 @@ repo_root = Path(__file__).resolve().parents[1]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from scripts.henke_router import route_request
+from henke.henke_router import route_request
 
 CORPUS = repo_root / "evals" / "router_corpus.jsonl"
 MIN_TOP1_RATIO = 0.85

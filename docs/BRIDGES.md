@@ -6,7 +6,7 @@ Este documento especifica a arquitetura do **Classificador de Missão e Pontes M
 
 ## 1. Visão Geral da Arquitetura
 
-O Classificador de Missão (`scripts/mission_classifier.py`) atua como a primeira camada de inteligência do Henke Toolkit ao inspecionar um repositório. Em vez de rodar portões de forma estática e cega (o que geraria falsos-positivos ou desperdício de tempo em repositórios heterogêneos), o classificador:
+O Classificador de Missão (`henke/mission_classifier.py`) atua como a primeira camada de inteligência do Henke Toolkit ao inspecionar um repositório. Em vez de rodar portões de forma estática e cega (o que geraria falsos-positivos ou desperdício de tempo em repositórios heterogêneos), o classificador:
 
 1. **Varre Heuristicamente o Repositório**: Detecta linguagens, frameworks e ferramentas de build através de manifestos canônicos, extensões de arquivo e padrões de projeto, podando diretórios de build e dependências (`node_modules`, `target`, `dist`, `.venv`, `.git`).
 2. **Cruza com a Configuração do Projeto (`.henke/CONFIG.json`)**: Identifica quais stacks estão ativas/habilitadas e quais são stacks recém-introduzidas ainda não configuradas.
@@ -180,7 +180,7 @@ O classificador expõe contratos formais limpos para integração em outras ferr
 
 ```python
 from pathlib import Path
-from scripts.mission_classifier import (
+from henke.mission_classifier import (
     detect_stacks,
     classify_repository,
     filter_gates_for_stacks,
@@ -212,11 +212,11 @@ Você pode inspecionar diretamente a classificação do seu projeto através do 
 
 ```bash
 # Diagnóstico amigável
-python scripts/mission_classifier.py --repo .
+python henke/mission_classifier.py --repo .
 
 # Diagnóstico em formato JSON estruturado
-python scripts/mission_classifier.py --repo . --json
+python henke/mission_classifier.py --repo . --json
 
 # Diagnóstico integrado na CLI Henke
-python scripts/henke_cli.py doctor --repo . --json
+python henke/henke_cli.py doctor --repo . --json
 ```

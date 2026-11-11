@@ -115,17 +115,17 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos [MECÂNICO] — poliglotas (py/ts/tsx/js/mjs/rs/go)
 
-Coletor (mede, não julga): `python scripts/repo_signals.py` (ou `../scripts/repo_signals.py` relativo à pasta da skill instalada)
+Coletor (mede, não julga): `python henke/repo_signals.py` (ou `../henke/repo_signals.py` relativo à pasta da skill instalada)
 - `metrics --root <dir> [--coverage cov.json|coverage-summary.json|coverage-final.json|lcov.info] [--per-file]`
 - `edges --root <dir>` — só arestas internas; poda node_modules/target/dist/vendor
 - `churn --repo <dir> --order oldest-first` — conta binários; omite commit de 0 arquivos
 
 Portões (exit 0=verde · 1=vermelho · 2/3=não-veredito — nunca trate 2 como verde):
-- `scripts/metricas/assertless_scan.py <tests>` — NO-ASSERTION / MOCK-ONLY / SWALLOWED em `test_*.py`, `*.test.*`, `*.spec.*`, `*_test.go`, `*_test.rs`, `tests/*.rs`
-- `metrics | scripts/metricas/crap_score.py --threshold 6` — complexidade × (1-cobertura)
-- `scripts/metricas/ratchet.py --baseline b.tsv --current c.tsv` — arquivo tocado não pode piorar
-- `scripts/metricas/fence_check.py fence.json edges.json` — dependência não aponta pra camada externa; `edges=[]` → exit 2
-- `churn | scripts/metricas/tornado_scan.py --order oldest-first` — arquivos/commit subindo
+- `henke/metricas/assertless_scan.py <tests>` — NO-ASSERTION / MOCK-ONLY / SWALLOWED em `test_*.py`, `*.test.*`, `*.spec.*`, `*_test.go`, `*_test.rs`, `tests/*.rs`
+- `metrics | henke/metricas/crap_score.py --threshold 6` — complexidade × (1-cobertura)
+- `henke/metricas/ratchet.py --baseline b.tsv --current c.tsv` — arquivo tocado não pode piorar
+- `henke/metricas/fence_check.py fence.json edges.json` — dependência não aponta pra camada externa; `edges=[]` → exit 2
+- `churn | henke/metricas/tornado_scan.py --order oldest-first` — arquivos/commit subindo
 
 Heurística universal dos 5 defeitos: teste-fantasma/mock-only, função com CRAP alto, regressão no arquivo tocado, dependência outward, amplificação de mudança.
 

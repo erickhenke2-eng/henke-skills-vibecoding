@@ -8,7 +8,7 @@
 
 A auditoria comparativa Suíte Henke × `Island-Dev-Crew/uncle-bob-skills` (conversa de 2026-10-31) identificou que ~60% do pacote UB já é coberto pelo PROTOCOLO (custódia, spec-hash, ledger, canários, dois agentes). A lacuna real é **métrica de qualidade executável**: hoje `code-cirurgico`, `arch-pastas` e a regra anti-migué de cobertura operam só em `[PROSA]`. Esta spec porta 5 portões determinísticos do UB + coletores locais, transformando-os em `[MECÂNICO]`.
 
-Decisão arquitetural: **zero skills novas**. Os portões viram mecanismos em `scripts/metricas/`, invocáveis por `henke-audit-vibecode`, `henke-ops-preflight` e pelo Maestro — sem inflar o inventário de 49 skills.
+Decisão arquitetural: **zero skills novas**. Os portões viram mecanismos em `henke/metricas/`, invocáveis por `henke-audit-vibecode`, `henke-ops-preflight` e pelo Maestro — sem inflar o inventário de 49 skills.
 
 ## 2. Decisões
 
@@ -28,25 +28,25 @@ Decisão arquitetural: **zero skills novas**. Os portões viram mecanismos em `s
 | `fence_check.py` | `fence.json` (camadas) + `edges.json` (imports) | aresta apontando "para fora" da camada |
 | `tornado_scan.py` | TSV `mudança<TAB>arquivos_tocados` | tendência de amplificação de mudança subindo |
 
-Coletor `scripts/repo_signals.py` (stdlib): `churn` (git numstat → TSV), `metrics` (AST → complexidade por função + coverage opcional), `edges` (AST imports → edges.json).
+Coletor `henke/repo_signals.py` (stdlib): `churn` (git numstat → TSV), `metrics` (AST → complexidade por função + coverage opcional), `edges` (AST imports → edges.json).
 
 ## 4. Escopo Declarado (arquivos e símbolos a tocar)
 
 Novos (v1):
 - `docs/designs/portoes-metricos-ub.md` (este arquivo)
-- `scripts/metricas/__init__.py`
-- `scripts/metricas/assertless_scan.py`
-- `scripts/metricas/crap_score.py`
-- `scripts/metricas/ratchet.py`
-- `scripts/metricas/fence_check.py`
-- `scripts/metricas/tornado_scan.py`
-- `scripts/repo_signals.py`
+- `henke/metricas/__init__.py`
+- `henke/metricas/assertless_scan.py`
+- `henke/metricas/crap_score.py`
+- `henke/metricas/ratchet.py`
+- `henke/metricas/fence_check.py`
+- `henke/metricas/tornado_scan.py`
+- `henke/repo_signals.py`
 - `evals/canaries_metricas.py`
 - `tests/test_metric_gates.py`
 - `evals/bench_corpus.py`
 
 Novos (v2):
-- `scripts/metricas/polyglot.py` — lexer O(N) compartilhado (mask de comentários/strings, funções por chaveamento, blocos de teste, imports) para ts/tsx/js/mjs/rs/go.
+- `henke/metricas/polyglot.py` — lexer O(N) compartilhado (mask de comentários/strings, funções por chaveamento, blocos de teste, imports) para ts/tsx/js/mjs/rs/go.
 
 Editados (v1):
 - `PROTOCOLO.md` — §10 tabela de portões + delta de versão (v3.1.1 → v3.2)
@@ -55,10 +55,10 @@ Editados (v1):
 
 Editados (v2):
 - `docs/designs/portoes-metricos-ub.md` — esta revisão
-- `scripts/metricas/fence_check.py` — `edges=[]` → exit 2 (mata falso-verde)
-- `scripts/repo_signals.py` — universalização: `os.walk` com poda (`node_modules`, `target`, `dist`, `out`, `release`, `vendor`, `.runtime`, `coverage`), churn conta binários/`--no-merges`/nunca emite 0, metrics poliglota, loaders de coverage (coverage.py, Istanbul summary/final, lcov.info), edges poliglota (py/ts/js/rs/go + pacotes de workspace)
-- `scripts/metricas/assertless_scan.py` — dispatch poliglota (`.test.ts`, `.spec.ts`, `.test.js`, `_test.go`, `_test.rs`, `tests/*.rs`)
-- `scripts/metricas/*.py` + `scripts/repo_signals.py` — reconfiguração de streams para UTF-8 em Windows
+- `henke/metricas/fence_check.py` — `edges=[]` → exit 2 (mata falso-verde)
+- `henke/repo_signals.py` — universalização: `os.walk` com poda (`node_modules`, `target`, `dist`, `out`, `release`, `vendor`, `.runtime`, `coverage`), churn conta binários/`--no-merges`/nunca emite 0, metrics poliglota, loaders de coverage (coverage.py, Istanbul summary/final, lcov.info), edges poliglota (py/ts/js/rs/go + pacotes de workspace)
+- `henke/metricas/assertless_scan.py` — dispatch poliglota (`.test.ts`, `.spec.ts`, `.test.js`, `_test.go`, `_test.rs`, `tests/*.rs`)
+- `henke/metricas/*.py` + `henke/repo_signals.py` — reconfiguração de streams para UTF-8 em Windows
 - `henke-audit-vibecode/SKILL.md` — portões + heurística universal
 - `henke-code-cirurgico/SKILL.md` — idem
 - `henke-arch-pastas/SKILL.md` — idem
@@ -70,16 +70,16 @@ Editados (v2):
 
 Editados (v3 — correção Goldfish round-2, veredito REJECT sobre b988b88):
 - `docs/designs/portoes-metricos-ub.md` — esta revisão
-- `scripts/metricas/polyglot.py` — (a) `_looks_like_lifetime` só em lang `rs` e `'x'`/`'\x'` exige `'` de fechamento, nunca `\n`; (b) `_mask_template` trata strings/`//`/`/* */`/templates aninhados dentro de `${}` e guarda `j+1<n`; (c) `find_functions` aceita Go `(T, error)`, TS genérico `<T>`, Rust `match`, e `lang` normalizado sem ponto; (d) `_TESTCALL_RE` com lookbehind `(?<![.\w$])`, encadeadores `runIf`/`skipIf`, callback = último arg, corpos `{...}` ou arrow concisa, ignora `.todo`
-- `scripts/metricas/assertless_scan.py` — `expect` exige matcher real (não-mock) após `_paren_end`; `throw`/`assert.fail`/`expect.fail` contam como asserção; SWALLOWED isenta `catch(e){x=e}` com `x` asserido fora e não duplica achados; Rust: `.unwrap(`/`.expect(` não são asserção
-- `scripts/repo_signals.py` — `TEST_RE` aplicado a `"/"+rel` (não ao path absoluto) e cobre `test_*.py`/`_test.py`; edges: `Path(str(base)+e)` antes de `with_suffix`, Rust `use`/módulo-pai, Python `from pkg import mod` tenta submódulo primeiro; flags `--coverage-json`/`--lcov`; match de coverage por sufixo com fronteira `/` sem fallback cego de basename; `churn` subprocess `encoding="utf-8"`; `sys.stdin` reconfigurado
-- `scripts/metricas/crap_score.py` — `sys.stdin` reconfigurado UTF-8
-- `scripts/metricas/ratchet.py` — idem
-- `scripts/metricas/tornado_scan.py` — idem
-- `scripts/metricas/fence_check.py` — idem
-- `scripts/install_skills.py` — instala `scripts/repo_signals.py` + `scripts/metricas/` junto às skills
+- `henke/metricas/polyglot.py` — (a) `_looks_like_lifetime` só em lang `rs` e `'x'`/`'\x'` exige `'` de fechamento, nunca `\n`; (b) `_mask_template` trata strings/`//`/`/* */`/templates aninhados dentro de `${}` e guarda `j+1<n`; (c) `find_functions` aceita Go `(T, error)`, TS genérico `<T>`, Rust `match`, e `lang` normalizado sem ponto; (d) `_TESTCALL_RE` com lookbehind `(?<![.\w$])`, encadeadores `runIf`/`skipIf`, callback = último arg, corpos `{...}` ou arrow concisa, ignora `.todo`
+- `henke/metricas/assertless_scan.py` — `expect` exige matcher real (não-mock) após `_paren_end`; `throw`/`assert.fail`/`expect.fail` contam como asserção; SWALLOWED isenta `catch(e){x=e}` com `x` asserido fora e não duplica achados; Rust: `.unwrap(`/`.expect(` não são asserção
+- `henke/repo_signals.py` — `TEST_RE` aplicado a `"/"+rel` (não ao path absoluto) e cobre `test_*.py`/`_test.py`; edges: `Path(str(base)+e)` antes de `with_suffix`, Rust `use`/módulo-pai, Python `from pkg import mod` tenta submódulo primeiro; flags `--coverage-json`/`--lcov`; match de coverage por sufixo com fronteira `/` sem fallback cego de basename; `churn` subprocess `encoding="utf-8"`; `sys.stdin` reconfigurado
+- `henke/metricas/crap_score.py` — `sys.stdin` reconfigurado UTF-8
+- `henke/metricas/ratchet.py` — idem
+- `henke/metricas/tornado_scan.py` — idem
+- `henke/metricas/fence_check.py` — idem
+- `henke/install_skills.py` — instala `henke/repo_signals.py` + `henke/metricas/` junto às skills
 - `tests/test_install.py` — cobre a instalação dos scripts
-- `scripts/spec_drift.py` — `re.findall` extrai múltiplos paths por bullet
+- `henke/spec_drift.py` — `re.findall` extrai múltiplos paths por bullet
 - `henke-code-cirurgico/SKILL.md` — ratchet com `--root` escopado aos arquivos tocados (dívida legada não dispara BUDGET-BUST)
 - `henke-arch-pastas/SKILL.md` — corrige invocação `repo_signals.py churn`
 - `PROTOCOLO.md` — §10/linha 172 reflete SKILLs alterados
@@ -102,7 +102,7 @@ Fora de escopo (declarado): `prompts/`, `.henke/`, nenhum arquivo do `virusclip`
 - `python tests/test_metric_gates.py` → verde
 - `python evals/canaries_metricas.py` → N/N canários
 - `python evals/bench_corpus.py` → tabela de recall impressa
-- `python scripts/validate_skills.py` → verde (regressão)
+- `python henke/validate_skills.py` → verde (regressão)
 - `python tests/test_evals.py` + `python evals/canaries.py` → verde (regressão)
 
 ## 7. O que NÃO será verificado

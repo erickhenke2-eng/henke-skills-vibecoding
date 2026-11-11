@@ -23,13 +23,6 @@ from tests.e2e.e2e_common import (
     SUITE_ROOT,
     SCRIPTS_DIR,
     CLI_PATH,
-    HAS_MISSION_CLASSIFIER,
-    HAS_PROCESS_RUNNER,
-    HAS_INSTALL_HOOK,
-    HAS_GATE_CACHE,
-    HAS_REPORT_GENERATOR,
-    CLI_HAS_INSTALL_HOOK,
-    CLI_HAS_REPORT,
     git_init,
     run_cli,
     setup_mock_stack,
@@ -55,8 +48,6 @@ class TestTier4RealWorldScenarios(unittest.TestCase):
 
     def test_t4_scenario_1_polyglot_full_lifecycle(self):
         """Scenario 1: Full workflow on multi-stack polyglot repo with hook, commit block/pass, and report."""
-        if not (HAS_MISSION_CLASSIFIER and HAS_INSTALL_HOOK and HAS_REPORT_GENERATOR):
-            self.skipTest("Requires mission_classifier (M1), install_hook (M3), and report_generator (M5)")
 
         classifier = get_mission_classifier_module()
         installer = get_install_hook_module()
@@ -88,8 +79,6 @@ class TestTier4RealWorldScenarios(unittest.TestCase):
 
     def test_t4_scenario_2_runaway_deadlock_elimination(self):
         """Scenario 2: Runaway hanging subprocess deadlock eliminated atomically via taskkill on Windows."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Requires process_runner (M2)")
 
         runner = get_process_runner_module()
         
@@ -125,8 +114,6 @@ time.sleep(120)
 
     def test_t4_scenario_3_progressive_stack_adoption(self):
         """Scenario 3: Progressive stack adoption in fresh repo with interactive prompt and config update."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Requires mission_classifier (M1)")
 
         classifier = get_mission_classifier_module()
 
@@ -160,8 +147,6 @@ time.sleep(120)
 
     def test_t4_scenario_4_high_frequency_dev_loop_cache_and_memory(self):
         """Scenario 4: High-frequency dev loop with cache hits and 500 MB RAM eviction under load."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Requires gate_cache (M4)")
 
         cache = get_gate_cache_module()
         src_file = self.repo_path / "calculator.py"
@@ -192,8 +177,6 @@ time.sleep(120)
 
     def test_t4_scenario_5_full_audit_and_executive_reporting(self):
         """Scenario 5: Full security audit report generation with self-contained HTML and plain-language summary."""
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Requires report_generator (M5)")
 
         rep_gen = get_report_generator_module()
 

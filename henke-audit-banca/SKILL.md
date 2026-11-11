@@ -42,9 +42,9 @@ Você é o **Presidente da Banca Adversarial Multi-Modelo (`SHERLOCK`)** da Suí
 
 1. Gere os sinais determinísticos do repositório em `$TEMP` (sem tocar na working tree):
    ```bash
-   python scripts/repo_signals.py metrics --root . > $TEMP/banca-metrics.json
-   python scripts/metricas/hazard_scan.py . > $TEMP/banca-hazards.txt
-   python scripts/metricas/coverage_ledger.py init --root . --out $TEMP/banca-ledger.json
+   python henke/repo_signals.py metrics --root . > $TEMP/banca-metrics.json
+   python henke/metricas/hazard_scan.py . > $TEMP/banca-hazards.txt
+   python henke/metricas/coverage_ledger.py init --root . --out $TEMP/banca-ledger.json
    ```
 2. Empacote o envelope neutro contendo apenas caminhos, hashes SHA-256, trechos de código numerados e saídas dos portões.
 
@@ -66,7 +66,7 @@ Você é o **Presidente da Banca Adversarial Multi-Modelo (`SHERLOCK`)** da Suí
 ### Fase 4: Apuração de Quorum ($\ge 2/3$) & Consolidação no Ledger
 
 1. Consolide no `$TEMP/banca-ledger.json` os achados confirmados pela banca e registre as passagens adversariais em `critic_passes[]`.
-2. Atualize `.henke/runs/<run_id>.json` via `scripts/run_state.py` registrando `review_status: "goldfish_certified"` (ou `"goldfish_unavailable"` se subagentes isolados não estiverem disponíveis no harness).
+2. Atualize `.henke/runs/<run_id>.json` via `henke/run_state.py` registrando `review_status: "goldfish_certified"` (ou `"goldfish_unavailable"` se subagentes isolados não estiverem disponíveis no harness).
 
 ## 4. Portões Mecânicos & Comandos de Verificação
 
@@ -74,14 +74,14 @@ Execute obrigatoriamente os portões abaixo para validar o dossiê da banca:
 
 ```bash
 # 1. Verificação do ledger com exigência de passagem crítica (critic_passes)
-python scripts/metricas/coverage_ledger.py verify $TEMP/banca-ledger.json --min-pct 90 --require-critic
+python henke/metricas/coverage_ledger.py verify $TEMP/banca-ledger.json --min-pct 90 --require-critic
 
 # 2. Renderização mecânica das lacunas não verificadas
-python scripts/metricas/coverage_ledger.py render-gaps $TEMP/banca-ledger.json
+python henke/metricas/coverage_ledger.py render-gaps $TEMP/banca-ledger.json
 
 # 3. Certificação Goldfish: com driver de subagente gera o envelope isolado;
 #    sem driver registra goldfish_unavailable e sai 2 (nunca check local disfarçado)
-python scripts/henke_cli.py goldfish --repo . --run .henke/runs/<run_id>.json --driver <cmd>
+python henke/henke_cli.py goldfish --repo . --run .henke/runs/<run_id>.json --driver <cmd>
 ```
 
 **Linhas Vermelhas (PROIBIDO):**

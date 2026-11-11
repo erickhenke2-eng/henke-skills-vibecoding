@@ -166,5 +166,5 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 ## Portões Métricos & Doutrina Sherlock Holmes [MECÂNICO]
 
 - **Rastreio `Source → Sink` obrigatório (padrão `fp-check`)**: nunca acuse uma linha só porque "o padrão parece suspeito". Rastreie o fluxo completo da origem do dado até o ponto de quebra e registre o comando físico de reprodução.
-- **Mapa de Premissas Não-Impostas (`assumptions[]`)**: em investigações profundas, use `python scripts/metricas/coverage_ledger.py init --root <escopo> --out <ledger.json>` (ou `../scripts/metricas/coverage_ledger.py` relativo à skill instalada) para priorizar arquivos por fan-in/complexidade/hazards e registrar premissas `unenforced` (onde um módulo assume algo que nenhum chamador valida).
-- **Varredura de Falhas Silenciosas**: rode `python scripts/metricas/hazard_scan.py <escopo>` e `python scripts/metricas/assertless_scan.py <testes>` para detectar `catch` engolidor e perigos de runtime.
+- **Mapa de Premissas Não-Impostas (`assumptions[]`)**: em investigações profundas, use `python henke/metricas/coverage_ledger.py init --root <escopo> --out <ledger.json>` (ou `../henke/metricas/coverage_ledger.py` relativo à skill instalada) para priorizar arquivos por fan-in/complexidade/hazards e registrar premissas `unenforced` (onde um módulo assume algo que nenhum chamador valida).
+- **Varredura de Falhas Silenciosas**: rode `python henke/metricas/hazard_scan.py <escopo>` e `python henke/metricas/assertless_scan.py <testes>` para detectar `catch` engolidor e perigos de runtime.

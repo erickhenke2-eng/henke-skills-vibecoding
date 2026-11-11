@@ -14,15 +14,15 @@ dependencies = [
 ]
 
 [project.scripts]
-henke = "scripts.henke_cli:main"
+henke = "henke.henke_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["scripts*"]
+include = ["henke", "henke.*"]
 
 # Artefatos runtime instalados junto ao pacote: sem eles o wheel vinha só com
 # scripts*/ e `henke doctor`/`install_skills.py` operavam com 0 skills.
-# Tudo aterrissa em <sys.prefix>/henke_data/ — resolvido via scripts/_paths.py
+# Tudo aterrissa em <sys.prefix>/henke_data/ — resolvido via henke/_paths.py
 # (sysconfig data dir) como fallback do checkout.
 [tool.setuptools.data-files]
 henke_data = ["PROTOCOLO.md", "LICENSE", "AGENTS.md"]

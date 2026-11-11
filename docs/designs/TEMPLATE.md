@@ -35,8 +35,8 @@
 
 ## 7. Ledger Esperado de Comandos
 
-- `python scripts/spec_drift.py --spec docs/designs/<este-arquivo>.md --expected-hash <sha256> --against <base>`
-- `python scripts/metricas/contract_closure.py --spec docs/designs/<este-arquivo>.md --repo .`
+- `python henke/spec_drift.py --spec docs/designs/<este-arquivo>.md --expected-hash <sha256> --against <base>`
+- `python henke/metricas/contract_closure.py --spec docs/designs/<este-arquivo>.md --repo .`
 
 ## 8. O que NÃO será verificado
 

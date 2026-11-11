@@ -9,9 +9,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "henke"))
 
-import scripts.event_store as es  # noqa: E402
+import henke.event_store as es  # noqa: E402
 
 
 class TestAppendAndChain(unittest.TestCase):

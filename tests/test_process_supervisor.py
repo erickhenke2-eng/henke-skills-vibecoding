@@ -1,4 +1,4 @@
-"""Testes do supervisor de filhos por propriedade (`scripts/process_supervisor.py`).
+"""Testes do supervisor de filhos por propriedade (`henke/process_supervisor.py`).
 
 Contrato (Wave 7, R7/R1):
 1. Filho + neto dormem; timeout do pai retorna 124 e os dois PIDs desaparecem.
@@ -23,7 +23,7 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.process_supervisor import (
+from henke.process_supervisor import (
     SUPERVISOR_UNAVAILABLE,
     TIMEOUT_RETURNCODE,
     ChildSupervisor,
@@ -261,11 +261,11 @@ class TestSupervisorUnavailable(unittest.TestCase):
         """Popen falhando (executável ausente) fecha o Job já criado — sem leak."""
         fake_job = 424242
         with ChildSupervisor() as sup:
-            with patch("scripts.process_supervisor._win_create_job",
+            with patch("henke.process_supervisor._win_create_job",
                        return_value=fake_job), \
                  patch("subprocess.Popen",
                        side_effect=FileNotFoundError("exe ausente")) as popen_mock, \
-                 patch("scripts.process_supervisor._k32.CloseHandle") as close_mock:
+                 patch("henke.process_supervisor._k32.CloseHandle") as close_mock:
                 with self.assertRaises(FileNotFoundError):
                     sup._start_windows([r"C:\inexistente.exe"], Path.cwd(), {}, 1024)
         close_mock.assert_called_once_with(fake_job)
@@ -275,7 +275,7 @@ class TestSupervisorUnavailable(unittest.TestCase):
     def test_assign_failure_never_runs_unsupervised(self):
         marker = Path(self._tmpfile())
         with ChildSupervisor() as sup:
-            with patch("scripts.process_supervisor._k32.AssignProcessToJobObject", return_value=0):
+            with patch("henke.process_supervisor._k32.AssignProcessToJobObject", return_value=0):
                 child = sup.start(
                     [sys.executable, "-c",
                      f"open(r'{marker}', 'w').write('RODOU_SEM_SUPERVISAO')"],

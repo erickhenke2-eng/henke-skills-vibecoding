@@ -13,7 +13,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from scripts.report_generator import generate_report, main as report_main
+from henke.report_generator import generate_report, main as report_main
 
 
 class TestReportGenerator(unittest.TestCase):

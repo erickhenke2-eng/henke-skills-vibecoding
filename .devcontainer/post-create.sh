@@ -8,7 +8,7 @@ if [ -f requirements.txt ]; then
 fi
 
 echo "=== Validando Skills & Canários ==="
-python scripts/validate_skills.py
-python scripts/metricas/hazard_scan.py .
+python henke/validate_skills.py
+python henke/metricas/hazard_scan.py .
 
 echo "=== Pronto! Digite: python evals/canaries_metricas.py para rodar a suíte completa ==="

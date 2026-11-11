@@ -11,39 +11,39 @@ A versão 4.0 do Henke Toolkit estabeleceu portões mecânicos e auditoria adver
 5. Execuções repetidas de portões lentos sem cache consumiam CPU, ou acumulavam memória sem limites de RAM.
 
 ## 2. Decisões Técnicas & Arquitetura
-1. **R1: Classificador de Missão & Pontes Multi-Framework** (`scripts/mission_classifier.py`):
+1. **R1: Classificador de Missão & Pontes Multi-Framework** (`henke/mission_classifier.py`):
    - Detecção baseada em assinaturas de manifesto e extensões de arquivos em profundidade controlada (excluindo diretórios de dependências).
    - Suporte pronto para 10 linguagens (Python, TS/JS, Rust, Go, Java, C/C++, C#, PHP, Ruby, Kotlin/Swift) + Svelte, Vite, Tailwind.
    - Guia de extensão para usuários em `docs/BRIDGES.md`.
-2. **R2: Pre-Commit Hook Nativo** (`scripts/install_hook.py`):
+2. **R2: Pre-Commit Hook Nativo** (`henke/install_hook.py`):
    - Instalação nativa em `.git/hooks/pre-commit` com caminho absoluto autônomo.
    - Preservação de hooks legados pré-existentes com backup timestampado (`pre-commit.legacy.<timestamp>`) e encadeamento de execução.
-3. **R3: Morte Atômica de Processos Zumbis** (`scripts/process_runner.py`):
+3. **R3: Morte Atômica de Processos Zumbis** (`henke/process_runner.py`):
    - Execução via `subprocess.Popen` e terminação imediata de árvore completa no Windows com `taskkill /F /T /PID <pid>` no timeout.
-4. **R4: Dashboard Visual Local em HTML Autocontido** (`scripts/report_generator.py`):
+4. **R4: Dashboard Visual Local em HTML Autocontido** (`henke/report_generator.py`):
    - Arquivo HTML 100% offline (zero CDNs externas) com estilos inline.
    - Seção obrigatória de Resumo Executivo em Linguagem Simples para leigos.
    - Veredito rigoroso: qualquer portão com falha (`gates_failed > 0`) marca REPROVADO.
-5. **R5: Cache Inteligente de Portões com Limite de RAM** (`scripts/gate_cache.py`):
+5. **R5: Cache Inteligente de Portões com Limite de RAM** (`henke/gate_cache.py`):
    - Hashing Merkle determinístico incluindo diretórios de CI (`.github`) e arquivos do repositório.
    - Medição real do consumo de memória privada/working set no Windows com Win32 API.
    - Evicção LRU em memória e remoção correspondente no disco `.henke/cache/` quando o limite de 500 MB é atingido.
 
 ## 3. Contratos de Tipos, Entrada & Saída
-- `scripts/mission_classifier.py`:
+- `henke/mission_classifier.py`:
   - `classify_repository(repo_path: Path) -> MissionClassification`
   - `detect_stacks(repo_path: Path) -> List[StackInfo]`
   - `prompt_unconfigured_stack(stack: str, config_path: Path, interactive: bool = False) -> bool`
-- `scripts/process_runner.py`:
+- `henke/process_runner.py`:
   - `run_process(cmd: List[str] | str, cwd: Path, timeout_sec: float | None = None, env: dict | None = None) -> ProcessExecutionResult`
-- `scripts/install_hook.py`:
+- `henke/install_hook.py`:
   - `install_hook(repo_path: Path, force: bool = False) -> Tuple[bool, str]`
-- `scripts/gate_cache.py`:
+- `henke/gate_cache.py`:
   - `compute_cache_key(gate_name: str, script_path: Path, args: List[str], repo_root: Path) -> str`
   - `get_cached_gate(key: str, repo_root: Path | None = None) -> Dict[str, Any] | None`
   - `store_cached_gate(key: str, payload: Dict[str, Any], repo_root: Path | None = None) -> None`
   - `enforce_ram_limit(limit_mb: float = 500.0, repo_root: Path | None = None, force_flush: bool = False) -> int`
-- `scripts/report_generator.py`:
+- `henke/report_generator.py`:
   - `generate_report(repo_path: Path, output_file: Path | None = None) -> Path`
 
 ## 4. Escopo Declarado (Arquivos e Símbolos a Tocar)
@@ -51,15 +51,15 @@ A versão 4.0 do Henke Toolkit estabeleceu portões mecânicos e auditoria adver
 - `TEST_READY.md`
 - `docs/BRIDGES.md`
 - `docs/designs/wave6_production_expansions.md`
-- `scripts/audit_ledger.py`
-- `scripts/gate_cache.py`
-- `scripts/henke_cli.py`
-- `scripts/install_hook.py`
-- `scripts/mission_classifier.py`
-- `scripts/process_runner.py`
-- `scripts/report_generator.py`
-- `scripts/run_state.py`
-- `scripts/metricas/mutant_hunt.py`
+- `henke/audit_ledger.py`
+- `henke/gate_cache.py`
+- `henke/henke_cli.py`
+- `henke/install_hook.py`
+- `henke/mission_classifier.py`
+- `henke/process_runner.py`
+- `henke/report_generator.py`
+- `henke/run_state.py`
+- `henke/metricas/mutant_hunt.py`
 - `tests/test_gate_cache.py`
 - `tests/test_install_hook.py`
 - `tests/test_mission_classifier.py`
@@ -73,11 +73,11 @@ A versão 4.0 do Henke Toolkit estabeleceu portões mecânicos e auditoria adver
 - `tests/e2e/test_wave6_e2e_tier4.py`
 
 ## 5. Pontes de Contrato
-- ponte: `scripts/process_runner.py::run_process -> tests/test_process_runner.py`
-- ponte: `scripts/install_hook.py::install_hook -> tests/test_install_hook.py`
-- ponte: `scripts/mission_classifier.py::classify_repository -> tests/test_mission_classifier.py`
-- ponte: `scripts/gate_cache.py::compute_cache_key -> tests/test_gate_cache.py`
-- ponte: `scripts/report_generator.py::generate_report -> tests/test_report.py`
+- ponte: `henke/process_runner.py::run_process -> tests/test_process_runner.py`
+- ponte: `henke/install_hook.py::install_hook -> tests/test_install_hook.py`
+- ponte: `henke/mission_classifier.py::classify_repository -> tests/test_mission_classifier.py`
+- ponte: `henke/gate_cache.py::compute_cache_key -> tests/test_gate_cache.py`
+- ponte: `henke/report_generator.py::generate_report -> tests/test_report.py`
 
 ## 6. Casos de Borda & Matriz Pre-Mortem de 40 Anos (Estadista)
 1. **Queda de Energia / Crash Parcial** (`[MECÂNICO]`): Escrita atômica em arquivos de cache e relatórios via arquivos `.tmp` e `os.replace`.
@@ -88,7 +88,7 @@ A versão 4.0 do Henke Toolkit estabeleceu portões mecânicos e auditoria adver
 
 ## 7. Ledger Esperado de Comandos
 - `python -m unittest discover -s tests -p "test_*.py"`
-- `python scripts/metricas/hazard_scan.py .`
-- `python scripts/metricas/assertless_scan.py tests/`
-- `python scripts/metricas/a11y_scan.py .`
-- `python scripts/henke_cli.py check --repo .`
+- `python henke/metricas/hazard_scan.py .`
+- `python henke/metricas/assertless_scan.py tests/`
+- `python henke/metricas/a11y_scan.py .`
+- `python henke/henke_cli.py check --repo .`

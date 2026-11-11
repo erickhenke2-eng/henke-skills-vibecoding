@@ -1,8 +1,8 @@
-"""Testes para scripts/metricas/scan_manifest.py (Wave 7, R5).
+"""Testes para henke/metricas/scan_manifest.py (Wave 7, R5).
 
 Scanners, motor e configs resolvem SEMPRE da suíte Henke instalada — o
 repo auditado é somente dados. As fixtures usam repos externos sem
-`scripts/` para provar que o manifesto não depende nem executa código do
+`henke/` para provar que o manifesto não depende nem executa código do
 repo alvo (MUST FIX #1 da auditoria adversarial).
 """
 from __future__ import annotations
@@ -19,8 +19,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.state_paths import cache_root
-from scripts.metricas.scan_manifest import (
+from henke.state_paths import cache_root
+from henke.metricas.scan_manifest import (
     IncrementalScanResult, ScannerSpec, run_incremental_scan, scanner_specs,
 )
 
@@ -35,7 +35,7 @@ class TestScanManifest(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
         self.addCleanup(self._td.cleanup)
-        self.repo = Path(self._td.name)  # repo externo, sem scripts/ Henke
+        self.repo = Path(self._td.name)  # repo externo, sem henke/ Henke
         self._sd = os.environ.pop("HENKE_STATE_DIR", None)
         self.addCleanup(
             lambda: os.environ.__setitem__("HENKE_STATE_DIR", self._sd)
@@ -68,7 +68,7 @@ class TestScanManifest(unittest.TestCase):
         self.specs = {s.scanner_id: s for s in scanner_specs()}
 
     def test_scanners_resolve_from_suite_not_repo(self):
-        """Specs apontam para a suíte; repo externo sem scripts/ é escaneado."""
+        """Specs apontam para a suíte; repo externo sem henke/ é escaneado."""
         for spec in scanner_specs():
             self.assertTrue(spec.script_path.is_file(),
                             f"scanner inexistente: {spec.script_path}")
@@ -91,7 +91,7 @@ class TestScanManifest(unittest.TestCase):
         spec = self.specs["a11y"]
         r = run_incremental_scan(self.repo, spec, full=True)
 
-        script = ROOT / "scripts" / "metricas" / "a11y_scan.py"
+        script = ROOT / "henke" / "metricas" / "a11y_scan.py"
         proc = subprocess.run(
             [sys.executable, str(script), str(self.repo), "--json"],
             capture_output=True, text=True, timeout=60)
@@ -168,7 +168,7 @@ class TestScanManifest(unittest.TestCase):
         run_incremental_scan(self.repo, spec, full=True)
         # Spec injetada apontando para cópia com SCANNER_VERSION bumpado:
         # fingerprint diverge do manifesto → full rebuild.
-        suite_scanner = ROOT / "scripts" / "metricas" / "a11y_scan.py"
+        suite_scanner = ROOT / "henke" / "metricas" / "a11y_scan.py"
         with tempfile.TemporaryDirectory() as ext:
             bumped = Path(ext) / "a11y_scan.py"
             bumped.write_text(
@@ -262,7 +262,7 @@ class TestScanManifest(unittest.TestCase):
         self.assertFalse((self.repo / ".henke" / ".cache_secret").exists())
         # Um tarball hostil entrega chave + manifesto assinado com ela:
         # o verificador usa a chave do perfil → hmac_invalid → full scan.
-        from scripts.metricas.scan_manifest import _manifest_hmac
+        from henke.metricas.scan_manifest import _manifest_hmac
         mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         data = json.loads(mp.read_text(encoding="utf-8"))
         data["hmac"] = _manifest_hmac(b"attacker-planted-key", data)
@@ -292,7 +292,7 @@ class TestScanManifest(unittest.TestCase):
 
         _write(self.repo, "page.html", "<html><body>v2</body></html>")
 
-        import scripts.metricas.scan_manifest as sm
+        import henke.metricas.scan_manifest as sm
         real_scan_one = sm._scan_one
 
         def racing(repo_root, spec_, path, rel, mod, **kw):
@@ -350,12 +350,12 @@ class TestScanManifest(unittest.TestCase):
 
     def test_hmac_predicates_return_exact_booleans(self):
         """Predicados retornam bool/tupla exatos — nunca None disfarçado."""
-        from scripts.metricas.scan_manifest import (
+        from henke.metricas.scan_manifest import (
             _load_manifest, _manifest_hmac_ok, _secret_is_tracked,
         )
         outside = Path(self._td.name).parent / f"outside_{os.getpid()}"
         self.assertIs(_secret_is_tracked(self.repo, outside), False)
-        with patch("scripts.metricas.scan_manifest.subprocess.run",
+        with patch("henke.metricas.scan_manifest.subprocess.run",
                    side_effect=OSError("sem git")):
             self.assertIs(_secret_is_tracked(
                 self.repo, self.repo / ".henke" / ".cache_secret"), False)

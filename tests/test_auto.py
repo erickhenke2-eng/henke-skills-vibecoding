@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Testes da máquina de uma frase (scripts/henke_auto.py) — propostas M1+M2+M8.
+"""Testes da máquina de uma frase (henke/henke_auto.py) — propostas M1+M2+M8.
 
 Cobre: --dry-run sem escrita, envelope com SKILL.md verbatim + sha256 (M2),
 trava de autorização PUBLISH/destrutivo sem exceção para --yes/yolo (M8),
@@ -25,8 +25,8 @@ repo_root = Path(__file__).resolve().parents[1]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from scripts import henke_auto
-from scripts.run_state import approve_run, record_gate
+from henke import henke_auto
+from henke.run_state import approve_run, record_gate
 import subprocess
 
 SUITE = Path(henke_auto.SUITE_ROOT)
@@ -498,7 +498,7 @@ class DriverAgentAdapterTests(unittest.TestCase):
     """Kimi-audit: falhas do adapter propagam exit != 0 (JSON de erro no stdout)."""
 
     def _run_adapter(self, argv, stdin_text):
-        from scripts import henke_driver_agent as adapter
+        from henke import henke_driver_agent as adapter
         out = io.StringIO()
         with mock.patch.object(sys, "argv", argv), \
              mock.patch.object(sys, "stdin", io.StringIO(stdin_text)), \

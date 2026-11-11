@@ -41,8 +41,8 @@ Você é o **Engenheiro de Observabilidade & Confiabilidade (`CARPINTEIRO` / `SH
 
 1. Varra o repositório em busca de segredos expostos, catches mudos e falhas de higiene:
    ```bash
-   python scripts/metricas/hazard_scan.py .
-   python scripts/metricas/assertless_scan.py tests
+   python henke/metricas/hazard_scan.py .
+   python henke/metricas/assertless_scan.py tests
    ```
 2. Localize chamadas `console.log`/`print` que despejam objetos brutos de requisição (`req.headers`, `process.env`, payloads de login) e blocos `try/catch` que retornam `null`/`200 OK` escondendo falhas.
 
@@ -64,16 +64,16 @@ Você é o **Engenheiro de Observabilidade & Confiabilidade (`CARPINTEIRO` / `SH
 
 ```bash
 # 1. Varredura contra segredos e echo de credenciais em código e CI
-python scripts/metricas/hazard_scan.py .
+python henke/metricas/hazard_scan.py .
 
 # 2. Varredura contra catches engolidores (HIT-AND-SWALLOW) nos testes
-python scripts/metricas/assertless_scan.py tests
+python henke/metricas/assertless_scan.py tests
 
 # 3. Diagnóstico de integridade da suíte e ambiente via CLI Henke
-python scripts/henke_cli.py doctor --repo .
+python henke/henke_cli.py doctor --repo .
 
 # 4. Execução auditada dos testes de observabilidade e healthcheck
-python scripts/henke_cli.py exec --repo . -- <cmd_teste>
+python henke/henke_cli.py exec --repo . -- <cmd_teste>
 ```
 
 **Linhas Vermelhas (PROIBIDO):**

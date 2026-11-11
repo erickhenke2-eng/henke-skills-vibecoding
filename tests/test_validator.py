@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Testes automatizados do validador (scripts/validate_skills.py).
+Testes automatizados do validador (henke/validate_skills.py).
 Comprova que o validador rejeita exatamente as 4 adulterações auditadas pelo GPT Astra
 e aprova o repositório canônico legítimo.
 """
@@ -16,12 +16,12 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 repo_root = Path(__file__).resolve().parents[1]
-validate_script = repo_root / "scripts" / "validate_skills.py"
+validate_script = repo_root / "henke" / "validate_skills.py"
 
 
 def run_validator(cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(cwd / "scripts" / "validate_skills.py")],
+        [sys.executable, str(cwd / "henke" / "validate_skills.py")],
         cwd=str(cwd),
         capture_output=True,
         text=True,
@@ -32,9 +32,9 @@ def run_validator(cwd: Path) -> subprocess.CompletedProcess:
 def copy_repo_to_temp() -> tempfile.TemporaryDirectory:
     tmp = tempfile.TemporaryDirectory()
     tmp_path = Path(tmp.name)
-    # Copia arquivos essenciais: PROTOCOLO.md, scripts/ e henke-*/
+    # Copia arquivos essenciais: PROTOCOLO.md, henke/ e henke-*/
     shutil.copy2(repo_root / "PROTOCOLO.md", tmp_path / "PROTOCOLO.md")
-    shutil.copytree(repo_root / "scripts", tmp_path / "scripts")
+    shutil.copytree(repo_root / "henke", tmp_path / "henke")
     for d in repo_root.glob("henke-*"):
         if d.is_dir():
             shutil.copytree(d, tmp_path / d.name)

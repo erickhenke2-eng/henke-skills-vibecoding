@@ -49,7 +49,7 @@ Sua missão é **avaliar a tarefa com visão sistêmica de 10.000 pés**, determ
 
 1. **Defina o Modo:** A intenção é interrogativa ("como faço?", "explica") ou de auditoria? Resolva para **`ANALISAR`**. É desenho de arquitetura? Resolva para **`PLANEJAR`**. É implementação ou correção de código? Resolva para **`EXECUTAR`**.
 2. **Checagem de Memória:** Se estiver em `PLANEJAR`/`EXECUTAR` e a pasta `.henke/` não existir, declare e execute `henke-prepara`.
-3. **Economia de Tokens:** Leia `economia_tokens.caveman` e `economia_tokens.ponytail` (`auto|on|off`). Aplique a precedência e migração de `henke-prepara` (§Fase 2): instrução atual, CONFIG.local.json, CONFIG.json, `auto`. Respeite `off`; `on` e `auto` só ativam skills invocáveis nesta sessão. Não crie arquivos durante auditoria para migrar preferências.
+3. **Economia de Tokens:** Leia `economia_tokens.caveman` e `economia_tokens.ponytail` (`auto|on|off`). Aplique a precedência e migração de `henke-prepara` (§Fase 2): instrução atual, CONFIG.local.json, CONFIG.json, `auto`. Respeite `off`; `on` e `auto` só ativam skills invocáveis nesta sessão. Não crie arquivos durante auditoria para migrar preferências. Se nenhuma for invocável e a preferência não for `off`, aplique o fallback embutido do PROTOCOLO §7 (estilo caveman por texto).
 
 ### Fase 2: Seleção de Fase & Despacho por Domínio
 
@@ -86,7 +86,7 @@ flowchart TD
 
 ### Fase 4: Registro da Execução (Handoff por Run)
 
-Para tarefas não triviais, grave o registro em `.henke/runs/<run_id>.json` via `scripts/run_state.py` contendo (em auditoria, use diretório externo ao objeto auditado):
+Para tarefas não triviais, grave o registro em `.henke/runs/<run_id>.json` via `henke/run_state.py` contendo (em auditoria, use diretório externo ao objeto auditado):
 - `modo`, `skills_acionadas`, `escopo_tocado`.
 - `checks`: lista dos comandos físicos executados com códigos de retorno.
 - `outcome`: estado derivado mecanicamente (`verified`, `failed`, `blocked`, `unverified`).
@@ -143,12 +143,12 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos [MECÂNICO] — catálogo para o Maestro
 
-Infra métrica poliglota da suíte (py/ts/tsx/js/mjs/rs/go), stdlib pura e CLI unificada `henke` (`scripts/henke_cli.py`: `henke route`, `henke exec`, `henke check`, `henke doctor`, `henke gate`, `henke approve`, `henke scope`, `henke goldfish`):
+Infra métrica poliglota da suíte (py/ts/tsx/js/mjs/rs/go), stdlib pura e CLI unificada `henke` (`henke/henke_cli.py`: `henke route`, `henke exec`, `henke check`, `henke doctor`, `henke gate`, `henke approve`, `henke scope`, `henke goldfish`):
 
-- Coletor `scripts/repo_signals.py` (ou `../scripts/repo_signals.py` relativo à skill instalada): `metrics` (funções+complexidade+coverage: coverage.py json, Istanbul summary/final, lcov), `edges` (imports internos com poda de node_modules/target/dist/vendor), `churn` (git numstat, conta binários, omite commits vazios).
-- Portões em `scripts/metricas/` (0=verde · 1=vermelho · 2/3=não-veredito): `assertless_scan.py` (teste-fantasma/mock-only/engolidor em py+ts+js+rs+go), `crap_score.py` (complexidade×cobertura), `ratchet.py` (arquivo tocado não piora), `fence_check.py` (sem dependência outward; `edges=[]`→2), `tornado_scan.py` (amplificação de mudança), `a11y_scan.py` (duplicação `.sr-only`, interativos ocultos e controles sem nome acessível) e `mutant_hunt.py` (mutação cirúrgica de AST no diff).
-- Roteamento determinístico (Passo 0): `henke route --prompt "<pedido>" [--repo <dir>]` ou `python scripts/henke_router.py --prompt "<pedido>" [--repo <dir>]` resolve `mode` (`ANALISAR|PLANEJAR|EXECUTAR`), `archetype` (`SHERLOCK|CARPINTEIRO|ESTADISTA`), `confidence` (`high|medium|low|none`), `requires_human_auth`, as `skills` exatas (0..3) a ler via `read_file` e os `gates_required`.
-- Portões adicionais em `scripts/metricas/` e `scripts/`: `hazard_scan.py` (segredos, shell/SQL injection, weak crypto, path traversal, concorrência sem semáforo, CI/CD hazards, escopo intraprocedural), `coverage_ledger.py` (cobertura de auditoria com `sha256` + `assumptions[]` + `render-gaps`), `contract_closure.py` (`declared ⊆ existing` + fechamento de pontes `## 5. Pontes de Contrato` por símbolo exportado/importado, literal IPC ou `ROUTE:METHOD`), `metaconfig_diff.py` (trava anti-TOCTOU de package.json/lockfiles/workflows/build.rs/untracked), `run_state.py` (manifesto `.henke/runs/<run_id>.json` com derivação mecânica de `outcome`) e `evals/canaries_metricas.py` (bateria de 80 canários bilaterais M1-M80).
+- Coletor `henke/repo_signals.py` (ou `../henke/repo_signals.py` relativo à skill instalada): `metrics` (funções+complexidade+coverage: coverage.py json, Istanbul summary/final, lcov), `edges` (imports internos com poda de node_modules/target/dist/vendor), `churn` (git numstat, conta binários, omite commits vazios).
+- Portões em `henke/metricas/` (0=verde · 1=vermelho · 2/3=não-veredito): `assertless_scan.py` (teste-fantasma/mock-only/engolidor em py+ts+js+rs+go), `crap_score.py` (complexidade×cobertura), `ratchet.py` (arquivo tocado não piora), `fence_check.py` (sem dependência outward; `edges=[]`→2), `tornado_scan.py` (amplificação de mudança), `a11y_scan.py` (duplicação `.sr-only`, interativos ocultos e controles sem nome acessível) e `mutant_hunt.py` (mutação cirúrgica de AST no diff).
+- Roteamento determinístico (Passo 0): `henke route --prompt "<pedido>" [--repo <dir>]` ou `python henke/henke_router.py --prompt "<pedido>" [--repo <dir>]` resolve `mode` (`ANALISAR|PLANEJAR|EXECUTAR`), `archetype` (`SHERLOCK|CARPINTEIRO|ESTADISTA`), `confidence` (`high|medium|low|none`), `requires_human_auth`, as `skills` exatas (0..3) a ler via `read_file` e os `gates_required`.
+- Portões adicionais em `henke/metricas/` e `henke/`: `hazard_scan.py` (segredos, shell/SQL injection, weak crypto, path traversal, concorrência sem semáforo, CI/CD hazards, escopo intraprocedural), `coverage_ledger.py` (cobertura de auditoria com `sha256` + `assumptions[]` + `render-gaps`), `contract_closure.py` (`declared ⊆ existing` + fechamento de pontes `## 5. Pontes de Contrato` por símbolo exportado/importado, literal IPC ou `ROUTE:METHOD`), `metaconfig_diff.py` (trava anti-TOCTOU de package.json/lockfiles/workflows/build.rs/untracked), `run_state.py` (manifesto `.henke/runs/<run_id>.json` com derivação mecânica de `outcome`) e `evals/canaries_metricas.py` (bateria de 80 canários bilaterais M1-M80).
 - Roteamento manual de fallback: auditoria de código → `henke-audit-vibecode`; banca multi-modelo → `henke-audit-banca`; mutação de testes → `henke-test-mutantes`; performance → `henke-audit-perf`; cirurgia → `henke-code-cirurgico`; LLMs/RAG → `henke-code-llm`; estrutura/camadas → `henke-arch-pastas`; observabilidade → `henke-ops-observa`; verificação de ambiente → `henke-ops-preflight`.
 
 Dispatch deve repassar a regra: escopo vazio, linguagem não suportada ou coverage ausente = não-veredito declarado, nunca verde presumido.

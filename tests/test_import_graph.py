@@ -1,4 +1,4 @@
-"""Testes para scripts/import_graph.py (Wave 7)."""
+"""Testes para henke/import_graph.py (Wave 7)."""
 from __future__ import annotations
 
 import sys
@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.import_graph import build_import_graph
+from henke.import_graph import build_import_graph
 
 
 def _write(root: Path, rel: str, content: str) -> None:

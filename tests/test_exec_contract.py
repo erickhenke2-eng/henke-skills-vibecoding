@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "henke"))
 
-from scripts.exec_contract import evaluate_execution  # noqa: E402
+from henke.exec_contract import evaluate_execution  # noqa: E402
 
 
 class TestNotTestCommand(unittest.TestCase):
@@ -85,11 +85,11 @@ class TestRunnerVerdicts(unittest.TestCase):
 class TestCliAutoConsistency(unittest.TestCase):
     def test_same_contract_module_for_both(self):
         """henke_cli e henke_auto resolvem o MESMO evaluate_execution."""
-        import scripts.exec_contract as ec
+        import henke.exec_contract as ec
         self.assertTrue(callable(ec.evaluate_execution))
-        # henke_auto chama via _load_module('exec_contract') → scripts.exec_contract
+        # henke_auto chama via _load_module('exec_contract') → henke.exec_contract
         import importlib
-        mod = importlib.import_module("scripts.exec_contract")
+        mod = importlib.import_module("henke.exec_contract")
         self.assertIs(mod.evaluate_execution, ec.evaluate_execution)
 
 

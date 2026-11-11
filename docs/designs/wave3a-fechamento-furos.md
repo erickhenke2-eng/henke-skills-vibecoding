@@ -45,8 +45,8 @@ Na auditoria adversarial da Suíte Henke (Wave 2.5), identificou-se furos de seg
    - Destrutivos imperativos classificam como `EXECUTAR`.
    - Perguntas preservam `ANALISAR`.
    - Vocabulário bilíngue PT/EN expandido.
-   - Quando `confidence == "none"`, portões mínimos de segurança são fornecidos: `["scripts/repo_signals.py", "scripts/metricas/hazard_scan.py"]`.
-   - `CARPINTEIRO` inclui `scripts/spec_drift.py`.
+   - Quando `confidence == "none"`, portões mínimos de segurança são fornecidos: `["henke/repo_signals.py", "henke/metricas/hazard_scan.py"]`.
+   - `CARPINTEIRO` inclui `henke/spec_drift.py`.
 
 ## 3. Contratos de Tipos, Entrada & Saída
 
@@ -59,11 +59,11 @@ Na auditoria adversarial da Suíte Henke (Wave 2.5), identificou-se furos de seg
 ## 4. Escopo Declarado
 
 - `docs/designs/wave3a-fechamento-furos.md`
-- `scripts/metricas/polyglot.py`
-- `scripts/metricas/hazard_scan.py`
-- `scripts/metricas/contract_closure.py`
-- `scripts/metricas/coverage_ledger.py`
-- `scripts/henke_router.py`
+- `henke/metricas/polyglot.py`
+- `henke/metricas/hazard_scan.py`
+- `henke/metricas/contract_closure.py`
+- `henke/metricas/coverage_ledger.py`
+- `henke/henke_router.py`
 - `evals/hazard_fixtures_manifest.json`
 - `evals/canaries_metricas.py`
 - `tests/test_metric_gates.py`
@@ -72,12 +72,12 @@ Na auditoria adversarial da Suíte Henke (Wave 2.5), identificou-se furos de seg
 
 ## 5. Pontes de Contrato
 
-- ponte: `scripts/metricas/polyglot.py::find_comment_spans -> scripts/metricas/hazard_scan.py`
-- ponte: `scripts/metricas/hazard_scan.py::scan_path -> evals/canaries_metricas.py`
-- ponte: `scripts/metricas/contract_closure.py::check_contract_closure -> evals/canaries_metricas.py`
-- ponte: `scripts/metricas/coverage_ledger.py::verify_ledger -> evals/canaries_metricas.py`
-- ponte: `scripts/henke_router.py::route_request -> tests/test_metric_gates.py`
-- ponte: `scripts/henke_router.py::"scripts/spec_drift.py" -> tests/test_metric_gates.py`
+- ponte: `henke/metricas/polyglot.py::find_comment_spans -> henke/metricas/hazard_scan.py`
+- ponte: `henke/metricas/hazard_scan.py::scan_path -> evals/canaries_metricas.py`
+- ponte: `henke/metricas/contract_closure.py::check_contract_closure -> evals/canaries_metricas.py`
+- ponte: `henke/metricas/coverage_ledger.py::verify_ledger -> evals/canaries_metricas.py`
+- ponte: `henke/henke_router.py::route_request -> tests/test_metric_gates.py`
+- ponte: `henke/henke_router.py::"henke/spec_drift.py" -> tests/test_metric_gates.py`
 
 ## 6. Casos de Borda & Matriz Pre-Mortem de 40 Anos (Estadista)
 
@@ -94,8 +94,8 @@ Na auditoria adversarial da Suíte Henke (Wave 2.5), identificou-se furos de seg
 
 ## 7. Ledger Esperado de Comandos
 
-- `python scripts/metricas/contract_closure.py --spec docs/designs/wave3a-fechamento-furos.md --repo .`
-- `python scripts/metricas/hazard_scan.py .`
+- `python henke/metricas/contract_closure.py --spec docs/designs/wave3a-fechamento-furos.md --repo .`
+- `python henke/metricas/hazard_scan.py .`
 - `python evals/canaries_metricas.py`
 - `python -m unittest discover -s tests -p "*.py"`
 

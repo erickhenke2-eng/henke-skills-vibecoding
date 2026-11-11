@@ -174,11 +174,11 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos & Segurança [MECÂNICO] — Sherlock Holmes (Cloudflare + Trail of Bits)
 
-1. **Varredura estática em 2 passes, IaC e Bundles**: `python scripts/metricas/hazard_scan.py <alvo> [--dist <dir>]` detecta:
+1. **Varredura estática em 2 passes, IaC e Bundles**: `python henke/metricas/hazard_scan.py <alvo> [--dist <dir>]` detecta:
    - **Código e runtime**: `HARDCODED-SECRET`, `ENV-COMMITTED`, `URL-CRED`, `SHELL-INJECTION`, `SQL-CONCAT`, `WEAK-CRYPTO`, `PATH-TRAVERSAL`, `UNBOUNDED-CONCURRENCY`, `UNSAFE-DESERIALIZE`, `XSS-RAW-HTML`, `ELECTRON-INSECURE-CONFIG`, `SSRF-UNVALIDATED`, `IDOR-NO-OWNERSHIP`, `JWT-NONE-OR-UNVERIFIED`, `CORS-CRED-WILDCARD`, `PROTO-POLLUTION`, `FRAME-INTROSPECTION` e `DYNAMIC-DISPATCH-IPC`.
    - **IaC / Multi-Cloud**: `CLOUD-IAM-WILDCARD`, `CLOUD-BUCKET-PUBLIC`, `CLOUD-SECRET-MATERIAL`, `DOCKER-ESCALATED`, `IMDS-V1`.
    - **Anti-fraude**: `UNJUSTIFIED-SUPPRESSION`.
 2. **Coverage Ledger & Dossier**:
-   - Inicialize fora do repo auditado: `python scripts/metricas/coverage_ledger.py init --root <dir> --out <ledger.json> [--profile quick|standard|deep]`
+   - Inicialize fora do repo auditado: `python henke/metricas/coverage_ledger.py init --root <dir> --out <ledger.json> [--profile quick|standard|deep]`
    - Preencha cada unidade (`covered` exige `checks[]` com `assumptions[]: {text, status: enforced|unenforced|unknown}`; `finding_confirmed` exige `trace[]` `source → sink` com `file:line` reais no disco + `boundary_crossed` + `real_impact` + `reproduction_cmd_or_poc`; dúvidas externas viram `needs_validation` **sem severidade**).
-   - Valide e gere a seção de lacunas: `python scripts/metricas/coverage_ledger.py verify <ledger.json> --min-pct 90` e `python scripts/metricas/coverage_ledger.py render-gaps <ledger.json>`.
+   - Valide e gere a seção de lacunas: `python henke/metricas/coverage_ledger.py verify <ledger.json> --min-pct 90` e `python henke/metricas/coverage_ledger.py render-gaps <ledger.json>`.

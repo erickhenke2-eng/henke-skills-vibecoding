@@ -1,4 +1,4 @@
-"""Testes do faxineiro com quarentena (`scripts/henke_clean.py`).
+"""Testes do faxineiro com quarentena (`henke/henke_clean.py`).
 
 Contrato: dry-run sem mutações, quarentena transacional com manifesto e hash,
 restore exigente (destino ausente + hash fiel), purga só após expiração com
@@ -20,7 +20,7 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.henke_clean import (
+from henke.henke_clean import (
     CleanCandidate,
     plan_clean,
     purge_expired_batch,
@@ -129,7 +129,7 @@ class TestQuarantine(unittest.TestCase):
                 raise OSError("segunda perna forçada")
             return real_replace(src, dst)
 
-        with patch("scripts.henke_clean.os.replace", side_effect=flaky):
+        with patch("henke.henke_clean.os.replace", side_effect=flaky):
             batch = quarantine(self.repo, [cand])
 
         # Nada movido; a origem voltou intacta e o staging guarda a cópia.
@@ -152,7 +152,7 @@ class TestQuarantine(unittest.TestCase):
                 raise OSError("primeira tentativa forçada")
             return real_replace(src, dst)
 
-        with patch("scripts.henke_clean.os.replace", side_effect=flaky):
+        with patch("henke.henke_clean.os.replace", side_effect=flaky):
             batch = quarantine(self.repo, [cand])
 
         self.assertEqual(len(batch.items), 1)
@@ -181,7 +181,7 @@ class TestQuarantine(unittest.TestCase):
                 raise OSError("segunda perna com origem recriada")
             return real_replace(src, dst)
 
-        with patch("scripts.henke_clean.os.replace", side_effect=flaky):
+        with patch("henke.henke_clean.os.replace", side_effect=flaky):
             batch = quarantine(self.repo, [cand])
 
         self.assertEqual(batch.items, ())
@@ -216,8 +216,8 @@ class TestQuarantine(unittest.TestCase):
                 raise OSError("arquivo bloqueado por outro processo")
             return real_rmtree(path, *a, **kw)
 
-        with patch("scripts.henke_clean.os.replace", side_effect=flaky), \
-             patch("scripts.henke_clean.shutil.rmtree", side_effect=honored):
+        with patch("henke.henke_clean.os.replace", side_effect=flaky), \
+             patch("henke.henke_clean.shutil.rmtree", side_effect=honored):
             batch = quarantine(self.repo, [cand])
 
         self.assertEqual(len(batch.items), 1)
@@ -235,7 +235,7 @@ class TestQuarantine(unittest.TestCase):
         """
         cache = self._seed_cache()
         cand = CleanCandidate(source=cache, kind="repo-cache", size_bytes=16)
-        with patch("scripts.henke_clean._tree_sha256",
+        with patch("henke.henke_clean._tree_sha256",
                    side_effect=["a" * 64, "b" * 64, "b" * 64]):
             batch = quarantine(self.repo, [cand])
         self.assertEqual(len(batch.items), 1)
@@ -335,7 +335,7 @@ class TestRestoreAndPurge(unittest.TestCase):
         manifest["items"][0]["sha256"] = "f" * 64
         # Banca-A 3: manifesto é assinado — adultera só o item e re-assina
         # com a chave da instalação para exercitar o caminho verified=False.
-        from scripts.henke_clean import _manifest_hmac
+        from henke.henke_clean import _manifest_hmac
         manifest["hmac"] = _manifest_hmac(self.repo, manifest)
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         n = restore_batch(self.repo, self.batch.batch_id)

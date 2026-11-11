@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Testes do executor mecânico de portões (scripts/henke_gates.py — proposta M3).
+Testes do executor mecânico de portões (henke/henke_gates.py — proposta M3).
 
 Cobre: vereditos por path (exit/sha/stderr_tail), ordem preservada sem parar no
 primeiro vermelho, portão desconhecido -> exit 2 sem exceção, despacho por nome
@@ -21,9 +21,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import scripts.henke_gates as henke_gates
-from scripts.henke_gates import MAX_REWORK, main as gates_main, run_gates
-from scripts.run_state import derive_run_outcome, init_run, record_gate
+import henke.henke_gates as henke_gates
+from henke.henke_gates import MAX_REWORK, main as gates_main, run_gates
+from henke.run_state import derive_run_outcome, init_run, record_gate
 
 GATE_OK_SRC = (
     "import sys\n"
@@ -96,7 +96,7 @@ class GatesRunnerTests(unittest.TestCase):
         self.assertTrue(res["all_green"])
 
     def test_portao_desconhecido_exit2_sem_excecao(self):
-        res = run_gates(str(self.repo), allow_external_gates=True, gates=["nao-existe", "scripts/tambem_nao.py"], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=["nao-existe", "henke/tambem_nao.py"], record=False)
         self.assertEqual([v["exit"] for v in res["verdicts"]], [2, 2])
         self.assertFalse(res["all_green"])
         self.assertEqual(res["verdicts"][0]["gate"], "nao-existe")
@@ -119,7 +119,7 @@ class GatesRunnerTests(unittest.TestCase):
         (self.repo / "tests" / "test_x.py").write_text(
             "def test_x():\n    assert True\n", encoding="utf-8"
         )
-        res = run_gates(str(self.repo), allow_external_gates=True, gates=["scripts/metricas/assertless_scan.py"], record=False)
+        res = run_gates(str(self.repo), allow_external_gates=True, gates=["henke/metricas/assertless_scan.py"], record=False)
         v = res["verdicts"][0]
         self.assertEqual(v["gate"], "assertless_scan")
         self.assertIn(str(self.repo / "tests"), v["cmd"])
@@ -186,7 +186,7 @@ class GatesRunnerTests(unittest.TestCase):
     def test_derive_mandatory_satisfeito_por_veredito_na(self):
         data = self._run_with_gates(
             {"hazard_scan": 0, "a11y_scan": 3},
-            mandatory=["scripts/metricas/hazard_scan.py", "scripts/metricas/a11y_scan.py"],
+            mandatory=["henke/metricas/hazard_scan.py", "henke/metricas/a11y_scan.py"],
         )
         outcome, reasons = derive_run_outcome(data)
         self.assertEqual(outcome, "verified", reasons)
@@ -194,7 +194,7 @@ class GatesRunnerTests(unittest.TestCase):
     def test_derive_mandatory_ausente_mesmo_com_na_presente(self):
         data = self._run_with_gates(
             {"hazard_scan": 0, "a11y_scan": 3},
-            mandatory=["scripts/metricas/hazard_scan.py", "scripts/metricas/ratchet.py"],
+            mandatory=["henke/metricas/hazard_scan.py", "henke/metricas/ratchet.py"],
         )
         outcome, reasons = derive_run_outcome(data)
         self.assertEqual(outcome, "blocked")

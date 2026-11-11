@@ -22,7 +22,7 @@ import tempfile
 import time
 import unittest
 
-from scripts.gate_cache import (
+from henke.gate_cache import (
     compute_cache_key,
     get_cached_gate,
     store_cached_gate,

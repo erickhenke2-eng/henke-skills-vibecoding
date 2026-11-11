@@ -22,8 +22,8 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 repo_root = Path(__file__).resolve().parents[1]
-MET = repo_root / "scripts" / "metricas"
-SIGNALS = repo_root / "scripts" / "repo_signals.py"
+MET = repo_root / "henke" / "metricas"
+SIGNALS = repo_root / "henke" / "repo_signals.py"
 
 
 def run(script: Path, *args, input_text=None, cwd=None):
@@ -341,10 +341,10 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         # --- 34..37: hazard_scan.py bilateral (scan_path + CLI) ---
         if str(repo_root) not in sys.path:
             sys.path.insert(0, str(repo_root))
-        from scripts.metricas.hazard_scan import scan_path
-        from scripts.metricas.coverage_ledger import init_ledger, verify_ledger
-        from scripts.metricas.contract_closure import check_contract_closure
-        from scripts.metricas.assertless_scan import scan_polyglot  # noqa: F401 — ponte contratual W4
+        from henke.metricas.hazard_scan import scan_path
+        from henke.metricas.coverage_ledger import init_ledger, verify_ledger
+        from henke.metricas.contract_closure import check_contract_closure
+        from henke.metricas.assertless_scan import scan_polyglot  # noqa: F401 — ponte contratual W4
 
         haz_bad = t / "haz_bad.py"
         fake_sk = "sk-proj-" + ("A9b8C7d6E5f4G3h2J1k0" * 2)
@@ -468,7 +468,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                code == 1 and "MISSING-DECLARED-FILE" in out and "BROKEN-BRIDGE-STRING" in out)
 
         # --- 43..45: henke_router.py bilateral ---
-        ROUTER = repo_root / "scripts" / "henke_router.py"
+        ROUTER = repo_root / "henke" / "henke_router.py"
         code, out = run(ROUTER, "--prompt", "audita a segurança desse projeto e caça vulnerabilidades")
         r_sec = json.loads(out) if code == 0 else {}
         sec_skills = [s["name"] for s in r_sec.get("skills", [])]
@@ -699,8 +699,8 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         r_carp = json.loads(out_carp) if code_carp == 0 else {}
         gates_carp = r_carp.get("gates_required", [])
         expect("Canário M60: henke_router fornece portões mínimos sob confidence=none e CARPINTEIRO inclui spec_drift",
-               "scripts/metricas/hazard_scan.py" in gates_none and "scripts/repo_signals.py" in gates_none
-               and "scripts/spec_drift.py" in gates_carp)
+               "henke/metricas/hazard_scan.py" in gates_none and "henke/repo_signals.py" in gates_none
+               and "henke/spec_drift.py" in gates_carp)
 
         # M61: hazard_scan manifesto sem entradas orfas e dogfooding limpo no repo (exit 0)
         man_p = repo_root / "evals" / "hazard_fixtures_manifest.json"
@@ -764,7 +764,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         # M64: metaconfig_diff flagra mutação em package.json.scripts não autorizada;
         # arquivo declarado na spec passa. Requer mini-repo git temporário.
         try:
-            from scripts.metricas.metaconfig_diff import check_metaconfig
+            from henke.metricas.metaconfig_diff import check_metaconfig
         except ImportError:
             check_metaconfig = None
         mc_dir = t / "m64_repo"
@@ -794,7 +794,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
             spec_mc.write_text("# S\n\n## 4. Escopo Declarado\n\n- `package.json`\n", encoding="utf-8")
             muts_auth, auth_req = check_metaconfig(mc_dir, "HEAD", spec_mc)
         code_mc, out_mc = run(MET / "metaconfig_diff.py", "--repo", mc_dir, "--against", "HEAD", "--json")
-        expect("Canário M64: metaconfig_diff reprova mutação de scripts/dependencies não autorizada e exige auth",
+        expect("Canário M64: metaconfig_diff reprova mutação de henke/dependencies não autorizada e exige auth",
                muts_clean == [] and auth_clean is False
                and any("package.json" in m for m in muts_dirty) and auth_dirty is True
                and code_mc == 1 and "METACONFIG-MUTATION" in out_mc and "requires_human_auth" in out_mc
@@ -803,10 +803,10 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         # M65: audit_ledger resolve grafo de hooks npm (pretest->test->posttest)
         # e reprova comando proibido escondido no posttest
         try:
-            from scripts.audit_ledger import resolve_npm_lifecycle
+            from henke.audit_ledger import resolve_npm_lifecycle
         except ImportError:
             resolve_npm_lifecycle = None
-        from scripts.audit_ledger import audit_ledger_content
+        from henke.audit_ledger import audit_ledger_content
         pkg_hook = {"scripts": {"pretest": "npm run lint", "test": "vitest run",
                                 "posttest": "npm publish --dry-run", "prelint": "echo pre",
                                 "lint": "eslint .", "postlint": "echo post"}}
@@ -957,10 +957,10 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                code_sw == 1 and "HIT-AND-SWALLOW" in out_sw, out_sw.strip()[:100])
 
         # ============ WAVE 5 — Banca Adversarial v4.0 (M71..M80) ============
-        from scripts.run_state import verify_run_file
-        from scripts.metricas.a11y_scan import scan_a11y_path
-        from scripts.metricas.mutant_hunt import run_mutant_hunt
-        from scripts.audit_ledger import verify_exec_log
+        from henke.run_state import verify_run_file
+        from henke.metricas.a11y_scan import scan_a11y_path
+        from henke.metricas.mutant_hunt import run_mutant_hunt
+        from henke.audit_ledger import verify_exec_log
 
         # M71: hazard_scan escopo intraprocedural e precedência de offset (sanitizer em fn_a não isenta fn_b)
         m71_bad = t / "m71_bad.ts"
@@ -1083,7 +1083,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                and ok_m75_rt, f"bad={errs_m75_bad} rt={errs_m75_rt}")
 
         # M76: spec_drift bloqueia curinga puro (**/*) e aprova glob recursivo (src/**)
-        from scripts.spec_drift import check_spec_drift, compute_spec_hash, is_path_in_scope
+        from henke.spec_drift import check_spec_drift, compute_spec_hash, is_path_in_scope
         m76_spec = m73_repo / "spec_wild.md"
         m76_spec.write_text("# S\n## 4. Escopo Declarado\n- `**/*`\n", encoding="utf-8")
         ok_m76, errs_m76 = check_spec_drift(m76_spec, expected_hash=compute_spec_hash(m76_spec), against="HEAD", git_root=m73_repo)
@@ -1119,7 +1119,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         # Run "ruim" precisa de custódia válida (nome=run_id, em .henke/runs/,
         # sidecar local) para alcançar a derivação — senão cai nas travas
         # anteriores (banca v8 F-06/F-16) sem exercitar o CONFLICT.
-        from scripts.run_state import write_anchor_sidecar as _m78_anchor
+        from henke.run_state import write_anchor_sidecar as _m78_anchor
         (t / ".henke" / "runs").mkdir(parents=True, exist_ok=True)
         m78_bad = t / ".henke" / "runs" / "r1.json"
         m78_bad.write_text(json.dumps({
@@ -1136,7 +1136,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         # atestação — depois do endurecimento banca v5, não verifica mais) E a
         # evidência sob custódia de .henke/evidence/<run_id>/ (confinamento v6)
         # E a tríade no manifesto local fora do repo (custódia v6).
-        from scripts.run_state import _append_evidence_manifest
+        from henke.run_state import _append_evidence_manifest
         (t / ".henke" / "evidence" / "r2").mkdir(parents=True)
         (t / ".henke" / "runs").mkdir(parents=True, exist_ok=True)
         m78_ok = t / ".henke" / "runs" / "r2.json"
@@ -1164,7 +1164,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         }), encoding="utf-8")
         # Custódia como init_run: sidecar de âncoras fora do repo (banca v8
         # F-06) — verify falha fechado sem ele.
-        from scripts.run_state import write_anchor_sidecar
+        from henke.run_state import write_anchor_sidecar
         write_anchor_sidecar("r2", None, None, None, repo_root=t,
                              fields={"mode": "EXECUTAR"})
         ok_r_ok, errs_r_ok = verify_run_file(m78_ok)
@@ -1196,7 +1196,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
         # M80: henke_cli exec grava exec_log.jsonl hash-encadeado e verify_exec_log bloqueia adulteração de testes_descobertos
         m80_dir = t / "m80_exec"
         m80_dir.mkdir()
-        CLI_SCRIPT = repo_root / "scripts" / "henke_cli.py"
+        CLI_SCRIPT = repo_root / "henke" / "henke_cli.py"
         # Comando real de teste (não texto de saída — desde o endurecimento banca
         # v5, `discovered>0` sozinho NÃO classifica o comando como runner).
         # unittest precisa de ≥1 teste real — py3.12 sai exit 5 com zero testes.
@@ -1220,7 +1220,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
 
         # M81: polyglot — '/' após keyword (return/typeof/etc.) é regex literal,
         # não abre comentário /*; '/' após identificador é divisão.
-        from scripts.metricas import polyglot as _pg
+        from henke.metricas import polyglot as _pg
         js_regex = "function f(){ return /a\\/*/; exec(cmd); }\n"
         masked_r = _pg.mask_c_like(js_regex, ".js")
         js_div = "function g(){ x = y / z /*comentario*/; exec(cmd2); }\n"
@@ -1231,7 +1231,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
 
         # M82: hazard — yaml.load exige loader seguro EXATO (AST); NotSafeLoader
         # e comentário mencionando SafeLoader não são bypass; unsafe_load sempre.
-        from scripts.metricas.hazard_scan import scan_path as _hz_scan
+        from henke.metricas.hazard_scan import scan_path as _hz_scan
         hz_dir = t / "m82_yaml"
         hz_dir.mkdir()
         (hz_dir / "evil.py").write_text(
@@ -1279,7 +1279,7 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                 "evidence_file": str(m84_ev), "evidence_sha256": m84_sha,
             }}}), encoding="utf-8")
         ok84, errs84 = verify_run_file(m84_run)
-        RS_SCRIPT = repo_root / "scripts" / "run_state.py"
+        RS_SCRIPT = repo_root / "henke" / "run_state.py"
         c84, o84 = run(RS_SCRIPT, "record-gate", str(m84_run),
                        "--gate", "stage_dispatch", "--exit-code", "0")
         # Custódia v6+v8: evidência plantada é rejeitada — ANCHOR-SIDECAR-

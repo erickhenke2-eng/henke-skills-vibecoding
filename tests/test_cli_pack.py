@@ -17,7 +17,7 @@ import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-_spec = importlib.util.spec_from_file_location("henke_cli", ROOT / "scripts" / "henke_cli.py")
+_spec = importlib.util.spec_from_file_location("henke_cli", ROOT / "henke" / "henke_cli.py")
 cli = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cli)
 
@@ -221,7 +221,7 @@ class CliPackTests(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_setup_cria_stubs_sem_sobrescrever(self):
         """setup: cria PROJECT.json (se henke_detect presente) + POLICY.json exato; idempotente."""
-        has_detect = importlib.util.find_spec("scripts.henke_detect") is not None
+        has_detect = importlib.util.find_spec("henke.henke_detect") is not None
         code, out, err = run_cli(["setup", str(self.repo)])
         if not has_detect:
             # Módulo de outro worker ausente -> mensagem honesta + exit 2, sem escrita parcial

@@ -141,6 +141,6 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos & Segurança [MECÂNICO]
 
-Antes de commitar ou aprovar blindagem: `python scripts/metricas/hazard_scan.py <arquivos-ou-dir>` (ou `../scripts/metricas/hazard_scan.py` relativo à skill instalada).
+Antes de commitar ou aprovar blindagem: `python henke/metricas/hazard_scan.py <arquivos-ou-dir>` (ou `../henke/metricas/hazard_scan.py` relativo à skill instalada).
 - Bloqueia (`exit 1`) segredos hardcoded (`sk-`, `ghp_`, `AKIA`, `AIza`, `PRIVATE KEY`, `VITE_*SECRET`), `.env`/`*.pem` commitados no Git (`ENV-COMMITTED`), `shell=True`/`exec` dinâmico, SQL interpolado e `Math.random()` em função de auth/token.
 - Exceções legítimas exigem supressão vinculada a regra e motivo: `# hazard-ok: SHELL-INJECTION — comando fixo validado`. Marcador `hazard-ok` sem motivo falha com `UNJUSTIFIED-SUPPRESSION`.

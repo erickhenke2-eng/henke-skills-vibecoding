@@ -37,16 +37,16 @@ def main() -> int:
             passed += 1
         print(f"[{tag}] {name} {detail}")
 
-    from scripts.process_supervisor import ChildSupervisor
-    from scripts.gate_parallel import (
+    from henke.process_supervisor import ChildSupervisor
+    from henke.gate_parallel import (
         GateSpec, aggregate_exit_code, run_gates_parallel,
     )
-    import scripts.winpath as winpath
-    import scripts.ephemeral as ephemeral
-    import scripts.henke_clean as henke_clean
-    import scripts.henke_session as henke_session
-    from scripts.metricas.scan_manifest import run_incremental_scan, scanner_specs
-    from scripts.test_impact import select_tests
+    import henke.winpath as winpath
+    import henke.ephemeral as ephemeral
+    import henke.henke_clean as henke_clean
+    import henke.henke_session as henke_session
+    from henke.metricas.scan_manifest import run_incremental_scan, scanner_specs
+    from henke.test_impact import select_tests
     from unittest.mock import patch
 
     # --- W7-1: supervisor mata a árvore no timeout (124) e limpa filho. ---
@@ -75,7 +75,7 @@ def main() -> int:
            and aggregate_exit_code(rs) == 2)
 
     # --- W7-3: run_process público NÃO expõe kill por PID. ---
-    import scripts.process_runner as pr
+    import henke.process_runner as pr
     expect("W7-3: fachada sem kill_process_tree/kill público",
            not hasattr(pr, "kill_process_tree")
            and not hasattr(pr, "kill")
@@ -83,25 +83,25 @@ def main() -> int:
 
     # --- W7-4: TIA — mudança em teste seleciona só ele; config → full. ---
     direct = {
-        "scripts/prod.py": frozenset(),
-        "tests/test_prod.py": frozenset({"scripts/prod.py"}),
+        "henke/prod.py": frozenset(),
+        "tests/test_prod.py": frozenset({"henke/prod.py"}),
     }
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)
-        for rel in ("scripts/prod.py", "tests/test_prod.py"):
+        for rel in ("henke/prod.py", "tests/test_prod.py"):
             p = repo / rel
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text("X=1\n", encoding="utf-8")
-        with patch("scripts.test_impact._discover",
+        with patch("henke.test_impact._discover",
                    return_value=(("tests/test_prod.py",), frozenset())):
             sel = select_tests(repo, "BASE", direct)
         expect("W7-4a: teste alterado seleciona a si mesmo",
                sel.mode == "selected" and sel.test_files == ("tests/test_prod.py",))
-        with patch("scripts.test_impact._discover",
+        with patch("henke.test_impact._discover",
                    return_value=(("pyproject.toml",), frozenset())):
             sel = select_tests(repo, "BASE", direct)
         expect("W7-4b: config/lock alterado força full", sel.mode == "full")
-        with patch("scripts.test_impact._discover",
+        with patch("henke.test_impact._discover",
                    return_value=((), frozenset())):
             sel = select_tests(repo, "BASE", direct)
         expect("W7-4c: no_changes -> selected vazio (nunca full)",
@@ -109,7 +109,7 @@ def main() -> int:
 
     # --- W7-5: manifesto incremental reusa arquivo intacto em repo externo. ---
     with tempfile.TemporaryDirectory() as td:
-        repo = Path(td)  # repo externo sem scripts/ — scanners vêm da suíte
+        repo = Path(td)  # repo externo sem henke/ — scanners vêm da suíte
         (repo / "p.html").write_text("<html><body>x</body></html>", encoding="utf-8")
         spec = {s.scanner_id: s for s in scanner_specs()}["a11y"]
         old_sd = os.environ.pop("HENKE_STATE_DIR", None)
@@ -124,7 +124,7 @@ def main() -> int:
                 os.environ["HENKE_STATE_DIR"] = old_sd
 
     # --- W7-6: 'henke watch' fora de TTY sai 2 (foreground-only). ---
-    code, out = run(ROOT / "scripts" / "henke_cli.py", "watch", "--repo", ROOT)
+    code, out = run(ROOT / "henke" / "henke_cli.py", "watch", "--repo", ROOT)
     expect("W7-6: watch sem TTY recusa com exit 2", code == 2)
 
     # --- W7-7: check --staged não grava manifesto nem cache. ---
@@ -136,7 +136,7 @@ def main() -> int:
         (repo / "ok.py").write_text("X=1\n", encoding="utf-8")
         subprocess.run(["git", "add", "-A"], cwd=td, capture_output=True)
         subprocess.run(["git", "commit", "-m", "i"], cwd=td, capture_output=True)
-        code, out = run(ROOT / "scripts" / "henke_cli.py", "check",
+        code, out = run(ROOT / "henke" / "henke_cli.py", "check",
                         "--repo", repo, "--staged")
         henke = repo / ".henke"
         expect("W7-7: staged não cria manifests/cache no worktree",

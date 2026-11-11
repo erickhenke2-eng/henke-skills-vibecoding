@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # henke — wrapper POSIX para a CLI global da Suíte Henke (v4.0).
-# Resolve scripts/henke_cli.py instalado ao lado deste diretório bin/;
+# Resolve henke/henke_cli.py instalado ao lado deste diretório bin/;
 # num wheel os scripts vivem em site-packages — cai no módulo instalado.
 set -eu
 
@@ -12,7 +12,7 @@ _py_works() {
 }
 
 BIN_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-HENKE_CLI="$BIN_DIR/../scripts/henke_cli.py"
+HENKE_CLI="$BIN_DIR/../henke/henke_cli.py"
 
 # R2-PT-06: -I (isolado) no LANÇADOR — ignora PYTHONPATH e user site, então
 # um sitecustomize.py do repo auditado nunca executa no processo. Sem isso o
@@ -25,11 +25,11 @@ if [ -f "$HENKE_CLI" ]; then
   exit 127
 fi
 
-# Instalação via wheel/pipx: <prefix>/henke_data/bin/henke com scripts/ em
+# Instalação via wheel/pipx: <prefix>/henke_data/bin/henke com henke/ em
 # site-packages — delega ao pacote importável (mesma resolução do console
 # script `henke` que o pip gera).
-if _py_works python3; then exec python3 -I -m scripts.henke_cli "$@"; fi
-if _py_works python; then exec python -I -m scripts.henke_cli "$@"; fi
-if _py_works py; then exec py -3 -I -m scripts.henke_cli "$@"; fi
+if _py_works python3; then exec python3 -I -m henke.henke_cli "$@"; fi
+if _py_works python; then exec python -I -m henke.henke_cli "$@"; fi
+if _py_works py; then exec py -3 -I -m henke.henke_cli "$@"; fi
 echo "henke: interpretador Python não encontrado" >&2
 exit 127
