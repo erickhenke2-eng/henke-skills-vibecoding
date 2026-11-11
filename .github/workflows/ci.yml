@@ -61,9 +61,13 @@ jobs:
           COVDIR=$(python -c "import tempfile; print(tempfile.mkdtemp())")
           COVRC="$COVDIR/henke.coveragerc"
           COVDATA="$COVDIR/henke_cov"
+          REPO_H=$(python -c "import os; print(os.path.abspath('henke'))")
           PURELIB=$(python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
           printf 'import os; os.getenv("COVERAGE_PROCESS_START") and __import__("coverage").process_startup()\n' > "$PURELIB/zz_henke_subprocess_cov.pth"
-          printf '[run]\nsource = henke\nparallel = true\ndata_file = %s\n' "$COVDATA" > "$COVRC"
+          # Testes rodam copias temporarias de henke/ — [paths] mapeia qualquer
+          # */henke para o modulo canonico do repo (mesma copia, mesma cobertura).
+          # ignore_errors: copias em temp ja deletadas no report nao quebram o passo.
+          printf '[run]\nsource = henke\nparallel = true\ndata_file = %s\n\n[paths]\nsource = %s */henke *\\henke\n\n[report]\nignore_errors = true\n' "$COVDATA" "$REPO_H" > "$COVRC"
           export COVERAGE_PROCESS_START="$COVRC"
           python -m coverage run --rcfile="$COVRC" -m unittest discover -s tests -p "test_*.py"
           python -m coverage combine --rcfile="$COVRC"
