@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import scripts.henke_cli  # noqa: F401,E402  (ponte declarada)
+import henke.henke_cli  # noqa: F401,E402  (ponte declarada)
 
-CLI = ROOT / "scripts" / "henke_cli.py"
+CLI = ROOT / "henke" / "henke_cli.py"
 
 
 def _cli(*args, cwd=None) -> subprocess.CompletedProcess:
@@ -113,7 +113,7 @@ class TestCleanCLI(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
             batch_id = next(
                 (repo / ".henke" / "quarantine").iterdir()).name
-            rc = scripts.henke_cli._cmd_clean(
+            rc = henke.henke_cli._cmd_clean(
                 repo, execute=True, restore=batch_id)
             self.assertEqual(rc, 0)
             self.assertTrue((pc / "x.pyc").is_file())
@@ -147,10 +147,11 @@ class TestCheckParallelAndManifests(unittest.TestCase):
                          f"{res.stdout[-800:]} {res.stderr[-400:]}")
 
     def test_manifest_files_created_on_check(self):
+        """PT-11: manifestos vivem em cache_root (fora do repo), não em state_dir."""
         with tempfile.TemporaryDirectory() as td:
-            sd = Path(td) / "state"
+            cd = Path(td) / "cache"
             env = os.environ.copy()
-            env["HENKE_STATE_DIR"] = str(sd)
+            env["HENKE_CACHE_DIR"] = str(cd)
             res = subprocess.run(
                 [sys.executable, str(CLI), "check", "--repo", ROOT],
                 capture_output=True, text=True, env=env, timeout=180,
@@ -159,8 +160,8 @@ class TestCheckParallelAndManifests(unittest.TestCase):
                              f"check na suíte deve passar limpo: "
                              f"{res.stdout[-600:]} {res.stderr[-300:]}")
             self.assertTrue(
-                (sd / "scan-manifests" / "a11y.json").is_file(),
-                f"manifesto a11y ausente em {sd}: {res.stderr[:300]}")
+                (cd / "scan-manifests" / "a11y.json").is_file(),
+                f"manifesto a11y ausente em {cd}: {res.stderr[:300]}")
 
 
 if __name__ == "__main__":

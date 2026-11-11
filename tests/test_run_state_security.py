@@ -20,7 +20,7 @@ repo_root = Path(__file__).resolve().parents[1]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from scripts.run_state import (
+from henke.run_state import (
     _append_evidence_manifest, _evidence_manifest_path, derive_run_outcome,
     verify_run_file, write_anchor_sidecar,
 )
@@ -237,12 +237,12 @@ class ForgedRunTests(unittest.TestCase):
         self.assertTrue(any("OUTSIDE-SCOPE" in r or "EVIDENCE" in r for r in reasons), reasons)
 
     def test_mandatory_gate_stem_matching(self):
-        """'hazard' casa 'scripts/metricas/hazard_scan.py'? Não — casa pelo stem
+        """'hazard' casa 'henke/metricas/hazard_scan.py'? Não — casa pelo stem
         do nome registrado do portão (ambos os lados normalizados)."""
         data = {
             "run_id": "r", "mode": "EXECUTAR",
             "mandatory_gates": ["hazard_scan"],
-            "gates": {"scripts/metricas/hazard_scan.py": _triad(self.t, "hs", 0),
+            "gates": {"henke/metricas/hazard_scan.py": _triad(self.t, "hs", 0),
                       "assertless_scan": _triad(self.t, "assertless_scan", 0),
                       "a11y_scan": _triad(self.t, "a11y_scan", 3)},
         }

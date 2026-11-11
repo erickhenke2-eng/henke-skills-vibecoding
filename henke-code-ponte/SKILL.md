@@ -147,6 +147,6 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos & Fechamento de Ponte [MECÂNICO]
 
-Declare toda ponte front↔back ou módulo↔handler↔IPC na seção `## 5. Pontes de Contrato` da spec (`docs/designs/<feature>.md`) e valide com `python scripts/metricas/contract_closure.py --spec docs/designs/<feature>.md --repo .` (ou `../scripts/metricas/contract_closure.py` relativo à skill instalada):
+Declare toda ponte front↔back ou módulo↔handler↔IPC na seção `## 5. Pontes de Contrato` da spec (`docs/designs/<feature>.md`) e valide com `python henke/metricas/contract_closure.py --spec docs/designs/<feature>.md --repo .` (ou `../henke/metricas/contract_closure.py` relativo à skill instalada):
 - **Modo Identificador**: `- ponte: packages/shared/schemas.ts::MeuContrato -> apps/web/api.ts` (verifica definição na origem e uso no destino).
 - **Modo String / Canal IPC**: `- ponte: apps/desktop/main/ipc.ts::"clips:list" -> apps/desktop/preload/index.ts` (verifica o literal do canal nos dois lados da ponte, impedindo canal órfão).

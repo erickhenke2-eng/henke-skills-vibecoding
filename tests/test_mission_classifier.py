@@ -30,7 +30,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.mission_classifier import (
+from henke.mission_classifier import (
     StackInfo,
     MissionClassification,
     detect_stacks,
@@ -375,7 +375,8 @@ class TestMissionClassifier(unittest.TestCase):
         self.assertTrue(data["stacks"]["rust"]["configured"])
 
     def test_prompt_unconfigured_stack_interactive_decline(self):
-        """Recusa no prompt interativo grava stack como desabilitada em CONFIG.json."""
+        """PT-11: recusa interativa NÃO persiste no repo — CONFIG.json fica
+        intocado (sujeira permanente no alvo auditado era o achado)."""
         cfg_file = self.repo_path / ".henke" / "CONFIG.json"
         cfg_file.parent.mkdir()
         cfg_file.write_text('{"stacks": {}}', encoding="utf-8")
@@ -385,8 +386,7 @@ class TestMissionClassifier(unittest.TestCase):
             self.assertFalse(res)
 
         data = json.loads(cfg_file.read_text(encoding="utf-8"))
-        self.assertFalse(data["stacks"]["rust"]["enabled"])
-        self.assertEqual(data["stacks"]["rust"].get("reason"), "user_declined")
+        self.assertNotIn("rust", data["stacks"])
 
     def test_prompt_unconfigured_stack_non_interactive(self):
         """Em modo não-interativo, bypassa a stack e retorna False sem travar."""
@@ -426,6 +426,26 @@ class TestMissionClassifier(unittest.TestCase):
         self.assertIn("detected_stacks", payload)
         stack_names = [s["name"] for s in payload["detected_stacks"]]
         self.assertIn("python", stack_names)
+
+    def test_classify_repository_honors_config_gates_and_test_cmd_overrides(self):
+        (self.repo_path / "pyproject.toml").write_text("[project]\nname = 'x'\n", encoding="utf-8")
+        (self.repo_path / ".henke").mkdir(parents=True, exist_ok=True)
+        (self.repo_path / ".henke" / "CONFIG.json").write_text(
+            json.dumps({
+                "stacks": {
+                    "python": {
+                        "enabled": True,
+                        "configured": True,
+                        "test_cmd": "pytest -q",
+                        "gates": ["hazard", "assertless", "metaconfig"],
+                    }
+                }
+            }),
+            encoding="utf-8",
+        )
+        res = classify_repository(self.repo_path)
+        self.assertIn("metaconfig", res.active_gates)
+        self.assertIn("pytest -q", res.active_test_commands)
 
 
 if __name__ == "__main__":

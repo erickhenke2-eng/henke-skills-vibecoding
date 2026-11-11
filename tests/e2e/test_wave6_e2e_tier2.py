@@ -18,13 +18,6 @@ from tests.e2e.e2e_common import (
     SUITE_ROOT,
     SCRIPTS_DIR,
     CLI_PATH,
-    HAS_MISSION_CLASSIFIER,
-    HAS_PROCESS_RUNNER,
-    HAS_INSTALL_HOOK,
-    HAS_GATE_CACHE,
-    HAS_REPORT_GENERATOR,
-    CLI_HAS_INSTALL_HOOK,
-    CLI_HAS_REPORT,
     git_init,
     run_cli,
     setup_mock_stack,
@@ -50,8 +43,6 @@ class TestTier2MissionClassifierBoundaries(unittest.TestCase):
 
     def test_t2_r1_empty_repository(self):
         """T2.1.1: Empty repo or docs-only repo returns empty stack list without crashing."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         (self.repo_path / "notes.txt").write_text("just notes", encoding="utf-8")
         detected = classifier.detect_stacks(self.repo_path)
@@ -59,8 +50,6 @@ class TestTier2MissionClassifierBoundaries(unittest.TestCase):
 
     def test_t2_r1_pruned_directories_ignored(self):
         """T2.1.2: Manifests inside node_modules, .git, dist, target are pruned."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         
         # Place package.json only in node_modules and Cargo.toml in target
@@ -78,8 +67,6 @@ class TestTier2MissionClassifierBoundaries(unittest.TestCase):
 
     def test_t2_r1_corrupted_manifest_files(self):
         """T2.1.3: Malformed package.json (broken JSON) handled without unhandled exception."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         (self.repo_path / "package.json").write_text("{ unclosed json: true, ", encoding="utf-8")
         try:
@@ -90,8 +77,6 @@ class TestTier2MissionClassifierBoundaries(unittest.TestCase):
 
     def test_t2_r1_ambiguous_build_files(self):
         """T2.1.4: Makefile in pure Go repo does not misclassify as C/C++ without C files."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         setup_mock_stack(self.repo_path, "go")
         (self.repo_path / "Makefile").write_text("build:\n\tgo build .\n", encoding="utf-8")
@@ -103,8 +88,6 @@ class TestTier2MissionClassifierBoundaries(unittest.TestCase):
 
     def test_t2_r1_case_insensitivity_windows(self):
         """T2.1.5: File names with varied case (Package.json, pyproject.TOML) handled safely."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         (self.repo_path / "PYPROJECT.toml").write_text('[project]\nname = "case-test"\n', encoding="utf-8")
         detected = classifier.detect_stacks(self.repo_path)
@@ -125,8 +108,6 @@ class TestTier2InstallHookBoundaries(unittest.TestCase):
 
     def test_t2_r2_missing_git_directory(self):
         """T2.2.1: Non-git directory fails gracefully with exit code 2."""
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         non_git = tempfile.TemporaryDirectory()
         try:
             installer = get_install_hook_module()
@@ -138,8 +119,6 @@ class TestTier2InstallHookBoundaries(unittest.TestCase):
 
     def test_t2_r2_empty_or_whitespace_hook(self):
         """T2.2.2: Pre-existing empty or whitespace-only pre-commit hook replaced safely."""
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         hook_path = self.repo_path / ".git" / "hooks" / "pre-commit"
         hook_path.parent.mkdir(parents=True, exist_ok=True)
         hook_path.write_text("   \n\n\t  ", encoding="utf-8")
@@ -152,8 +131,6 @@ class TestTier2InstallHookBoundaries(unittest.TestCase):
 
     def test_t2_r2_force_flag_without_prior_hook(self):
         """T2.2.3: Force flag works normally even when no prior hook exists."""
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         hook_path = self.repo_path / ".git" / "hooks" / "pre-commit"
         if hook_path.exists():
             hook_path.unlink()
@@ -169,8 +146,6 @@ class TestTier2InstallHookBoundaries(unittest.TestCase):
         custom_hooks.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "config", "core.hooksPath", ".githooks"], cwd=str(self.repo_path), check=True, capture_output=True)
 
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         installer = get_install_hook_module()
         ok, msg = installer.install_hook(self.repo_path)
         self.assertTrue(ok)
@@ -186,8 +161,6 @@ class TestTier2InstallHookBoundaries(unittest.TestCase):
             subprocess.run(["git", "worktree", "add", str(wt_path), "-b", "wt-branch"], cwd=str(self.repo_path), check=True, capture_output=True)
             self.assertTrue((wt_path / ".git").is_file(), ".git should be a file in worktree")
             
-            if not HAS_INSTALL_HOOK:
-                self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
             installer = get_install_hook_module()
             ok, msg = installer.install_hook(wt_path)
             self.assertTrue(ok)
@@ -208,16 +181,12 @@ class TestTier2ProcessRunnerBoundaries(unittest.TestCase):
 
     def test_t2_r3_zero_or_submillisecond_timeout(self):
         """T2.3.1: Zero or submillisecond timeout triggers immediate timeout and kills process."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         res = runner.run_process([sys.executable, "-c", "import time; time.sleep(10)"], cwd=self.work_dir, timeout_sec=0.001)
         self.assertTrue(res.timed_out)
 
     def test_t2_r3_massive_stdout_buffer_saturation(self):
         """T2.3.2: Process emitting 5MB of stdout before timeout does not deadlock OS pipe buffer."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         # Generates large output
         code = "import sys; sys.stdout.write('x' * (5 * 1024 * 1024))"
@@ -228,8 +197,6 @@ class TestTier2ProcessRunnerBoundaries(unittest.TestCase):
 
     def test_t2_r3_nonexistent_executable(self):
         """T2.3.3: Nonexistent binary returns non-zero without crashing runner."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         try:
             res = runner.run_process(["nonexistent_binary_xyz_12345", "--arg"], cwd=self.work_dir)
@@ -240,8 +207,6 @@ class TestTier2ProcessRunnerBoundaries(unittest.TestCase):
 
     def test_t2_r3_string_command_execution(self):
         """T2.3.4: Accepts string command in addition to list of tokens."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         cmd_str = f'"{sys.executable}" -c "print(12345)"'
         res = runner.run_process(cmd_str, cwd=self.work_dir)
@@ -250,8 +215,6 @@ class TestTier2ProcessRunnerBoundaries(unittest.TestCase):
 
     def test_t2_r3_already_dead_process_on_timeout(self):
         """T2.3.5: Taskkill on already dead process handled without crashing (error code 128)."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         # Process exits immediately
         res = runner.run_process([sys.executable, "-c", "import sys; sys.exit(0)"], cwd=self.work_dir, timeout_sec=0.01)
@@ -271,8 +234,6 @@ class TestTier2ReportGeneratorBoundaries(unittest.TestCase):
 
     def test_t2_r4_empty_henke_directory(self):
         """T2.4.1: Report generation when .henke has no runs generates clean empty state dashboard."""
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         out = rep_gen.generate_report(self.repo_path)
         self.assertTrue(out.is_file())
@@ -281,8 +242,6 @@ class TestTier2ReportGeneratorBoundaries(unittest.TestCase):
 
     def test_t2_r4_nonexistent_output_parent_directory(self):
         """T2.4.2: Creates parent directories automatically when custom --out has nonexistent dirs."""
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         deep_out = self.repo_path / "deep" / "nested" / "reports" / "summary.html"
         out = rep_gen.generate_report(self.repo_path, output_file=deep_out)
@@ -295,8 +254,6 @@ class TestTier2ReportGeneratorBoundaries(unittest.TestCase):
         findings = [{"gate": f"gate_{i}", "file": f"src/file_{i}.py", "msg": f"Finding {i}"} for i in range(500)]
         (henke_dir / "LEDGER.json").write_text(json.dumps({"findings": findings, "verdict": "REPROVADO"}), encoding="utf-8")
 
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         out = rep_gen.generate_report(self.repo_path)
         self.assertTrue(out.is_file())
@@ -309,8 +266,6 @@ class TestTier2ReportGeneratorBoundaries(unittest.TestCase):
         malicious = "<script>alert('xss')</script>"
         (henke_dir / "LEDGER.json").write_text(json.dumps({"findings": [{"msg": malicious}], "verdict": malicious}), encoding="utf-8")
 
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         out = rep_gen.generate_report(self.repo_path)
         content = out.read_text(encoding="utf-8")
@@ -322,8 +277,6 @@ class TestTier2ReportGeneratorBoundaries(unittest.TestCase):
         runs_dir.mkdir(parents=True, exist_ok=True)
         (runs_dir / "r_bad.json").write_text("{ unclosed bad json", encoding="utf-8")
 
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         try:
             out = rep_gen.generate_report(self.repo_path)
@@ -349,8 +302,6 @@ class TestTier2GateCacheBoundaries(unittest.TestCase):
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text("{ truncated corrupt file...", encoding="utf-8")
 
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         # Should return None without raising json.JSONDecodeError
         res = cache.get_cached_gate("any_key")
@@ -358,8 +309,6 @@ class TestTier2GateCacheBoundaries(unittest.TestCase):
 
     def test_t2_r5_zero_or_low_ram_limit_evicts_all(self):
         """T2.5.2: Setting RAM limit to 0 MB forces eviction of all entries."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         for i in range(5):
             cache.store_cached_gate(f"item_{i}", {"data": i})
@@ -368,8 +317,6 @@ class TestTier2GateCacheBoundaries(unittest.TestCase):
 
     def test_t2_r5_empty_key_or_empty_dict(self):
         """T2.5.3: Empty key or empty dict handled gracefully."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         cache.store_cached_gate("", {})
         res = cache.get_cached_gate("")
@@ -377,8 +324,6 @@ class TestTier2GateCacheBoundaries(unittest.TestCase):
 
     def test_t2_r5_rapid_sequential_cache_access(self):
         """T2.5.4: 50 consecutive store and get operations maintain consistency."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         for i in range(50):
             cache.store_cached_gate(f"seq_{i}", {"val": i * 2})

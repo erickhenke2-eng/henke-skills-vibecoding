@@ -1,4 +1,4 @@
-"""Testes do diretório de estado Henke (`scripts/state_paths.py`).
+"""Testes do diretório de estado Henke (`henke/state_paths.py`).
 
 Contrato: `HENKE_STATE_DIR` absoluto redireciona `.henke`; relativo é erro de
 uso explícito; ausente, o estado fica em `<repo>/.henke`.
@@ -16,7 +16,7 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.state_paths import state_dir
+from henke.state_paths import state_dir
 
 
 class TestStateDir(unittest.TestCase):

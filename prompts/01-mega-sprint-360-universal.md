@@ -19,7 +19,7 @@ Sua missão neste repositório é executar uma varredura completa na veia do pro
    - Inspecione `git status`, branch e HEAD.
    - **Regra de Worktrees:** Se o projeto possuir governança própria que exija isolamento (ex: Gauntlet ou worktrees em `.worktrees/`), opere dentro da worktree apropriada. Caso contrário, opere no checkout ativo registrando a fotografia de integridade.
    - **Proteção dos Dados do Dono:** É terminantemente proibido deletar, modificar ou limpar stashes pré-existentes, arquivos `.lnk`, atalhos `.bat`/`.sh`, pastas de credenciais locais (`.secrets/`, `.env`) ou logs de sessões anteriores.
-   - Se disponível no path, inicialize: `python scripts/henke_gate.py baseline`. Caso contrário, grave formalmente os arquivos sujos/limpos no inventário de memória.
+   - Se disponível no path, inicialize: `python henke/henke_gate.py baseline`. Caso contrário, grave formalmente os arquivos sujos/limpos no inventário de memória.
 2. **Setup da Memória do Projeto (`henke-prepara`):**
    - Garanta a pasta `.henke/` com `DIARIO.md`, `DECISOES.md` e crie `docs/designs/`.
    - Gere/atualize o mapa estrutural em `.henke/MAPA.md` identificando a árvore essencial e pontos de entrada.

@@ -12,34 +12,34 @@ Três vetores de contorno que nenhum portão atual cobre, consolidados num conse
 
 ## 2. Decisões Técnicas & Arquitetura
 
-1. **`scripts/metricas/metaconfig_diff.py`** (novo):
+1. **`henke/metricas/metaconfig_diff.py`** (novo):
    - CLI: `--repo <dir> --against <ref> [--spec <spec>] [--json]`.
    - Alvos protegidos: `package.json`, `pyproject.toml`, `Cargo.toml`, `build.rs`, `conftest.py`, `.github/workflows/*`, `.cargo/config(.toml)`.
    - Inspeção semântica: `package.json` compara `scripts`, `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`, `overrides`, `resolutions`, `publishConfig`, `bin` (diff por chave); TOML compara seções de dependências/build-system/scripts; `build.rs`, `conftest.py`, workflows e `.cargo/config` tratam qualquer diff (incl. arquivo novo/deletado) como mutação.
    - Autorização: arquivo listado em `## 4. Escopo Declarado` da spec fornecida via `--spec` é autorizado; qualquer outra mutação → `METACONFIG-MUTATION`, exit 1, saída JSON com `"requires_human_auth": true`.
    - Exit codes: `0` limpo, `1` mutação não autorizada, `2` erro de uso/ref inválida.
 
-2. **`scripts/audit_ledger.py`**: função `resolve_npm_lifecycle(cmd: str, pkg: dict) -> list[tuple[str, str]]` resolve o grafo de hooks npm (`npm test`/`pnpm test`/`yarn test` → `pretest`, `test`, `posttest`; `npm run X` → `preX`, `X`, `postX`), com guarda de ciclo. Cada comando do grafo passa pelas mesmas proibições do ledger (publish, etc.). Ativado via flag `--package-json <path>`.
+2. **`henke/audit_ledger.py`**: função `resolve_npm_lifecycle(cmd: str, pkg: dict) -> list[tuple[str, str]]` resolve o grafo de hooks npm (`npm test`/`pnpm test`/`yarn test` → `pretest`, `test`, `posttest`; `npm run X` → `preX`, `X`, `postX`), com guarda de ciclo. Cada comando do grafo passa pelas mesmas proibições do ledger (publish, etc.). Ativado via flag `--package-json <path>`.
 
-3. **`scripts/metricas/hazard_scan.py`**:
+3. **`henke/metricas/hazard_scan.py`**:
    - Flag `--dist <dir>`: escaneia diretório de build (extensões `.js`, `.mjs`, `.cjs`, `.map`, `.html`, `.json`), teto de 8MB/arquivo (oversize continua fail-closed), mesmo pipeline de regras por classe de máscara.
    - Regra `FRAME-INTROSPECTION` (classe código): `sys._getframe`, `inspect.stack(`, `inspect.currentframe`, `Error.prepareStackTrace`, `new Error(...).stack` parsing.
    - Regra `DYNAMIC-DISPATCH-IPC` (intraprocedural): corpo de função com registro IPC (`ipcMain|ipcRenderer|handle|invoke|channel`) + indexação dinâmica `ident[ident]` sem literal → flag.
 
-4. **`scripts/metricas/contract_closure.py`** (v2):
+4. **`henke/metricas/contract_closure.py`** (v2):
    - Sintaxe estendida: `- ponte: <origem>::"<CANAL>" -> <destino> [ações: "a1", "a2"]`.
    - `CHANNEL-LITERAL-DEAD`: literal do canal precisa aparecer como argumento direto de callsite (`…("CANAL"` ou `…,'CANAL'` dentro de chamada) no arquivo de origem; literal em declaração solta não fecha.
    - `COMPUTED-CHANNEL`: callsite IPC cujo primeiro argumento é `atob(`, `join(`, `.concat(`, template literal com `${` → reprovado.
    - `[ações: …]`: cada literal de ação deve aparecer no destino; ausente → `BROKEN-BRIDGE-ACTION` (exit 1).
    - `HIDDEN-DISPATCH`/`NO-DEFAULT-DENY`: no destino, handler registrando o canal com indexação dinâmica (`handlers[x]`, `obj[k]`, `getattr`) → flag; `switch` sem `default:` → flag.
 
-5. **`scripts/metricas/coverage_ledger.py`**:
+5. **`henke/metricas/coverage_ledger.py`**:
    - `--max-out-of-scope-per-dir-pct` (default 20.0): teto OOS por diretório-pai (dirs com ≥3 unidades); excesso → `DILUTED-OUT-OF-SCOPE` exit 1.
    - `--against <ref>`: arquivo com status `A` no diff marcado `out_of_scope` → `NEW-FILE-OUT-OF-SCOPE` exit 1.
 
-6. **`scripts/metricas/assertless_scan.py`**: `try`/`catch`/`except` (JS/TS/Py) e `.catch(())` sem `expect|assert|throw|pytest.raises|rejects|raise` no bloco → `HIT-AND-SWALLOW`.
+6. **`henke/metricas/assertless_scan.py`**: `try`/`catch`/`except` (JS/TS/Py) e `.catch(())` sem `expect|assert|throw|pytest.raises|rejects|raise` no bloco → `HIT-AND-SWALLOW`.
 
-7. **`scripts/henke_router.py`**: `scripts/metricas/metaconfig_diff.py` entra no conjunto de portões do `CARPINTEIRO`.
+7. **`henke/henke_router.py`**: `henke/metricas/metaconfig_diff.py` entra no conjunto de portões do `CARPINTEIRO`.
 
 ## 3. Contratos de Tipos, Entrada & Saída
 
@@ -53,24 +53,24 @@ Três vetores de contorno que nenhum portão atual cobre, consolidados num conse
 ## 4. Escopo Declarado
 
 - `docs/designs/wave4-consenso-adversarial.md`
-- `scripts/metricas/metaconfig_diff.py`
-- `scripts/metricas/hazard_scan.py`
-- `scripts/metricas/contract_closure.py`
-- `scripts/metricas/coverage_ledger.py`
-- `scripts/metricas/assertless_scan.py`
-- `scripts/audit_ledger.py`
-- `scripts/henke_router.py`
+- `henke/metricas/metaconfig_diff.py`
+- `henke/metricas/hazard_scan.py`
+- `henke/metricas/contract_closure.py`
+- `henke/metricas/coverage_ledger.py`
+- `henke/metricas/assertless_scan.py`
+- `henke/audit_ledger.py`
+- `henke/henke_router.py`
 - `evals/canaries_metricas.py`
 - `evals/hazard_fixtures_manifest.json`
 - `PROTOCOLO.md`
 
 ## 5. Pontes de Contrato
 
-- ponte: `scripts/metricas/metaconfig_diff.py::check_metaconfig -> evals/canaries_metricas.py`
-- ponte: `scripts/audit_ledger.py::resolve_npm_lifecycle -> evals/canaries_metricas.py`
-- ponte: `scripts/metricas/contract_closure.py::check_contract_closure -> evals/canaries_metricas.py`
-- ponte: `scripts/metricas/coverage_ledger.py::verify_ledger -> evals/canaries_metricas.py`
-- ponte: `scripts/metricas/assertless_scan.py::scan_polyglot -> evals/canaries_metricas.py`
+- ponte: `henke/metricas/metaconfig_diff.py::check_metaconfig -> evals/canaries_metricas.py`
+- ponte: `henke/audit_ledger.py::resolve_npm_lifecycle -> evals/canaries_metricas.py`
+- ponte: `henke/metricas/contract_closure.py::check_contract_closure -> evals/canaries_metricas.py`
+- ponte: `henke/metricas/coverage_ledger.py::verify_ledger -> evals/canaries_metricas.py`
+- ponte: `henke/metricas/assertless_scan.py::scan_polyglot -> evals/canaries_metricas.py`
 
 ## 6. Casos de Borda & Matriz Pre-Mortem de 40 Anos (Estadista)
 
@@ -86,10 +86,10 @@ Três vetores de contorno que nenhum portão atual cobre, consolidados num conse
 ## 7. Ledger Esperado de Comandos
 
 - `python evals/canaries_metricas.py` → M64+ vermelhos antes dos fixes; 100% verde depois.
-- `python scripts/metricas/hazard_scan.py .` → exit 0 (dogfooding).
-- `python scripts/spec_drift.py --expected-hash <hash> --against <spec-commit>` → exit 0.
-- `python scripts/metricas/contract_closure.py --repo . --spec docs/designs/wave4-consenso-adversarial.md --require-touched` → exit 0.
-- `python tests/test_metric_gates.py`, `python scripts/validate_skills.py` → verde.
+- `python henke/metricas/hazard_scan.py .` → exit 0 (dogfooding).
+- `python henke/spec_drift.py --expected-hash <hash> --against <spec-commit>` → exit 0.
+- `python henke/metricas/contract_closure.py --repo . --spec docs/designs/wave4-consenso-adversarial.md --require-touched` → exit 0.
+- `python tests/test_metric_gates.py`, `python henke/validate_skills.py` → verde.
 
 ## 8. O que NÃO será verificado
 

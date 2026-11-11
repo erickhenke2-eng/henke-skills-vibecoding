@@ -12,7 +12,7 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from evals.canaries import run_all_canaries, check_a11y_sr_only_cheat
-from scripts.audit_ledger import audit_ledger_content
+from henke.audit_ledger import audit_ledger_content
 
 
 class TestSpecDriftAndEvals(unittest.TestCase):

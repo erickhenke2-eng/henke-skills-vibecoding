@@ -1,8 +1,8 @@
-"""Testes para scripts/metricas/scan_manifest.py (Wave 7, R5).
+"""Testes para henke/metricas/scan_manifest.py (Wave 7, R5).
 
 Scanners, motor e configs resolvem SEMPRE da suíte Henke instalada — o
 repo auditado é somente dados. As fixtures usam repos externos sem
-`scripts/` para provar que o manifesto não depende nem executa código do
+`henke/` para provar que o manifesto não depende nem executa código do
 repo alvo (MUST FIX #1 da auditoria adversarial).
 """
 from __future__ import annotations
@@ -19,7 +19,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.metricas.scan_manifest import (
+from henke.state_paths import cache_root
+from henke.metricas.scan_manifest import (
     IncrementalScanResult, ScannerSpec, run_incremental_scan, scanner_specs,
 )
 
@@ -34,7 +35,7 @@ class TestScanManifest(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
         self.addCleanup(self._td.cleanup)
-        self.repo = Path(self._td.name)  # repo externo, sem scripts/ Henke
+        self.repo = Path(self._td.name)  # repo externo, sem henke/ Henke
         self._sd = os.environ.pop("HENKE_STATE_DIR", None)
         self.addCleanup(
             lambda: os.environ.__setitem__("HENKE_STATE_DIR", self._sd)
@@ -51,10 +52,23 @@ class TestScanManifest(unittest.TestCase):
             else:
                 os.environ["HENKE_SECRET_DIR"] = self._prev_secret_dir
         self.addCleanup(_restore_secret_dir)
+        # PT-11: manifestos vivem em cache_root (perfil). Isola também o
+        # cache — testes nunca tocam o perfil real do usuário.
+        self._cache_td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._cache_td.cleanup)
+        self._prev_cache_dir = os.environ.get("HENKE_CACHE_DIR")
+        os.environ["HENKE_CACHE_DIR"] = str(
+            Path(self._cache_td.name) / "cache")
+        def _restore_cache_dir():
+            if self._prev_cache_dir is None:
+                os.environ.pop("HENKE_CACHE_DIR", None)
+            else:
+                os.environ["HENKE_CACHE_DIR"] = self._prev_cache_dir
+        self.addCleanup(_restore_cache_dir)
         self.specs = {s.scanner_id: s for s in scanner_specs()}
 
     def test_scanners_resolve_from_suite_not_repo(self):
-        """Specs apontam para a suíte; repo externo sem scripts/ é escaneado."""
+        """Specs apontam para a suíte; repo externo sem henke/ é escaneado."""
         for spec in scanner_specs():
             self.assertTrue(spec.script_path.is_file(),
                             f"scanner inexistente: {spec.script_path}")
@@ -77,7 +91,7 @@ class TestScanManifest(unittest.TestCase):
         spec = self.specs["a11y"]
         r = run_incremental_scan(self.repo, spec, full=True)
 
-        script = ROOT / "scripts" / "metricas" / "a11y_scan.py"
+        script = ROOT / "henke" / "metricas" / "a11y_scan.py"
         proc = subprocess.run(
             [sys.executable, str(script), str(self.repo), "--json"],
             capture_output=True, text=True, timeout=60)
@@ -114,7 +128,7 @@ class TestScanManifest(unittest.TestCase):
         _write(self.repo, "page.html", "<html><body>ok</body></html>")
         spec = self.specs["a11y"]
         run_incremental_scan(self.repo, spec, full=True)
-        mdir = self.repo / ".henke" / "scan-manifests"
+        mdir = cache_root(self.repo) / "scan-manifests"
         for m in mdir.glob("*.json"):
             m.write_text("{corrupted", encoding="utf-8")
         r = run_incremental_scan(self.repo, spec)
@@ -124,7 +138,7 @@ class TestScanManifest(unittest.TestCase):
     def test_incomplete_tmp_ignored(self):
         _write(self.repo, "page.html", "<html><body>ok</body></html>")
         spec = self.specs["a11y"]
-        mdir = self.repo / ".henke" / "scan-manifests"
+        mdir = cache_root(self.repo) / "scan-manifests"
         mdir.mkdir(parents=True, exist_ok=True)
         (mdir / "a11y.json.tmp").write_text("{partial", encoding="utf-8")
         r = run_incremental_scan(self.repo, spec)
@@ -154,7 +168,7 @@ class TestScanManifest(unittest.TestCase):
         run_incremental_scan(self.repo, spec, full=True)
         # Spec injetada apontando para cópia com SCANNER_VERSION bumpado:
         # fingerprint diverge do manifesto → full rebuild.
-        suite_scanner = ROOT / "scripts" / "metricas" / "a11y_scan.py"
+        suite_scanner = ROOT / "henke" / "metricas" / "a11y_scan.py"
         with tempfile.TemporaryDirectory() as ext:
             bumped = Path(ext) / "a11y_scan.py"
             bumped.write_text(
@@ -170,7 +184,7 @@ class TestScanManifest(unittest.TestCase):
         _write(self.repo, "page.html", "<html><body>ok</body></html>")
         spec = self.specs["a11y"]
         run_incremental_scan(self.repo, spec, full=True)
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         self.assertTrue(mp.is_file())
         data = json.loads(mp.read_text(encoding="utf-8"))
         self.assertEqual(data["scanner"]["id"], "a11y")
@@ -192,7 +206,7 @@ class TestScanManifest(unittest.TestCase):
         _write(self.repo, "page.html", "<html><body>ok</body></html>")
         spec = self.specs["a11y"]
         run_incremental_scan(self.repo, spec, full=True)
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         data = json.loads(mp.read_text(encoding="utf-8"))
         self.assertIsInstance(data.get("hmac"), str)
         self.assertEqual(len(data["hmac"]), 64)
@@ -210,7 +224,7 @@ class TestScanManifest(unittest.TestCase):
         spec = self.specs["a11y"]
         r1 = run_incremental_scan(self.repo, spec, full=True)
         self.assertEqual(r1.exit_code, 1)
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         data = json.loads(mp.read_text(encoding="utf-8"))
         for entry in data["files"].values():
             entry["findings"] = []
@@ -228,7 +242,7 @@ class TestScanManifest(unittest.TestCase):
         _write(self.repo, "page.html", "<html><body>ok</body></html>")
         spec = self.specs["a11y"]
         run_incremental_scan(self.repo, spec, full=True)
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         data = json.loads(mp.read_text(encoding="utf-8"))
         del data["hmac"]
         mp.write_text(json.dumps(data), encoding="utf-8")
@@ -248,8 +262,8 @@ class TestScanManifest(unittest.TestCase):
         self.assertFalse((self.repo / ".henke" / ".cache_secret").exists())
         # Um tarball hostil entrega chave + manifesto assinado com ela:
         # o verificador usa a chave do perfil → hmac_invalid → full scan.
-        from scripts.metricas.scan_manifest import _manifest_hmac
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        from henke.metricas.scan_manifest import _manifest_hmac
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         data = json.loads(mp.read_text(encoding="utf-8"))
         data["hmac"] = _manifest_hmac(b"attacker-planted-key", data)
         mp.write_text(json.dumps(data), encoding="utf-8")
@@ -273,12 +287,12 @@ class TestScanManifest(unittest.TestCase):
         _write(self.repo, "page.html", "<html><body>v1</body></html>")
         spec = self.specs["a11y"]
         run_incremental_scan(self.repo, spec, full=True)
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         before = mp.read_bytes()
 
         _write(self.repo, "page.html", "<html><body>v2</body></html>")
 
-        import scripts.metricas.scan_manifest as sm
+        import henke.metricas.scan_manifest as sm
         real_scan_one = sm._scan_one
 
         def racing(repo_root, spec_, path, rel, mod, **kw):
@@ -300,7 +314,7 @@ class TestScanManifest(unittest.TestCase):
         _write(self.repo, "page.html", "<html><body>ok</body></html>")
         spec = self.specs["a11y"]
         run_incremental_scan(self.repo, spec, full=True)
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         mp.write_bytes(b'\xff\xfe{"schema_version": 1')
         r = run_incremental_scan(self.repo, spec)
         self.assertTrue(r.full_scan)
@@ -313,7 +327,7 @@ class TestScanManifest(unittest.TestCase):
         _write(self.repo, "page.html", "<html><body>ok</body></html>")
         spec = self.specs["a11y"]
         run_incremental_scan(self.repo, spec, full=True)
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         mp.write_text("[1, 2, 3]", encoding="utf-8")
         r = run_incremental_scan(self.repo, spec)
         self.assertTrue(r.full_scan)
@@ -325,7 +339,7 @@ class TestScanManifest(unittest.TestCase):
         _write(self.repo, "page.html", "<html><body>ok</body></html>")
         spec = self.specs["a11y"]
         run_incremental_scan(self.repo, spec, full=True)
-        mp = self.repo / ".henke" / "scan-manifests" / "a11y.json"
+        mp = cache_root(self.repo) / "scan-manifests" / "a11y.json"
         data = json.loads(mp.read_text(encoding="utf-8"))
         data["hmac"] = "áéíóú" * 13
         mp.write_text(json.dumps(data), encoding="utf-8")
@@ -336,12 +350,12 @@ class TestScanManifest(unittest.TestCase):
 
     def test_hmac_predicates_return_exact_booleans(self):
         """Predicados retornam bool/tupla exatos — nunca None disfarçado."""
-        from scripts.metricas.scan_manifest import (
+        from henke.metricas.scan_manifest import (
             _load_manifest, _manifest_hmac_ok, _secret_is_tracked,
         )
         outside = Path(self._td.name).parent / f"outside_{os.getpid()}"
         self.assertIs(_secret_is_tracked(self.repo, outside), False)
-        with patch("scripts.metricas.scan_manifest.subprocess.run",
+        with patch("henke.metricas.scan_manifest.subprocess.run",
                    side_effect=OSError("sem git")):
             self.assertIs(_secret_is_tracked(
                 self.repo, self.repo / ".henke" / ".cache_secret"), False)
@@ -350,7 +364,7 @@ class TestScanManifest(unittest.TestCase):
         self.assertIs(_manifest_hmac_ok(b"k", {"hmac": ""}), False)
         self.assertIs(_manifest_hmac_ok(b"k", {"hmac": 123}), False)
         spec = self.specs["a11y"]
-        mdir = self.repo / ".henke" / "scan-manifests"
+        mdir = cache_root(self.repo) / "scan-manifests"
         mdir.mkdir(parents=True)
         (mdir / "a11y.json").write_text(
             json.dumps({"schema_version": "old"}), encoding="utf-8")

@@ -16,7 +16,7 @@ Quem cria sistemas com IA no fluxo de vibecoding conhece bem o ciclo da loucura:
 4. **O Chute Aleatório no Debug:** O servidor dá erro 500 e a IA tenta 7 chutes no escuro, quebrando o banco, o contrato front-back e a sua paciência.
 5. **A Vitória Teatral (Falso-Verde):** A IA afirma que "todos os testes passaram com 100% de sucesso", mas quando você vai ver, ela escreveu testes sem nenhuma asserção real (`assertless`), criou mocks circulares ou usou truques de CSS (`.sr-only`) para forçar o teste a passar.
 
-A **Suíte Henke v4.0** nasceu para aniquilar esses 5 problemas combinando **58 Macro-Skills especializadas**, a **CLI unificada `henke`** (`scripts/henke_cli.py`) e **14 Portões Mecânicos determinísticos (fail-closed exit code)**.
+A **Suíte Henke v4.0** nasceu para aniquilar esses 5 problemas combinando **58 Macro-Skills especializadas**, a **CLI unificada `henke`** (`henke/henke_cli.py`) e **14 Portões Mecânicos determinísticos (fail-closed exit code)**.
 
 ---
 
@@ -35,19 +35,19 @@ flowchart LR
    - **Postura:** Desconfiança metódica, raciocínio abdutivo, consenso multi-modelo e evidência física irrefutável.
    - **Regra:** Nunca acredita em afirmação sem prova, nunca altera código durante a investigação e proíbe "severidade teatral" sem cadeia de exploração real.
    - **Skills:** [`henke-audit-seguranca`](./henke-audit-seguranca/SKILL.md), [`henke-audit-banca`](./henke-audit-banca/SKILL.md), [`henke-audit-perf`](./henke-audit-perf/SKILL.md), [`henke-test-mutantes`](./henke-test-mutantes/SKILL.md), [`henke-debug-raiz`](./henke-debug-raiz/SKILL.md), [`henke-audit-vibecode`](./henke-audit-vibecode/SKILL.md).
-   - **Portões Mecânicos:** [`repo_signals.py`](./scripts/repo_signals.py), [`hazard_scan.py`](./scripts/metricas/hazard_scan.py), [`coverage_ledger.py`](./scripts/metricas/coverage_ledger.py), [`a11y_scan.py`](./scripts/metricas/a11y_scan.py), [`mutant_hunt.py`](./scripts/metricas/mutant_hunt.py).
+   - **Portões Mecânicos:** [`repo_signals.py`](./henke/repo_signals.py), [`hazard_scan.py`](./henke/metricas/hazard_scan.py), [`coverage_ledger.py`](./henke/metricas/coverage_ledger.py), [`a11y_scan.py`](./henke/metricas/a11y_scan.py), [`mutant_hunt.py`](./henke/metricas/mutant_hunt.py).
 
 2. **🔨 O CARPINTEIRO BRABO (Engenheiro Full-Stack Pragmático):**
    - **Postura:** O bisturi cirúrgico. Constrói com a menor mudança necessária (Minimal Diff), alinha contratos rígidos entre pontas, blinda integrações LLM/RAG e nunca quebra pontes por falta de cuidado.
    - **Regra:** Nem código a mais (`touched ⊆ declared` via `spec_drift`), nem código a menos (`declared ⊆ touched` via `contract_closure`).
    - **Skills:** [`henke-code-cirurgico`](./henke-code-cirurgico/SKILL.md), [`henke-code-ponte`](./henke-code-ponte/SKILL.md), [`henke-code-contratos`](./henke-code-contratos/SKILL.md), [`henke-code-llm`](./henke-code-llm/SKILL.md), [`henke-ops-observa`](./henke-ops-observa/SKILL.md), [`henke-blindagem`](./henke-blindagem/SKILL.md).
-   - **Portões Mecânicos:** [`spec_drift.py`](./scripts/spec_drift.py), [`contract_closure.py`](./scripts/metricas/contract_closure.py), [`ratchet.py`](./scripts/metricas/ratchet.py), [`assertless_scan.py`](./scripts/metricas/assertless_scan.py), [`mutant_hunt.py`](./scripts/metricas/mutant_hunt.py), [`run_state.py`](./scripts/run_state.py).
+   - **Portões Mecânicos:** [`spec_drift.py`](./henke/spec_drift.py), [`contract_closure.py`](./henke/metricas/contract_closure.py), [`ratchet.py`](./henke/metricas/ratchet.py), [`assertless_scan.py`](./henke/metricas/assertless_scan.py), [`mutant_hunt.py`](./henke/metricas/mutant_hunt.py), [`run_state.py`](./henke/run_state.py).
 
 3. **🏛️ O ESTADISTA DE 40 ANOS (Planejador de Longo Alcance):**
    - **Postura:** Visão de estadista. Premedita a arquitetura, desenha fronteiras limpas (3 Gavetas: UI $\to$ Core $\to$ Executores) e cria matrizes de pré-mortem antes de encostar no código.
    - **Regra:** Nenhum recurso é criado sem especificação clara de escopo, pontes de contrato e plano de reversão.
    - **Skills:** [`henke-plan-historias`](./henke-plan-historias/SKILL.md), [`henke-plan-mvp`](./henke-plan-mvp/SKILL.md), [`henke-prepara`](./henke-prepara/SKILL.md).
-   - **Portões Mecânicos:** [`TEMPLATE.md`](./docs/designs/TEMPLATE.md), [`fence_check.py`](./scripts/metricas/fence_check.py).
+   - **Portões Mecânicos:** [`TEMPLATE.md`](./docs/designs/TEMPLATE.md), [`fence_check.py`](./henke/metricas/fence_check.py).
 
 ---
 
@@ -57,19 +57,19 @@ Texto em prosa não segura agente de IA sob pressão. O que protege código de v
 
 | Portão Mecânico | Script | O que ele barra fisicamente |
 |---|---|---|
-| **CLI Global & Runner Auditado** | [`henke_cli.py`](./scripts/henke_cli.py) | **Execução sem prova (`henke exec`)**: roda os testes reais, extrai contagem, calcula `stdout_sha256` e grava em `.henke/exec_log.jsonl` (hash-encadeado) e `.henke/LEDGER.json`. Orquestra `init`, `doctor`, `route`, `exec`, `check`, `gate`, `approve`, `scope`, `goldfish`, `run`, `report`, `status`, `setup` e `auto`. |
-| **Máquina de Estados por Run** | [`run_state.py`](./scripts/run_state.py) | **Auto-atestado de vitória (`STATE-DERIVED-CONFLICT`)**: gerencia `.henke/runs/<run_id>.json` e deriva `outcome` (`verified\|failed\|blocked`) mecanicamente dos portões e do `exec_log.jsonl`. |
-| **Fechamento de Contrato** | [`contract_closure.py`](./scripts/metricas/contract_closure.py) | **Código de menos**: barra arquivos declarados ausentes, traversal em pontes (`PATH-TRAVERSAL-BRIDGE`) e pontes quebradas (símbolos sem export/import real `BROKEN-BRIDGE-IMPORT`, canais IPC literais `"clips:bake"` ou rotas `ROUTE:METHOD /path`). |
-| **Deriva de Especificação** | [`spec_drift.py`](./scripts/spec_drift.py) | **Código a mais / à toa**: barra qualquer arquivo alterado no `git status` que não conste na seção `## 4. Escopo Declarado` da spec, bloqueando escopos curingas (`WILDCARD-SCOPE-FORBIDDEN`). |
-| **Dossiê de Cobertura & SHA-256** | [`coverage_ledger.py`](./scripts/metricas/coverage_ledger.py) | **Pular arquivos difíceis**: indexa 100% dos arquivos com hash SHA-256. Reprova unidades `pending`, arquivos alterados pós-auditoria (`STALE-HASH`), diluição de `out_of_scope` ou cobertura abaixo de 90%. |
-| **Metaconfiguração & Anti-TOCTOU** | [`metaconfig_diff.py`](./scripts/metricas/metaconfig_diff.py) | **Mutação furtiva de build**: barra alterações em `scripts`, lifecycle hooks (`pretest`, `postinstall`), lockfiles, arquivos untracked (`??`), dependências e metaconfiguração (`package.json`, `pyproject.toml`, `Cargo.toml`, `conftest.py`, `Makefile`, CI) sem autorização humana explícita. |
-| **Varredura de Perigos (Hazards)** | [`hazard_scan.py`](./scripts/metricas/hazard_scan.py) | **Riscos em código, IaC, CI/CD e bundle**: análise intraprocedural (`XSS-RAW-HTML`, `UNBOUNDED-CONCURRENCY`, `IMDS-V1`), `SHELL-INJECTION`, `HARDCODED-SECRET`, `SQL-CONCAT`, `PATH-TRAVERSAL`, `WEAK-CRYPTO`, IaC Multi-Cloud, Pentest (`IDOR`, `SSRF`, `JWT`, `CORS`, `PROTO-POLLUTION`), CI/CD (`CI-PWN-REQUEST`, `CI-CURL-PIPE-SH`, `CI-SECRET-ECHO`) e proteção contra manifesto plantado. |
-| **Caça a Testes Fantasmas** | [`assertless_scan.py`](./scripts/metricas/assertless_scan.py) | **Testes teatrais**: reprova testes sem nenhuma asserção real, testes puramente `mock-only` e testes engolindo erros com `catch` (`HIT-AND-SWALLOW`). |
-| **Caça a Mutantes no Diff** | [`mutant_hunt.py`](./scripts/metricas/mutant_hunt.py) | **Testes fracos que aprovam código quebrado**: injeta mutações AST cirúrgicas nas linhas alteradas (`==` $\leftrightarrow$ `!=`, `+` $\leftrightarrow$ `-`, `True` $\leftrightarrow$ `False`) e barra se a suíte deixar mutantes sobreviverem (`SURVIVED-MUTANT`). |
-| **Scanner Anti-Cheat de A11y** | [`a11y_scan.py`](./scripts/metricas/a11y_scan.py) | **Trapaças visuais**: barra `.sr-only` duplicando texto visível (`A11Y-SR-ONLY-DUPLICATE`), elementos interativos ocultos (`A11Y-HIDDEN-INTERACTIVE`) e botões vazios (`A11Y-EMPTY-CONTROL`), preservando `.sr-only` legítimo em botões icon-only. |
-| **Complexidade vs Cobertura (CRAP)** | [`crap_score.py`](./scripts/metricas/crap_score.py) | **Código espaguete sem teste**: mede complexidade ciclomática poliglota (Python, TypeScript, Rust, Go) ponderada pela cobertura de testes. |
-| **Catraca Anti-Regressão** | [`ratchet.py`](./scripts/metricas/ratchet.py) | **Piora gradual**: barra qualquer commit que piore as métricas em relação ao baseline do repositório. |
-| **Fronteira Arquitetural (Fence)** | [`fence_check.py`](./scripts/metricas/fence_check.py) | **Violação de camadas**: garante que a UI nunca importe diretamente executores pesados de I/O ou backend interno (`ui -> core -> exec`). |
+| **CLI Global & Runner Auditado** | [`henke_cli.py`](./henke/henke_cli.py) | **Execução sem prova (`henke exec`)**: roda os testes reais, extrai contagem, calcula `stdout_sha256` e grava em `.henke/exec_log.jsonl` (hash-encadeado) e `.henke/LEDGER.json`. Orquestra `init`, `doctor`, `route`, `exec`, `check`, `gate`, `approve`, `scope`, `goldfish`, `run`, `report`, `status`, `setup` e `auto`. |
+| **Máquina de Estados por Run** | [`run_state.py`](./henke/run_state.py) | **Auto-atestado de vitória (`STATE-DERIVED-CONFLICT`)**: gerencia `.henke/runs/<run_id>.json` e deriva `outcome` (`verified\|failed\|blocked`) mecanicamente dos portões e do `exec_log.jsonl`. |
+| **Fechamento de Contrato** | [`contract_closure.py`](./henke/metricas/contract_closure.py) | **Código de menos**: barra arquivos declarados ausentes, traversal em pontes (`PATH-TRAVERSAL-BRIDGE`) e pontes quebradas (símbolos sem export/import real `BROKEN-BRIDGE-IMPORT`, canais IPC literais `"clips:bake"` ou rotas `ROUTE:METHOD /path`). |
+| **Deriva de Especificação** | [`spec_drift.py`](./henke/spec_drift.py) | **Código a mais / à toa**: barra qualquer arquivo alterado no `git status` que não conste na seção `## 4. Escopo Declarado` da spec, bloqueando escopos curingas (`WILDCARD-SCOPE-FORBIDDEN`). |
+| **Dossiê de Cobertura & SHA-256** | [`coverage_ledger.py`](./henke/metricas/coverage_ledger.py) | **Pular arquivos difíceis**: indexa 100% dos arquivos com hash SHA-256. Reprova unidades `pending`, arquivos alterados pós-auditoria (`STALE-HASH`), diluição de `out_of_scope` ou cobertura abaixo de 90%. |
+| **Metaconfiguração & Anti-TOCTOU** | [`metaconfig_diff.py`](./henke/metricas/metaconfig_diff.py) | **Mutação furtiva de build**: barra alterações em `scripts`, lifecycle hooks (`pretest`, `postinstall`), lockfiles, arquivos untracked (`??`), dependências e metaconfiguração (`package.json`, `pyproject.toml`, `Cargo.toml`, `conftest.py`, `Makefile`, CI) sem autorização humana explícita. |
+| **Varredura de Perigos (Hazards)** | [`hazard_scan.py`](./henke/metricas/hazard_scan.py) | **Riscos em código, IaC, CI/CD e bundle**: análise intraprocedural (`XSS-RAW-HTML`, `UNBOUNDED-CONCURRENCY`, `IMDS-V1`), `SHELL-INJECTION`, `HARDCODED-SECRET`, `SQL-CONCAT`, `PATH-TRAVERSAL`, `WEAK-CRYPTO`, IaC Multi-Cloud, Pentest (`IDOR`, `SSRF`, `JWT`, `CORS`, `PROTO-POLLUTION`), CI/CD (`CI-PWN-REQUEST`, `CI-CURL-PIPE-SH`, `CI-SECRET-ECHO`) e proteção contra manifesto plantado. |
+| **Caça a Testes Fantasmas** | [`assertless_scan.py`](./henke/metricas/assertless_scan.py) | **Testes teatrais**: reprova testes sem nenhuma asserção real, testes puramente `mock-only` e testes engolindo erros com `catch` (`HIT-AND-SWALLOW`). |
+| **Caça a Mutantes no Diff** | [`mutant_hunt.py`](./henke/metricas/mutant_hunt.py) | **Testes fracos que aprovam código quebrado**: injeta mutações AST cirúrgicas nas linhas alteradas (`==` $\leftrightarrow$ `!=`, `+` $\leftrightarrow$ `-`, `True` $\leftrightarrow$ `False`) e barra se a suíte deixar mutantes sobreviverem (`SURVIVED-MUTANT`). |
+| **Scanner Anti-Cheat de A11y** | [`a11y_scan.py`](./henke/metricas/a11y_scan.py) | **Trapaças visuais**: barra `.sr-only` duplicando texto visível (`A11Y-SR-ONLY-DUPLICATE`), elementos interativos ocultos (`A11Y-HIDDEN-INTERACTIVE`) e botões vazios (`A11Y-EMPTY-CONTROL`), preservando `.sr-only` legítimo em botões icon-only. |
+| **Complexidade vs Cobertura (CRAP)** | [`crap_score.py`](./henke/metricas/crap_score.py) | **Código espaguete sem teste**: mede complexidade ciclomática poliglota (Python, TypeScript, Rust, Go) ponderada pela cobertura de testes. |
+| **Catraca Anti-Regressão** | [`ratchet.py`](./henke/metricas/ratchet.py) | **Piora gradual**: barra qualquer commit que piore as métricas em relação ao baseline do repositório. |
+| **Fronteira Arquitetural (Fence)** | [`fence_check.py`](./henke/metricas/fence_check.py) | **Violação de camadas**: garante que a UI nunca importe diretamente executores pesados de I/O ou backend interno (`ui -> core -> exec`). |
 
 ---
 
@@ -83,7 +83,7 @@ Você **não precisa memorizar** 58 skills nem adivinhar qual chamar primeiro. B
 
 ### O Despacho Inteligente:
 1. **Estágio 0 (Descoberta Leve):** A IDE/CLI só injeta o nome e 1 linha de descrição no prompt. As 58 skills **não poluem o contexto de tokens**.
-2. **Estágio 1 (Roteador Determinístico):** O script [`henke_router.py`](./scripts/henke_router.py) (ou `henke route`) analisa a intenção em milissegundos contra a fonte única da verdade (`SKILL.md` frontmatters + pontos de partida):
+2. **Estágio 1 (Roteador Determinístico):** O script [`henke_router.py`](./henke/henke_router.py) (ou `henke route`) analisa a intenção em milissegundos contra a fonte única da verdade (`SKILL.md` frontmatters + pontos de partida):
    - Aplica word-boundaries `\b`, desambiguação de verbos compostos (`"audita e corrige"`), afinidade com arquivos modificados (`_touched_files`) e a tabela de **Desambiguação Negativa** (`NEGATIVE_DISAMBIGUATION`, padrão *NVIDIA Skills Finder*).
    - Trava o **Modo de Operação** (`ANALISAR` por padrão em perguntas/auditorias; `requires_human_auth: true` em comandos `PUBLISH` como deploy, rollback ou faxina destrutiva).
    - Devolve **apenas as 1 a 3 skills essenciais** para a rodada atual (ou `skills: []` se a pergunta for externa) — economia real de tokens de instrução, sem injetar o catálogo inteiro no contexto.
@@ -100,7 +100,7 @@ A eficácia da Suíte Henke é testada contra um corpus físico de **defeitos re
 | **Cobertura Instrumental de Defeitos** | `3/15` (20,0%) | `11/15` (73,3%) | **`100,0%`** |
 | **Defeitos Detectados (Recall)** | `3/15` (20,0%) | `11/15` (73,3%) | **`100,0%`** |
 | **Controles Legítimos Aprovados (Zero Falso-Positivo)** | `0` | `1/1` (100%) | **`100%`** |
-| **Canários Bilaterais (`canaries_metricas.py`)** | `5/5` | `38/38` | **`80/80` (100% PASS)** |
+| **Canários Bilaterais (`canaries_metricas.py`)** | `5/5` | `38/38` | **`84/84` (100% PASS)** |
 | **Inventário Validado (`validate_skills.py`)** | `49/49` | `49/49` | **`58/58` (100% PASS)** |
 
 > **Prova física em monorepo real (`virusclip`):** O scanner varreu **491 arquivos** em segundos sem estourar limites, indexou **264 unidades de código** no `coverage_ledger.py` com SHA-256 e priorizou automaticamente as 3 superfícies mais perigosas sem nenhuma intervenção humana.
@@ -209,17 +209,17 @@ chmod +x install.sh && ./install.sh
 ```bash
 cd henke-skills-vibecoding
 pipx install .        # ou: python -m pip install .
-henke doctor          # entrypoint [project.scripts] -> scripts.henke_cli:main
+henke doctor          # entrypoint [project.scripts] -> henke.henke_cli:main
 ```
 
 > **O que o instalador faz:**  
-> Ele valida a estrutura de todas as 58 skills, instala os scripts, o `docs/designs/TEMPLATE.md`, os wrappers `bin/henke` (sh) e `bin/henke.cmd` (Windows) e os portões mecânicos em `scripts/`, publicando atomicamente nos 4 diretórios canônicos de agentes:
+> Ele valida a estrutura de todas as 58 skills, instala os scripts, o `docs/designs/TEMPLATE.md`, os wrappers `bin/henke` (sh) e `bin/henke.cmd` (Windows) e os portões mecânicos em `henke/`, publicando atomicamente nos 4 diretórios canônicos de agentes:
 > - `~/.gemini/config/skills` (Google Antigravity e Gemini CLI)
 > - `~/.claude/skills` (Anthropic Claude Code)
 > - `~/.agents/skills` (OpenAI Codex / Padrão Aberto)
 > - `~/.gemini/skills` (Mirror de Compatibilidade)
 >
-> Os wrappers ficam em `<destino>/bin/` e resolvem `<destino>/scripts/henke_cli.py` automaticamente. **Ao final, o instalador imprime a instrução de PATH** — adicione um dos diretórios `bin/` listados ao `PATH` para chamar `henke` de qualquer lugar (ou use a alternativa `pipx install .` acima, que registra o entrypoint automaticamente).
+> Os wrappers ficam em `<destino>/bin/` e resolvem `<destino>/henke/henke_cli.py` automaticamente. **Ao final, o instalador imprime a instrução de PATH** — adicione um dos diretórios `bin/` listados ao `PATH` para chamar `henke` de qualquer lugar (ou use a alternativa `pipx install .` acima, que registra o entrypoint automaticamente).
 
 ---
 
@@ -229,12 +229,12 @@ Para provar a robustez dos portões mecânicos na sua máquina:
 
 ```bash
 # 1. Valida estrutura das 58 skills
-python scripts/validate_skills.py
+python henke/validate_skills.py
 
 # 2. Roda os 5 canários comportamentais do PROTOCOLO
 python evals/canaries.py
 
-# 3. Roda os 80 canários bilaterais dos portões métricos (reprova o ruim e aprova o bom)
+# 3. Roda os 84 canários bilaterais dos portões métricos (reprova o ruim e aprova o bom)
 python evals/canaries_metricas.py
 
 # 4. Executa a suíte de testes unitários de integração

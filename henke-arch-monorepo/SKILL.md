@@ -75,7 +75,7 @@ projeto/
 │   ├── tipos.ts            # interfaces dos contratos
 │   ├── schemas.ts          # validação compartilhada
 │   └── constantes.ts       # rotas, enums, valores comuns
-└── scripts/                # utilitários (dev, build, setup)
+└── henke/                # utilitários (dev, build, setup)
 ```
 
 **Estratégia de junção — ordem de preferência pra vibecoding:**
@@ -100,7 +100,7 @@ projeto/
    ```json
    {
      "workspaces": ["frontend", "backend", "shared"],
-     "scripts": {
+     "henke": {
        "dev": "concurrently -n front,back -c blue,green \"npm run dev -w frontend\" \"npm run dev -w backend\"",
        "build": "npm run build -w shared && npm run build -w backend && npm run build -w frontend",
        "install:all": "npm install"

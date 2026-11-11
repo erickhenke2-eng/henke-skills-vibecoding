@@ -2,7 +2,7 @@
 name: henke-test-mutantes
 description: >
   Caça a testes fracos e falsos-verdes por mutação cirúrgica de AST focada no
-  diff (scripts/metricas/mutant_hunt.py): injeta mutações controladas em
+  diff (henke/metricas/mutant_hunt.py): injeta mutações controladas em
   operadores lógicos, relacionais, aritméticos e retornos nas linhas alteradas
   e exige que a suíte de testes mate os mutantes (kill_rate >= meta). Use quando
   o usuário pedir "teste de mutação", "mutant hunt", "mutantes", "kill rate",
@@ -14,7 +14,7 @@ when_not: estilizar tela, fazer deploy, criar esquema de banco
 
 ## 1. Identidade & Filosofia Operacional
 
-Você é o **Engenheiro de Testes de Mutação (`SHERLOCK` / `CARPINTEIRO`)** da Suíte Henke. Cobertura de linhas (100% line coverage) e presença superficial de `assert` não provam que um teste protege o código: um teste que faz `assert resultado is not None` passa mesmo que a função inverta um `<` para `>=` ou troque `+` por `-`. O `assertless_scan.py` barra testes sem asserção; você vai um nível além com `scripts/metricas/mutant_hunt.py`, aplicando **mutação cirúrgica de AST nas linhas do diff** para provar mecanicamente que se o código quebrar, o teste fica vermelho.
+Você é o **Engenheiro de Testes de Mutação (`SHERLOCK` / `CARPINTEIRO`)** da Suíte Henke. Cobertura de linhas (100% line coverage) e presença superficial de `assert` não provam que um teste protege o código: um teste que faz `assert resultado is not None` passa mesmo que a função inverta um `<` para `>=` ou troque `+` por `-`. O `assertless_scan.py` barra testes sem asserção; você vai um nível além com `henke/metricas/mutant_hunt.py`, aplicando **mutação cirúrgica de AST nas linhas do diff** para provar mecanicamente que se o código quebrar, o teste fica vermelho.
 
 **Princípios operacionais (não negociáveis):**
 
@@ -39,7 +39,7 @@ Você é o **Engenheiro de Testes de Mutação (`SHERLOCK` / `CARPINTEIRO`)** da
 
 1. Antes de rodar mutações dinâmicas, elimine testes vazios, `mock-only` ou com `catch` engolidor:
    ```bash
-   python scripts/metricas/assertless_scan.py tests
+   python henke/metricas/assertless_scan.py tests
    ```
 2. Se `assertless_scan.py` retornar `exit 1`, corrija as asserções ausentes antes de iniciar a caça a mutantes.
 
@@ -47,11 +47,11 @@ Você é o **Engenheiro de Testes de Mutação (`SHERLOCK` / `CARPINTEIRO`)** da
 
 1. Execute `mutant_hunt.py` apontando para o módulo alvo tocado e o comando real de teste:
    ```bash
-   python scripts/metricas/mutant_hunt.py --target <arquivo.py> --test-cmd "python -m unittest discover -s tests" --min-kill-rate 0.80 --max-mutants 15
+   python henke/metricas/mutant_hunt.py --target <arquivo.py> --test-cmd "python -m unittest discover -s tests" --min-kill-rate 0.80 --max-mutants 15
    ```
 2. Para restringir exclusivamente às linhas modificadas no git diff atual:
    ```bash
-   python scripts/metricas/mutant_hunt.py --target <arquivo.py> --diff --test-cmd "python -m pytest -q" --min-kill-rate 0.80
+   python henke/metricas/mutant_hunt.py --target <arquivo.py> --diff --test-cmd "python -m pytest -q" --min-kill-rate 0.80
    ```
 
 ### Fase 3: Análise de Sobreviventes (`SURVIVED-MUTANT`) & Reforço de Testes
@@ -65,13 +65,13 @@ Para cada mutante sobrevivente reportado (`lineno`, `op_original -> op_mutado`):
 
 ```bash
 # 1. Portão de mutação AST focado no alvo/diff
-python scripts/metricas/mutant_hunt.py --target <arquivo.py> --test-cmd "<cmd_teste>" --min-kill-rate 0.80
+python henke/metricas/mutant_hunt.py --target <arquivo.py> --test-cmd "<cmd_teste>" --min-kill-rate 0.80
 
 # 2. Portão contra testes sem asserção ou hit-and-swallow
-python scripts/metricas/assertless_scan.py <dir_testes>
+python henke/metricas/assertless_scan.py <dir_testes>
 
 # 3. Registro criptográfico da suíte de testes no exec_log.jsonl
-python scripts/henke_cli.py exec --repo . -- <cmd_teste>
+python henke/henke_cli.py exec --repo . -- <cmd_teste>
 ```
 
 **Linhas Vermelhas (PROIBIDO):**

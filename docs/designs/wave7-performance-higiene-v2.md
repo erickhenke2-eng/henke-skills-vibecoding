@@ -38,10 +38,10 @@ A versão anterior misturava metas úteis com complexidade e riscos operacionais
 
 A Wave 6 já oferece pontos de partida reais:
 
-- `scripts/henke_cli.py` possui `check`, `--staged`, cache e hook nativo.
-- `scripts/process_runner.py` encapsula `Popen`, mas ainda usa `taskkill /F /T /PID` e fallback POSIX baseado no grupo obtido em runtime.
-- `scripts/install_hook.py` chama `check --staged --no-cache`.
-- `scripts/gate_cache.py` e os scanners ainda fazem caminhos e varreduras que precisam ser integrados sem duplicar motores.
+- `henke/henke_cli.py` possui `check`, `--staged`, cache e hook nativo.
+- `henke/process_runner.py` encapsula `Popen`, mas ainda usa `taskkill /F /T /PID` e fallback POSIX baseado no grupo obtido em runtime.
+- `henke/install_hook.py` chama `check --staged --no-cache`.
+- `henke/gate_cache.py` e os scanners ainda fazem caminhos e varreduras que precisam ser integrados sem duplicar motores.
 - `.github/workflows/ci.yml` já possui a matriz Ubuntu/Windows × Python 3.11/3.12.
 - `requirements.txt` contém somente a dependência já existente `PyYAML>=6.0,<7`; a Wave 7 não altera esse arquivo.
 
@@ -179,7 +179,7 @@ flowchart LR
 - Dentro de `GateResult`, `124` = timeout e `125` = supervisor indisponível; o agregador converte qualquer um deles em falha e jamais em cache verde.
 - Todos os módulos usam `sys.platform == "win32"` como guarda canônica de Win32. `startswith("win")` pode permanecer apenas em código legado não tocado.
 
-`scripts/state_paths.py`:
+`henke/state_paths.py`:
 
 ```python
 from pathlib import Path
@@ -196,7 +196,7 @@ def state_dir(repo_root: Path) -> Path:
     return repo_root.resolve() / ".henke"
 ```
 
-### 3.2 R7 — `scripts/winpath.py`
+### 3.2 R7 — `henke/winpath.py`
 
 ```python
 from dataclasses import dataclass
@@ -259,7 +259,7 @@ def sha256_file(path: Path, *, chunk_size: int = 1024 * 1024) -> FileDigest: ...
 
 **Contrato de `sha256_file`:** lê em blocos com `hashlib.sha256`, compara `(size, mtime_ns)` antes/depois e lança `UnstableFileError` se o arquivo mudou durante a leitura. Não segue reparse point e não retorna hash parcial.
 
-### 3.3 R7/R1 — `scripts/process_supervisor.py` e fachada `process_runner.py`
+### 3.3 R7/R1 — `henke/process_supervisor.py` e fachada `process_runner.py`
 
 ```python
 from dataclasses import dataclass
@@ -311,7 +311,7 @@ class ChildSupervisor:
 
 `run_process(...)` permanece como fachada compatível da Wave 6, delegando a um supervisor de um único filho. A função pública `kill_process_tree(pid)` deixa de existir: morte por PID arbitrário não faz mais parte da API.
 
-### 3.4 R1 — `scripts/gate_parallel.py`
+### 3.4 R1 — `henke/gate_parallel.py`
 
 ```python
 @dataclass(frozen=True)
@@ -358,7 +358,7 @@ henke check --repo <path> [--spec <repo-relative-md>] [--staged]
 
 `--staged` implica `--no-cache --full`, desativa watch, manifestos incrementais e cache de vereditos, e usa o diretório exportado como único alvo de leitura dos arquivos.
 
-### 3.5 R3 — `scripts/test_impact.py` por arquivo de teste
+### 3.5 R3 — `henke/test_impact.py` por arquivo de teste
 
 ```python
 @dataclass(frozen=True)
@@ -398,7 +398,7 @@ henke test-impact --repo <path> --base <git-ref> [--full] [--run] [--json]
 
 Sem `--run`, apenas emite a decisão. Com `--run`, executa via `ChildSupervisor` e `henke exec` registra o comando resolvido e os hashes da saída. No caso `no_changes`, retorna `0` sem criar subprocesso e registra a razão, em vez de invocar um runner com lista vazia.
 
-### 3.6 Grafo compartilhado — `scripts/import_graph.py`
+### 3.6 Grafo compartilhado — `henke/import_graph.py`
 
 ```python
 @dataclass(frozen=True)
@@ -416,7 +416,7 @@ A construção reutiliza o motor já existente em `repo_signals.py`: extrai `bui
 
 `reverse_closure(C)` retorna `C` mais todos os arquivos que dependem direta ou transitivamente de `C`. Ciclos são visitados uma única vez. Qualquer import interno não resolvido é registrado e força rebuild integral no consumidor.
 
-### 3.7 R5 — `scripts/metricas/scan_manifest.py`
+### 3.7 R5 — `henke/metricas/scan_manifest.py`
 
 #### 3.7.1 API e adapters
 
@@ -471,12 +471,12 @@ Cada scanner grava `<state_dir>/scan-manifests/<scanner_id>.json`; não existe m
     "graph_version": 1
   },
   "files": {
-    "scripts/example.py": {
+    "henke/example.py": {
       "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
       "size": 1200,
       "mtime_ns": 1794352800000000000,
       "status": "scanned",
-      "dependencies": ["scripts/helper.py"],
+      "dependencies": ["henke/helper.py"],
       "findings": []
     }
   }
@@ -503,7 +503,7 @@ Cada scanner grava `<state_dir>/scan-manifests/<scanner_id>.json`; não existe m
 - Manifesto corrompido ou truncado não é “cache vazio com zero findings”: é rebuild integral registrado.
 - `--full` executa tudo e regrava o manifesto somente após sucesso; `--staged` nem lê nem grava manifesto.
 
-### 3.8 R6 — `scripts/henke_watch.py`
+### 3.8 R6 — `henke/henke_watch.py`
 
 ```python
 @dataclass(frozen=True)
@@ -530,7 +530,7 @@ class WatchController:
 
 CLI: `henke watch --repo <path> [--quiet] [--poll-interval 0.75] [--debounce 0.30]`.
 
-### 3.9 R7 — `scripts/henke_clean.py` com quarentena
+### 3.9 R7 — `henke/henke_clean.py` com quarentena
 
 ```python
 @dataclass(frozen=True)
@@ -580,7 +580,7 @@ henke clean --repo <path> --purge-expired --execute --confirm-batch <batch-id>
 
 Logs ficam em `<state_dir>/clean_log.jsonl`, incluindo ação, batch, item, hash e resultado; segredos e conteúdo de arquivos nunca são registrados.
 
-### 3.10 R7 — `scripts/ephemeral.py`
+### 3.10 R7 — `henke/ephemeral.py`
 
 ```python
 @dataclass(frozen=True)
@@ -614,7 +614,7 @@ def ephemeral_gc(repo_root: Path, *, now: datetime) -> int: ...
 - Se o interpretador cair, o SO mata os filhos ao fechar os Jobs; o diretório remanescente só é removido por `ephemeral_gc` após expiração e validação do marker. Não se confia em PID para limpar ou matar.
 - `@ephemeral_test` injeta `ws` por keyword, preserva assinatura com `functools.wraps` e sempre executa `close()` em `finally`.
 
-### 3.11 R7 — `scripts/henke_session.py` e sentinel em `AGENTS.md`
+### 3.11 R7 — `henke/henke_session.py` e sentinel em `AGENTS.md`
 
 ```python
 @dataclass(frozen=True)
@@ -662,17 +662,17 @@ Bloco exato a acrescentar em `AGENTS.md`:
 ### 4.1 Arquivos novos
 
 - `docs/designs/wave7-performance-higiene-v2.md`
-- `scripts/state_paths.py`
-- `scripts/winpath.py`
-- `scripts/process_supervisor.py`
-- `scripts/gate_parallel.py`
-- `scripts/import_graph.py`
-- `scripts/test_impact.py`
-- `scripts/metricas/scan_manifest.py`
-- `scripts/henke_watch.py`
-- `scripts/henke_clean.py`
-- `scripts/ephemeral.py`
-- `scripts/henke_session.py`
+- `henke/state_paths.py`
+- `henke/winpath.py`
+- `henke/process_supervisor.py`
+- `henke/gate_parallel.py`
+- `henke/import_graph.py`
+- `henke/test_impact.py`
+- `henke/metricas/scan_manifest.py`
+- `henke/henke_watch.py`
+- `henke/henke_clean.py`
+- `henke/ephemeral.py`
+- `henke/henke_session.py`
 - `tests/test_state_paths.py`
 - `tests/test_winpath.py`
 - `tests/test_process_supervisor.py`
@@ -693,14 +693,14 @@ Bloco exato a acrescentar em `AGENTS.md`:
 - `AGENTS.md` — somente o Protocolo de Sessão com sentinel.
 - `.gitignore` — manifests locais, quarentena, sessões e estado efêmero; sem ignorar a spec.
 - `.github/workflows/ci.yml` — execução dos novos testes/canários na matriz já existente.
-- `scripts/henke_cli.py` — wiring dos comandos, planejador paralelo, staged estrito e flags.
-- `scripts/process_runner.py` — fachada compatível sobre o supervisor; remoção da morte pública por PID.
-- `scripts/repo_signals.py` — extração pura de build_dependency_edges, sem mudar o JSON de edges.
-- `scripts/gate_cache.py` — uso de state_dir e desativação total no staged; sem redesenho do cache.
-- `scripts/install_hook.py` — chamada staged/full/no-cache e preservação dos hooks legados.
-- `scripts/metricas/assertless_scan.py` — extração pura de scan_test_file, mantendo run() equivalente.
-- `scripts/metricas/hazard_scan.py` — exposição do adapter global/per-file sem alterar regras.
-- `scripts/metricas/a11y_scan.py` — assinatura de adapter e versionamento, sem alterar regras.
+- `henke/henke_cli.py` — wiring dos comandos, planejador paralelo, staged estrito e flags.
+- `henke/process_runner.py` — fachada compatível sobre o supervisor; remoção da morte pública por PID.
+- `henke/repo_signals.py` — extração pura de build_dependency_edges, sem mudar o JSON de edges.
+- `henke/gate_cache.py` — uso de state_dir e desativação total no staged; sem redesenho do cache.
+- `henke/install_hook.py` — chamada staged/full/no-cache e preservação dos hooks legados.
+- `henke/metricas/assertless_scan.py` — extração pura de scan_test_file, mantendo run() equivalente.
+- `henke/metricas/hazard_scan.py` — exposição do adapter global/per-file sem alterar regras.
+- `henke/metricas/a11y_scan.py` — assinatura de adapter e versionamento, sem alterar regras.
 - `tests/test_process_runner.py` — compatibilidade da fachada e novos testes de propriedade.
 - `tests/test_install_hook.py` — testes bilaterais de stage parcial e ausência de watch.
 - `tests/test_metric_gates.py` — compatibilidade dos três scanners após extração dos adapters.
@@ -709,10 +709,10 @@ Bloco exato a acrescentar em `AGENTS.md`:
 
 | Agente | Arquivos exclusivos durante construção | Arquivos que não pode editar |
 |---|---|---|
-| Flash A (`swe-2-flash-max`) | `scripts/winpath.py`, `tests/test_winpath.py` | Todos os demais |
-| Flash B (`swe-2-flash-max`) | `scripts/ephemeral.py`, `tests/test_ephemeral.py` | Supervisor, CLI, estado e demais módulos |
-| Flash C (`swe-2-flash-max`) | `scripts/henke_clean.py`, `tests/test_henke_clean.py` | Winpath, CLI, `.gitignore`, quarentena real do usuário |
-| Flash D (`swe-2-flash-max`) | `scripts/metricas/scan_manifest.py`, `tests/test_scan_manifest.py` | Scanners existentes, grafo, CLI e demais módulos |
+| Flash A (`swe-2-flash-max`) | `henke/winpath.py`, `tests/test_winpath.py` | Todos os demais |
+| Flash B (`swe-2-flash-max`) | `henke/ephemeral.py`, `tests/test_ephemeral.py` | Supervisor, CLI, estado e demais módulos |
+| Flash C (`swe-2-flash-max`) | `henke/henke_clean.py`, `tests/test_henke_clean.py` | Winpath, CLI, `.gitignore`, quarentena real do usuário |
+| Flash D (`swe-2-flash-max`) | `henke/metricas/scan_manifest.py`, `tests/test_scan_manifest.py` | Scanners existentes, grafo, CLI e demais módulos |
 | Devin SWE-2 Max | Demais arquivos declarados e integração | Não edita os oito arquivos exclusivos enquanto os flashes trabalham |
 | Kimi K3.1 Pro Max | Nenhum; relatórios e ledgers somente em `$TEMP` | Todo o código e a spec auditados |
 
@@ -722,25 +722,25 @@ Runtime paralelo usa `HENKE_STATE_DIR=<diretório-temporário-do-construtor>`. C
 
 ## 5. Pontes de Contrato
 
-- ponte: `scripts/state_paths.py::state_dir -> tests/test_state_paths.py`
-- ponte: `scripts/winpath.py::canonical_path -> tests/test_winpath.py`
-- ponte: `scripts/winpath.py::iter_tree -> tests/test_winpath.py`
-- ponte: `scripts/winpath.py::sha256_file -> tests/test_winpath.py`
-- ponte: `scripts/process_supervisor.py::ChildSupervisor -> tests/test_process_supervisor.py`
-- ponte: `scripts/process_runner.py::run_process -> tests/test_process_runner.py`
-- ponte: `scripts/gate_parallel.py::run_gates_parallel -> tests/test_gate_parallel.py`
-- ponte: `scripts/import_graph.py::build_import_graph -> tests/test_import_graph.py`
-- ponte: `scripts/test_impact.py::select_tests -> tests/test_impact.py`
-- ponte: `scripts/metricas/scan_manifest.py::run_incremental_scan -> tests/test_scan_manifest.py`
-- ponte: `scripts/henke_watch.py::WatchController -> tests/test_henke_watch.py`
-- ponte: `scripts/henke_clean.py::quarantine -> tests/test_henke_clean.py`
-- ponte: `scripts/henke_clean.py::restore_batch -> tests/test_henke_clean.py`
-- ponte: `scripts/ephemeral.py::ephemeral_workspace -> tests/test_ephemeral.py`
-- ponte: `scripts/ephemeral.py::ephemeral_test -> tests/test_ephemeral.py`
-- ponte: `scripts/henke_session.py::start_session -> tests/test_henke_session.py`
-- ponte: `scripts/henke_session.py::session_gc -> tests/test_henke_session.py`
-- ponte: `scripts/install_hook.py::install_hook -> tests/test_install_hook.py`
-- ponte: `scripts/henke_cli.py::main -> tests/test_wave7_integration.py`
+- ponte: `henke/state_paths.py::state_dir -> tests/test_state_paths.py`
+- ponte: `henke/winpath.py::canonical_path -> tests/test_winpath.py`
+- ponte: `henke/winpath.py::iter_tree -> tests/test_winpath.py`
+- ponte: `henke/winpath.py::sha256_file -> tests/test_winpath.py`
+- ponte: `henke/process_supervisor.py::ChildSupervisor -> tests/test_process_supervisor.py`
+- ponte: `henke/process_runner.py::run_process -> tests/test_process_runner.py`
+- ponte: `henke/gate_parallel.py::run_gates_parallel -> tests/test_gate_parallel.py`
+- ponte: `henke/import_graph.py::build_import_graph -> tests/test_import_graph.py`
+- ponte: `henke/test_impact.py::select_tests -> tests/test_impact.py`
+- ponte: `henke/metricas/scan_manifest.py::run_incremental_scan -> tests/test_scan_manifest.py`
+- ponte: `henke/henke_watch.py::WatchController -> tests/test_henke_watch.py`
+- ponte: `henke/henke_clean.py::quarantine -> tests/test_henke_clean.py`
+- ponte: `henke/henke_clean.py::restore_batch -> tests/test_henke_clean.py`
+- ponte: `henke/ephemeral.py::ephemeral_workspace -> tests/test_ephemeral.py`
+- ponte: `henke/ephemeral.py::ephemeral_test -> tests/test_ephemeral.py`
+- ponte: `henke/henke_session.py::start_session -> tests/test_henke_session.py`
+- ponte: `henke/henke_session.py::session_gc -> tests/test_henke_session.py`
+- ponte: `henke/install_hook.py::install_hook -> tests/test_install_hook.py`
+- ponte: `henke/henke_cli.py::main -> tests/test_wave7_integration.py`
 
 ## 6. Casos de Borda & Matriz Pré-Mortem de 40 Anos (Estadista)
 
@@ -748,7 +748,7 @@ Runtime paralelo usa `HENKE_STATE_DIR=<diretório-temporário-do-construtor>`. C
 |---|---|---|---|
 | Queda de energia / crash parcial | Manifesto ou quarentena finge operação completa | Escrita atômica, staging, hash antes/depois, sentinel sem autoridade de morte | Interromper entre staging e rename; manifesto anterior permanece válido e restore não sobrescreve destino |
 | Escala 100x / efeito tornado | Pipes bloqueiam, saída consome RAM, watch dispara tempestade | Máximo 4 filhos, dreno com teto, debounce, single-flight, `os.scandir` com poda | Filho emite mais de 1 MiB e outro dorme; todos os resultados chegam, truncamento fica explícito |
-| Direção de dependência | Watch/UI controla supervisor ou scanner importa apresentação | Executores independentes de CLI; CLI só chama APIs; `fence_check` no diff | Grafo não contém aresta de `scripts/metricas` para `henke_watch` ou `henke_cli` |
+| Direção de dependência | Watch/UI controla supervisor ou scanner importa apresentação | Executores independentes de CLI; CLI só chama APIs; `fence_check` no diff | Grafo não contém aresta de `henke/metricas` para `henke_watch` ou `henke_cli` |
 | Evolução & migração de estado | Scanner novo reutiliza findings antigos | `schema_version`, `scanner_version`, script SHA-256, args/config/graph fingerprints | Alterar um byte do scanner ou helper invalida todos os arquivos |
 | Fronteira de falsificabilidade | Falso-verde por cache, seleção, stage ou exceção | Fallback full, snapshot instável = 2, resultados com findings reais, testes bilaterais | Cada otimização possui um caso que prova o caminho permitido e outro que força full/bloqueio |
 | PID reuse | Processo alheio morre por sentinel antigo | Handles vivos apenas; `owner_pid` nunca é usado para matar | Sentinel com PID reciclado termina sem sinal para o processo correspondente |
@@ -774,12 +774,12 @@ O cronograma abaixo define **ordem, dependências e portões**, não estimativas
 - [ ] Confirmar `git -C F:\DEV\ACTIVE\henke-skills-w7 status --short --branch`, `git rev-parse HEAD` e `git branch --show-current`. Critério: worktree limpa, `36cb454dd9ef05a08a9f77545de82252ead9659b`, `feat/wave7-perf-higiene`.
 - [ ] Se a worktree não existisse em outro ambiente, criar com `git -C F:\DEV\ACTIVE\henke-skills worktree add F:\DEV\ACTIVE\henke-skills-w7 -b feat/wave7-perf-higiene 36cb454`; como ela já existe aqui, este comando não deve ser executado nesta máquina.
 - [ ] Copiar esta spec para `docs/designs/wave7-performance-higiene-v2.md`, calcular SHA-256 e obter aprovação humana do modo `EXECUTAR` e do escopo.
-- [ ] Medir baseline com `python scripts/henke_cli.py exec --repo . -- python -m unittest discover -s tests -p "test_*.py"` e `python scripts/henke_cli.py exec --repo . -- python evals/bench_corpus.py --suite-dir .`. Critério: códigos e hashes registrados; falha pré-existente bloqueia a Wave até decisão humana.
-- [ ] Medir `check` sequencial com `python scripts/henke_cli.py exec --repo . -- python scripts/henke_cli.py check --repo . --full --no-cache --jobs 1 --json`. Guardar duração e veredito como comparação, sem ainda afirmar ganho.
+- [ ] Medir baseline com `python henke/henke_cli.py exec --repo . -- python -m unittest discover -s tests -p "test_*.py"` e `python henke/henke_cli.py exec --repo . -- python evals/bench_corpus.py --suite-dir .`. Critério: códigos e hashes registrados; falha pré-existente bloqueia a Wave até decisão humana.
+- [ ] Medir `check` sequencial com `python henke/henke_cli.py exec --repo . -- python henke/henke_cli.py check --repo . --full --no-cache --jobs 1 --json`. Guardar duração e veredito como comparação, sem ainda afirmar ganho.
 
 #### Task 1 — Flash A: caminhos canônicos e walk seguro
 
-**Arquivos:** `scripts/winpath.py`, `tests/test_winpath.py`.
+**Arquivos:** `henke/winpath.py`, `tests/test_winpath.py`.
 
 - [ ] Escrever testes RED para prefixo drive e UNC idempotente, caminho >260 caracteres, Unicode, `nul`, `con.txt`, `aux `, `..`, namespace `\\.\`, ordem determinística, arquivo instável e junction cíclica. Exemplo bilateral:
 
@@ -793,38 +793,38 @@ def test_reserved_names_are_rejected_for_write(self):
             self.assertFalse(is_reserved_component(name))
 ```
 
-- [ ] Rodar `python scripts/henke_cli.py exec --repo . -- python -m unittest tests.test_winpath -v`; esperado RED por módulo/símbolos ausentes.
+- [ ] Rodar `python henke/henke_cli.py exec --repo . -- python -m unittest tests.test_winpath -v`; esperado RED por módulo/símbolos ausentes.
 - [ ] Implementar exatamente os contratos §3.2, sem seguir reparse points e sem dependências.
 - [ ] Repetir o comando; critério GREEN, incluindo criação/leitura longa no Windows e testes puros equivalentes no Ubuntu.
 
 #### Task 2 — Orquestrador: supervisor por propriedade
 
-**Arquivos:** `scripts/process_supervisor.py`, `scripts/process_runner.py`, `scripts/state_paths.py`, `tests/test_process_supervisor.py`, `tests/test_process_runner.py`, `tests/test_state_paths.py`.
+**Arquivos:** `henke/process_supervisor.py`, `henke/process_runner.py`, `henke/state_paths.py`, `tests/test_process_supervisor.py`, `tests/test_process_runner.py`, `tests/test_state_paths.py`.
 
 - [ ] Substituir o teste que espera `kill_process_tree(pid)` por teste que prova ausência da API pública e exige `ChildSupervisor`.
 - [ ] Escrever teste real filho → neto: ambos dormem; timeout do pai retorna 124 e os dois PIDs criados desaparecem. O cleanup do teste usa somente handles ainda pertencentes ao teste, nunca enumeração global.
 - [ ] Escrever falha injetada de `AssignProcessToJobObject`: o filho suspenso é encerrado pelo próprio handle, nenhum código do filho executa e o resultado é `SUPERVISOR_UNAVAILABLE`.
 - [ ] No Ubuntu, criar um processo de controle fora do grupo do filho e provar que permanece vivo após timeout; no Windows, provar o mesmo com um processo de controle não associado ao Job.
-- [ ] Implementar supervisor e fachada. Rodar `python scripts/henke_cli.py exec --repo . -- python -m unittest tests.test_process_supervisor tests.test_process_runner tests.test_state_paths -v`; critério GREEN e zero processo fixture sobrevivente.
+- [ ] Implementar supervisor e fachada. Rodar `python henke/henke_cli.py exec --repo . -- python -m unittest tests.test_process_supervisor tests.test_process_runner tests.test_state_paths -v`; critério GREEN e zero processo fixture sobrevivente.
 
 #### Task 3 — Flash B: fixtures efêmeras
 
-**Arquivos:** `scripts/ephemeral.py`, `tests/test_ephemeral.py`. Pode ser construída em paralelo usando o contrato §3.3.
+**Arquivos:** `henke/ephemeral.py`, `tests/test_ephemeral.py`. Pode ser construída em paralelo usando o contrato §3.3.
 
 - [ ] Testar contenção de `path_for("../x")`, escrita UTF-8, exceção propagada, `close()` idempotente, decorador com injeção de `ws` e TTL menor que o comando.
 - [ ] Testar crash com um processo fixture que cria filho/neto e chama `os._exit(1)`: o SO deve encerrar a árvore pelo Job; `ephemeral_gc` remove somente o diretório expirado com marker correto.
 - [ ] Implementar §3.10 e integrar por import à API pública do supervisor, sem editar seu arquivo.
-- [ ] Rodar `python scripts/henke_cli.py exec --repo . -- python -m unittest tests.test_ephemeral -v`; critério GREEN e diretórios/PIDs fixtures limpos.
+- [ ] Rodar `python henke/henke_cli.py exec --repo . -- python -m unittest tests.test_ephemeral -v`; critério GREEN e diretórios/PIDs fixtures limpos.
 
 #### Task 4 — Flash C: quarentena restaurável
 
-**Arquivos:** `scripts/henke_clean.py`, `tests/test_henke_clean.py`. Usa o contrato estável de `winpath.py` em paralelo.
+**Arquivos:** `henke/henke_clean.py`, `tests/test_henke_clean.py`. Usa o contrato estável de `winpath.py` em paralelo.
 
 - [ ] Provar dry-run inalterado: snapshot recursivo com hashes antes/depois é idêntico.
 - [ ] Provar quarentena → restore com hashes idênticos; destino existente bloqueia restore; path traversal, reparse e nomes reservados são recusados.
 - [ ] Provar que purga antes de `expires_at` não altera bytes; purga sem `--confirm-batch` igual ao ID não executa; purga de batch inexistente retorna 2.
 - [ ] Provar que targets fora da allowlist não aparecem no plano mesmo com nomes sugestivos como `dist`, `build` ou brain de outro agente.
-- [ ] Implementar §3.9 e rodar `python scripts/henke_cli.py exec --repo . -- python -m unittest tests.test_henke_clean -v`; critério GREEN sem apagar qualquer diretório real do usuário.
+- [ ] Implementar §3.9 e rodar `python henke/henke_cli.py exec --repo . -- python -m unittest tests.test_henke_clean -v`; critério GREEN sem apagar qualquer diretório real do usuário.
 
 **Portão da Fase 1:** Kimi executa auditoria independente das Tasks 0–4. Nenhuma otimização começa antes de corrigir achados de propriedade, contenção ou perda de dados.
 
@@ -834,16 +834,16 @@ def test_reserved_names_are_rejected_for_write(self):
 
 #### Task 5 — Orquestrador: grafo único e Test Impact Analysis
 
-**Arquivos:** `scripts/import_graph.py`, `scripts/test_impact.py`, `scripts/repo_signals.py`, `scripts/henke_cli.py` (somente wiring de `test-impact`), `tests/test_import_graph.py`, `tests/test_impact.py`.
+**Arquivos:** `henke/import_graph.py`, `henke/test_impact.py`, `henke/repo_signals.py`, `henke/henke_cli.py` (somente wiring de `test-impact`), `tests/test_import_graph.py`, `tests/test_impact.py`.
 
-- [ ] Extrair `build_dependency_edges` e provar que `python scripts/repo_signals.py edges --root .` produz o mesmo JSON da baseline em um corpus fixo.
-- [ ] Criar fixtures `test_a -> scripts/a`, `test_b -> tests/helper_b -> scripts/b` e mudança em `scripts/c` não indexada. Critérios: A é selecionado ao mudar A; B é selecionado ao mudar seu helper e também ao mudar `scripts/b` pelo fechamento transitivo; mudança em C força full.
+- [ ] Extrair `build_dependency_edges` e provar que `python henke/repo_signals.py edges --root .` produz o mesmo JSON da baseline em um corpus fixo.
+- [ ] Criar fixtures `test_a -> henke/a`, `test_b -> tests/helper_b -> henke/b` e mudança em `henke/c` não indexada. Critérios: A é selecionado ao mudar A; B é selecionado ao mudar seu helper e também ao mudar `henke/b` pelo fechamento transitivo; mudança em C força full.
 - [ ] Testar deleção, arquivo untracked, import dinâmico, sintaxe inválida, fixture comum, config e `--full`; todos os casos incertos forçam full ou `exit 2`.
-- [ ] Implementar §§3.5–3.6 e rodar `python scripts/henke_cli.py exec --repo . -- python -m unittest tests.test_import_graph tests.test_impact -v`; critério GREEN.
+- [ ] Implementar §§3.5–3.6 e rodar `python henke/henke_cli.py exec --repo . -- python -m unittest tests.test_import_graph tests.test_impact -v`; critério GREEN.
 
 #### Task 6 — Flash D: manifesto incremental por scanner
 
-**Arquivos:** `scripts/metricas/scan_manifest.py`, `tests/test_scan_manifest.py`.
+**Arquivos:** `henke/metricas/scan_manifest.py`, `tests/test_scan_manifest.py`.
 
 - [ ] Escrever testes para cold build, no-change reuse, mudança direta, mudança em dependência transitiva, deleção, scanner alterado, config alterada, args alterados, JSON corrompido, lock ocupado, crash antes de `os.replace` e arquivo que muda durante hash.
 - [ ] Exemplo de asserção essencial:
@@ -853,15 +853,15 @@ first = run_incremental_scan(repo, spec)
 second = run_incremental_scan(repo, spec)
 self.assertEqual(first.findings, second.findings)
 self.assertEqual(second.scanned_files, ())
-self.assertIn("scripts/example.py", second.reused_files)
+self.assertIn("henke/example.py", second.reused_files)
 ```
 
 - [ ] Implementar §3.7 com registry interno dos três adapters baseado nos contratos públicos; testes unitários usam adapters fake para injeção de falhas e a integração do orquestrador exercita os adapters reais sem alterar este arquivo.
-- [ ] Rodar `python scripts/henke_cli.py exec --repo . -- python -m unittest tests.test_scan_manifest -v`; critério GREEN e igualdade de findings entre full e incremental em todo fixture.
+- [ ] Rodar `python henke/henke_cli.py exec --repo . -- python -m unittest tests.test_scan_manifest -v`; critério GREEN e igualdade de findings entre full e incremental em todo fixture.
 
 #### Task 7 — Orquestrador: adapters reais e portões paralelos
 
-**Arquivos:** `scripts/gate_parallel.py`, `scripts/henke_cli.py`, `scripts/metricas/{hazard_scan,assertless_scan,a11y_scan}.py`, `scripts/gate_cache.py`, `tests/test_gate_parallel.py`, `tests/test_metric_gates.py`, `tests/test_wave7_integration.py`.
+**Arquivos:** `henke/gate_parallel.py`, `henke/henke_cli.py`, `henke/metricas/{hazard_scan,assertless_scan,a11y_scan}.py`, `henke/gate_cache.py`, `tests/test_gate_parallel.py`, `tests/test_metric_gates.py`, `tests/test_wave7_integration.py`.
 
 - [ ] Extrair `scan_test_file` sem alterar findings e manter todos os canários existentes de `assertless_scan` verdes.
 - [ ] Escrever quatro Gates fake: um rápido verde, um rápido vermelho, um lento e um que cria neto e expira. Critérios: ordem da saída igual à declaração, todos os resultados presentes, timeout apenas no filho correspondente, agregado 1.
@@ -877,15 +877,15 @@ self.assertIn("scripts/example.py", second.reused_files)
 
 #### Task 8 — Orquestrador: watch foreground
 
-**Arquivos:** `scripts/henke_watch.py`, `tests/test_henke_watch.py`, wiring exclusivo em `scripts/henke_cli.py`.
+**Arquivos:** `henke/henke_watch.py`, `tests/test_henke_watch.py`, wiring exclusivo em `henke/henke_cli.py`.
 
 - [ ] Testar CLI sem TTY = `exit 2`, debounce de múltiplos eventos em uma execução, single-flight com evento durante check, exclusão de `.henke` e encerramento por `Ctrl+C` sem filhos.
 - [ ] Testar que nenhum arquivo de estado do watch contém veredito consumível por `check --staged` e que a template do hook não menciona `watch`.
-- [ ] Implementar §3.8 e rodar `python scripts/henke_cli.py exec --repo . -- python -m unittest tests.test_henke_watch -v`; critério GREEN.
+- [ ] Implementar §3.8 e rodar `python henke/henke_cli.py exec --repo . -- python -m unittest tests.test_henke_watch -v`; critério GREEN.
 
 #### Task 9 — Orquestrador: snapshot estrito do índice e hook
 
-**Arquivos:** `scripts/install_hook.py`, `scripts/henke_cli.py`, `tests/test_install_hook.py`, `tests/test_wave7_integration.py`.
+**Arquivos:** `henke/install_hook.py`, `henke/henke_cli.py`, `tests/test_install_hook.py`, `tests/test_wave7_integration.py`.
 
 - [ ] Manter o teste atual “stage com hazard + working tree limpa bloqueia” e acrescentar o inverso indispensável:
 
@@ -903,11 +903,11 @@ self.assertEqual(committed, CONTEUDO_LIMPO)
 
 #### Task 10 — Orquestrador: sentinel e documentação operacional
 
-**Arquivos:** `scripts/henke_session.py`, `scripts/henke_cli.py` (somente wiring de `session`), `AGENTS.md`, `.gitignore`, `tests/test_henke_session.py`.
+**Arquivos:** `henke/henke_session.py`, `henke/henke_cli.py` (somente wiring de `session`), `AGENTS.md`, `.gitignore`, `tests/test_henke_session.py`.
 
 - [ ] Testar início, heartbeat, registro de ephemeral válido, encerramento idempotente, JSON inválido, sentinel com PID reciclado e GC sem morte por PID.
 - [ ] Acrescentar exatamente o protocolo §3.11 e os padrões de estado local necessários ao `.gitignore`; não esconder a spec nem evidências destinadas a commit.
-- [ ] Rodar `python scripts/henke_cli.py exec --repo . -- python -m unittest tests.test_henke_session -v`; critério GREEN.
+- [ ] Rodar `python henke/henke_cli.py exec --repo . -- python -m unittest tests.test_henke_session -v`; critério GREEN.
 
 #### Task 11 — CI, canários e banca final
 
@@ -1032,40 +1032,40 @@ Se o alvo de 30% não for atingido, o resultado é reportado como medição, nã
 Todos executados na worktree, com registros reais no ledger; comandos de auditoria usam paths externos quando exigido pelo modo `ANALISAR`.
 
 ```bash
-python scripts/henke_cli.py exec --repo . -- python -m unittest discover -s tests -p "test_*.py"
-python scripts/henke_cli.py exec --repo . -- python evals/canaries.py
-python scripts/henke_cli.py exec --repo . -- python evals/canaries_metricas.py
-python scripts/henke_cli.py exec --repo . -- python evals/canaries_wave7.py
-python scripts/henke_cli.py exec --repo . -- python evals/bench_corpus.py --suite-dir .
-python scripts/henke_cli.py exec --repo . -- python evals/bench_wave7.py --repo . --json $TEMP/wave7-bench.json
-python scripts/henke_cli.py check --repo . --spec docs/designs/wave7-performance-higiene-v2.md --full --no-cache --jobs 4
-python scripts/spec_drift.py --repo . --spec docs/designs/wave7-performance-higiene-v2.md --against 36cb454
-python scripts/metricas/contract_closure.py --repo . --spec docs/designs/wave7-performance-higiene-v2.md --require-touched
-python scripts/metricas/metaconfig_diff.py --repo . --against 36cb454
-python scripts/metricas/assertless_scan.py tests
-python scripts/metricas/a11y_scan.py .
-python scripts/metricas/hazard_scan.py .
-python scripts/henke_gate.py check --repo .
-python scripts/run_state.py verify --run .henke/runs/<run_id>.json
-python scripts/audit_ledger.py --ledger .henke/LEDGER.json --require-exec-log
+python henke/henke_cli.py exec --repo . -- python -m unittest discover -s tests -p "test_*.py"
+python henke/henke_cli.py exec --repo . -- python evals/canaries.py
+python henke/henke_cli.py exec --repo . -- python evals/canaries_metricas.py
+python henke/henke_cli.py exec --repo . -- python evals/canaries_wave7.py
+python henke/henke_cli.py exec --repo . -- python evals/bench_corpus.py --suite-dir .
+python henke/henke_cli.py exec --repo . -- python evals/bench_wave7.py --repo . --json $TEMP/wave7-bench.json
+python henke/henke_cli.py check --repo . --spec docs/designs/wave7-performance-higiene-v2.md --full --no-cache --jobs 4
+python henke/spec_drift.py --repo . --spec docs/designs/wave7-performance-higiene-v2.md --against 36cb454
+python henke/metricas/contract_closure.py --repo . --spec docs/designs/wave7-performance-higiene-v2.md --require-touched
+python henke/metricas/metaconfig_diff.py --repo . --against 36cb454
+python henke/metricas/assertless_scan.py tests
+python henke/metricas/a11y_scan.py .
+python henke/metricas/hazard_scan.py .
+python henke/henke_gate.py check --repo .
+python henke/run_state.py verify --run .henke/runs/<run_id>.json
+python henke/audit_ledger.py --ledger .henke/LEDGER.json --require-exec-log
 ```
 
 Mutação cirúrgica nos arquivos críticos, um comando por alvo:
 
 ```bash
-python scripts/metricas/mutant_hunt.py --target scripts/gate_parallel.py --diff --test-cmd "python -m unittest tests.test_gate_parallel -v"
-python scripts/metricas/mutant_hunt.py --target scripts/metricas/scan_manifest.py --diff --test-cmd "python -m unittest tests.test_scan_manifest -v"
-python scripts/metricas/mutant_hunt.py --target scripts/test_impact.py --diff --test-cmd "python -m unittest tests.test_impact -v"
-python scripts/metricas/mutant_hunt.py --target scripts/winpath.py --diff --test-cmd "python -m unittest tests.test_winpath -v"
-python scripts/metricas/mutant_hunt.py --target scripts/henke_clean.py --diff --test-cmd "python -m unittest tests.test_henke_clean -v"
+python henke/metricas/mutant_hunt.py --target henke/gate_parallel.py --diff --test-cmd "python -m unittest tests.test_gate_parallel -v"
+python henke/metricas/mutant_hunt.py --target henke/metricas/scan_manifest.py --diff --test-cmd "python -m unittest tests.test_scan_manifest -v"
+python henke/metricas/mutant_hunt.py --target henke/test_impact.py --diff --test-cmd "python -m unittest tests.test_impact -v"
+python henke/metricas/mutant_hunt.py --target henke/winpath.py --diff --test-cmd "python -m unittest tests.test_winpath -v"
+python henke/metricas/mutant_hunt.py --target henke/henke_clean.py --diff --test-cmd "python -m unittest tests.test_henke_clean -v"
 ```
 
 Cobertura da auditoria final:
 
 ```bash
-python scripts/metricas/coverage_ledger.py init --root . --out $TEMP/wave7-ledger.json
-python scripts/metricas/coverage_ledger.py verify $TEMP/wave7-ledger.json --min-pct 90
-python scripts/metricas/coverage_ledger.py render-gaps $TEMP/wave7-ledger.json
+python henke/metricas/coverage_ledger.py init --root . --out $TEMP/wave7-ledger.json
+python henke/metricas/coverage_ledger.py verify $TEMP/wave7-ledger.json --min-pct 90
+python henke/metricas/coverage_ledger.py render-gaps $TEMP/wave7-ledger.json
 ```
 
 ### 10.3 Critérios de pronto

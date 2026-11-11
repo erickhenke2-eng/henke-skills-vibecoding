@@ -23,59 +23,7 @@ repo_root = Path(__file__).resolve().parents[1]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-
-def check_a11y_sr_only_cheat(html_content: str) -> tuple[bool, str]:
-    """
-    Detecta se .sr-only é um cheat (duplica texto de um elemento visível no mesmo container)
-    ou se é um uso legítimo de acessibilidade (fornece nome acessível a elemento icon-only).
-    """
-    sr_pattern = r'<([a-zA-Z0-9]+)[^>]*class=["\'][^"\']*(?:sr-only|visually-hidden)[^"\']*["\'][^>]*>(.*?)</\1>'
-    matches = list(re.finditer(sr_pattern, html_content, flags=re.S | re.IGNORECASE))
-    if not matches:
-        return True, "Nenhum elemento .sr-only encontrado."
-
-    translations = {
-        "save": "salvar", "salvar": "save",
-        "close": "fechar", "fechar": "close",
-        "delete": "excluir", "excluir": "delete",
-        "cancel": "cancelar", "cancelar": "cancel"
-    }
-
-    for sr_match in matches:
-        hidden_clean = re.sub(r'<[^>]+>', ' ', sr_match.group(2)).strip().lower()
-        hidden_words = set(re.findall(r'\w+', hidden_clean))
-        if not hidden_words:
-            continue
-
-        start = sr_match.start()
-        before = html_content[:start]
-        after = html_content[sr_match.end():]
-
-        open_tags = list(re.finditer(r'<([a-zA-Z0-9]+)(?:\s+[^>]*)?>', before))
-        for ot in reversed(open_tags):
-            tag = ot.group(1).lower()
-            if tag in ('svg', 'path', 'strong', 'em', 'i', 'b'):
-                continue
-            close_before = list(re.finditer(r'</' + re.escape(tag) + r'>', before[ot.end():], flags=re.I))
-            open_nested = list(re.finditer(r'<' + re.escape(tag) + r'(?:\s+[^>]*)?>', before[ot.end():], flags=re.I))
-            if len(close_before) <= len(open_nested):
-                close_after = re.search(r'</' + re.escape(tag) + r'>', after, flags=re.IGNORECASE)
-                if close_after:
-                    container_content = before[ot.end():] + after[:close_after.start()]
-                    visible_content = re.sub(sr_pattern, '', container_content, flags=re.S | re.IGNORECASE)
-                    visible_words = set(re.findall(r'\w+', re.sub(r'<[^>]+>', ' ', visible_content).lower()))
-                    if hidden_words and hidden_words.issubset(visible_words):
-                        return False, f"Cheat detectado: '.sr-only' duplica texto visível ('{hidden_clean}') dentro de <{tag}>."
-                    for hw in hidden_words:
-                        if hw in translations and translations[hw] in visible_words:
-                            return False, f"Cheat detectado: '.sr-only' duplica significado de texto visível ('{hidden_clean}' ~ '{translations[hw]}') para burlar asserções."
-                    is_control = tag in ('button', 'a', 'summary') or re.search(
-                        r'role\s*=\s*["\']button["\']', ot.group(0), flags=re.IGNORECASE
-                    )
-                    if is_control:
-                        break
-
-    return True, "Uso legítimo de acessibilidade ou nenhum hack detectado."
+from henke.metricas.a11y_scan import check_a11y_sr_only_cheat  # fonte unica (era copia local)
 
 
 def run_all_canaries() -> tuple[int, int, list[str]]:
@@ -115,8 +63,8 @@ def run_all_canaries() -> tuple[int, int, list[str]]:
 
     # --- CANÁRIO 3: Spec Drift - Teste Bilateral (bloqueio fora de escopo + aprovação legítima) ---
     total += 1
-    spec_drift_script = repo_root / "scripts" / "spec_drift.py"
-    from scripts.spec_drift import compute_spec_hash
+    spec_drift_script = repo_root / "henke" / "spec_drift.py"
+    from henke.spec_drift import compute_spec_hash
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
         subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True, check=True)
@@ -164,7 +112,7 @@ def run_all_canaries() -> tuple[int, int, list[str]]:
 
     # --- CANÁRIO 4: Ledger com 0 testes descobertos (Tautologia Migué) ---
     total += 1
-    from scripts.audit_ledger import audit_ledger_content
+    from henke.audit_ledger import audit_ledger_content
 
     tautology_ledger = [
         {"cmd": "npm test", "exit": 0, "testes_descobertos": 0}

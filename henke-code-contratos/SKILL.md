@@ -62,8 +62,8 @@ Você é o **Engenheiro de Contratos Formais (`CARPINTEIRO`)** da Suíte Henke. 
 
 Execute os dois portões complementares:
 ```bash
-python scripts/spec_drift.py --repo . --spec docs/designs/<feature>.md
-python scripts/metricas/contract_closure.py --repo . --spec docs/designs/<feature>.md --require-touched
+python henke/spec_drift.py --repo . --spec docs/designs/<feature>.md
+python henke/metricas/contract_closure.py --repo . --spec docs/designs/<feature>.md --require-touched
 ```
 - Se faltar qualquer arquivo prometido (`MISSING-DECLARED-FILE`, `UNTOUCHED-DECLARED-FILE`) ou se o identificador/string literal do canal não existir em ambos os lados fora de comentários (`BROKEN-BRIDGE-SYMBOL-*`, `BROKEN-BRIDGE-STRING-*`), se ações declaradas não forem consumidas no destino (`BROKEN-BRIDGE-ACTION`), ou se o literal constar na origem mas não for argumento direto de callsite IPC (`CHANNEL-LITERAL-DEAD`), o portão barra com `exit 1`.
 - Checagem automática de higiene IPC: barra canais computados dinamicamente (`COMPUTED-CHANNEL`), despachos dinâmicos cegos (`HIDDEN-DISPATCH`) e switches sem default-deny (`NO-DEFAULT-DENY`).
@@ -108,6 +108,6 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 ## Portões Métricos & Segurança [MECÂNICO] — Contract Closure Gate
 
 1. **Proibição de código de menos e pontes quebradas**:
-   `python scripts/metricas/contract_closure.py --repo <repo> --spec <spec.md> --require-touched`
+   `python henke/metricas/contract_closure.py --repo <repo> --spec <spec.md> --require-touched`
 2. **Proibição de código a mais (fora de escopo)**:
-   `python scripts/spec_drift.py --repo <repo> --spec <spec.md>`
+   `python henke/spec_drift.py --repo <repo> --spec <spec.md>`

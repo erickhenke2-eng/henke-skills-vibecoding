@@ -78,7 +78,7 @@ Escreva `MAPA.md` com esta estrutura:
 | componentes/ ou components/ | Pedacinhos de tela reutilizáveis (botões, cards) |
 | shared/ | O que front e back usam juntos (tipos, constantes) |
 | public/ ou assets/ | Imagens, ícones, arquivos estáticos |
-| scripts/ | Comandos de manutenção e automação |
+| henke/ | Comandos de manutenção e automação |
 | tests/ | Testes espelhando a estrutura |
 | .henke/ | Memória do projeto (diário, decisões, mapa) |
 

@@ -13,13 +13,13 @@ repo_root = Path(__file__).resolve().parents[1]
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-MET = repo_root / "scripts" / "metricas"
-SIGNALS = repo_root / "scripts" / "repo_signals.py"
+MET = repo_root / "henke" / "metricas"
+SIGNALS = repo_root / "henke" / "repo_signals.py"
 
 from evals.canaries_metricas import run_all_metric_canaries
-from scripts.repo_signals import complexity_py
-from scripts.henke_router import route_request
-from scripts.henke_cli import main as henke_cli_main
+from henke.repo_signals import complexity_py
+from henke.henke_router import route_request
+from henke.henke_cli import main as henke_cli_main
 import ast as _ast
 
 
@@ -121,9 +121,9 @@ class TestMetricGates(unittest.TestCase):
         self.assertEqual(code3a, 0, out3a)
 
     def test_router_wave3a_destructive_and_bilingual(self):
-        # 1. CARPINTEIRO gates_required inclui scripts/spec_drift.py
+        # 1. CARPINTEIRO gates_required inclui henke/spec_drift.py
         res_carp = route_request("faz uma mudança cirúrgica no código")
-        self.assertIn("scripts/spec_drift.py", res_carp["gates_required"])
+        self.assertIn("henke/spec_drift.py", res_carp["gates_required"])
 
         # 2. Destrutivo imperativo PT -> EXECUTAR + auth
         res_d_pt_exec = route_request("deleta o banco de dados e limpa tudo")
@@ -158,8 +158,8 @@ class TestMetricGates(unittest.TestCase):
         # 8. Fallback gates quando confidence == "none"
         res_none = route_request("what is the recipe for chocolate cake?")
         self.assertEqual(res_none["confidence"], "none")
-        self.assertIn("scripts/repo_signals.py", res_none["gates_required"])
-        self.assertIn("scripts/metricas/hazard_scan.py", res_none["gates_required"])
+        self.assertIn("henke/repo_signals.py", res_none["gates_required"])
+        self.assertIn("henke/metricas/hazard_scan.py", res_none["gates_required"])
 
         # 9. Perguntas com verbos destrutivos e pontuação interrogativa terminada em ?
         res_d_posso = route_request("posso deletar a tabela de usuarios?")
@@ -174,7 +174,7 @@ class TestMetricGates(unittest.TestCase):
 
     def test_hazard_scan_function_line_precision_and_block_suppression(self):
         import tempfile
-        from scripts.metricas.hazard_scan import scan_file
+        from henke.metricas.hazard_scan import scan_file
 
         # Teste 1: Supressão por bloco multiline (/* ... */) e precisão de linha em função
         code_ts = (
@@ -219,17 +219,17 @@ class TestMetricGates(unittest.TestCase):
 
     def test_contract_closure_multiline_html_comment_in_spec(self):
         import tempfile
-        from scripts.metricas.contract_closure import check_contract_closure
+        from henke.metricas.contract_closure import check_contract_closure
         spec_content = (
             "# Spec Test\n"
             "## 4. Escopo Declarado\n"
-            "- `scripts/henke_router.py`\n"
+            "- `henke/henke_router.py`\n"
             "## 5. Pontes de Contrato\n"
             "<!--\n"
             "Comentário explicativo multiline\n"
             "- nota sobre ponte interna\n"
             "-->\n"
-            "- ponte: `scripts/henke_router.py::route_request -> tests/test_metric_gates.py`\n"
+            "- ponte: `henke/henke_router.py::route_request -> tests/test_metric_gates.py`\n"
         )
         with tempfile.NamedTemporaryFile(suffix=".md", mode="w", delete=False, encoding="utf-8") as tf:
             tf.write(spec_content)
@@ -249,9 +249,9 @@ class TestMetricGates(unittest.TestCase):
 
     def test_wave5_goldfish_cli_contracts(self):
         import tempfile
-        from scripts.run_state import init_run, record_gate, main as run_state_main
-        from scripts.henke_gate import check_baseline, capture_baseline
-        from scripts.metricas.mutant_hunt import main as mutant_main
+        from henke.run_state import init_run, record_gate, main as run_state_main
+        from henke.henke_gate import check_baseline, capture_baseline
+        from henke.metricas.mutant_hunt import main as mutant_main
         with tempfile.TemporaryDirectory() as tmp:
             tp = Path(tmp)
             rf = init_run(tp, "r-gf", mode="ANALISAR", archetype="SHERLOCK")
@@ -289,7 +289,7 @@ class TestWave7ScannerCompat(unittest.TestCase):
     """Compatibilidade dos três scanners após extração dos adapters (Wave 7)."""
 
     def test_scan_test_file_extracted(self):
-        from scripts.metricas.assertless_scan import scan_test_file
+        from henke.metricas.assertless_scan import scan_test_file
         import tempfile
         from pathlib import Path as _P
         with tempfile.TemporaryDirectory() as td:
@@ -302,13 +302,13 @@ class TestWave7ScannerCompat(unittest.TestCase):
         self.assertTrue(findings)
 
     def test_scanner_versions_exposed(self):
-        import scripts.metricas.hazard_scan as hz
-        import scripts.metricas.a11y_scan as ax
+        import henke.metricas.hazard_scan as hz
+        import henke.metricas.a11y_scan as ax
         self.assertEqual(hz.SCANNER_VERSION, "wave7.1")
         self.assertEqual(ax.SCANNER_VERSION, "wave7.1")
 
     def test_a11y_scan_file_signature(self):
-        from scripts.metricas.a11y_scan import scan_a11y_file, A11Y_EXTS
+        from henke.metricas.a11y_scan import scan_a11y_file, A11Y_EXTS
         self.assertIn(".html", A11Y_EXTS)
         self.assertTrue(callable(scan_a11y_file))
 

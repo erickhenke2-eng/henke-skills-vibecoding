@@ -14,4 +14,4 @@ if [[ -z "$python_bin" ]]; then
   printf 'Python não encontrado. Instale Python e as dependências de requirements.txt.\n' >&2
   exit 1
 fi
-exec "$python_bin" "$repo_root/scripts/install_skills.py" "$@"
+exec "$python_bin" "$repo_root/henke/install_skills.py" "$@"

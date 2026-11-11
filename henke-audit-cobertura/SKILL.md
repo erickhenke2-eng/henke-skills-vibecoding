@@ -37,7 +37,7 @@ Você é o **Guardião de Cobertura Forense (`SHERLOCK`)** da Suíte Henke. O ma
 
 1. Execute o comando de inicialização gravando o arquivo em `$TEMP` (preservando a árvore do repositório 100% limpa):
    ```bash
-   python scripts/metricas/coverage_ledger.py init --root <dir_alvo> --out $TEMP/audit-ledger.json --profile standard
+   python henke/metricas/coverage_ledger.py init --root <dir_alvo> --out $TEMP/audit-ledger.json --profile standard
    ```
 2. O script enumera todos os arquivos de código (ignorando testes e `.d.ts`), calcula o `sha256` e a quantidade de linhas de cada um, cruza com `repo_signals.py` (`edges` + `metrics`) e `hazard_scan.py`, e ordena a fila por `risk_score`.
 
@@ -69,7 +69,7 @@ Em auditorias profundas (`--profile deep` ou `--require-critic`), execute uma se
 
 Execute o portão verificador:
 ```bash
-python scripts/metricas/coverage_ledger.py verify $TEMP/audit-ledger.json --min-pct 90 --max-out-of-scope-pct 20.0 --max-out-of-scope-per-dir-pct 20.0 [--against <base_ref>]
+python henke/metricas/coverage_ledger.py verify $TEMP/audit-ledger.json --min-pct 90 --max-out-of-scope-pct 20.0 --max-out-of-scope-per-dir-pct 20.0 [--against <base_ref>]
 ```
 - Se retornar `exit 1` (`PENDING-UNIT`, `LOW-COVERAGE`, `STALE-HASH`, `UNMAPPED-FILE`, `THEATRICAL-SEVERITY`, `FABRICATED-LINE`, `EXCESSIVE-OUT-OF-SCOPE`, `DILUTED-OUT-OF-SCOPE`, `NEW-FILE-OUT-OF-SCOPE`), corrija as pendências reais antes de prosseguir.
 
@@ -77,7 +77,7 @@ python scripts/metricas/coverage_ledger.py verify $TEMP/audit-ledger.json --min-
 
 Execute:
 ```bash
-python scripts/metricas/coverage_ledger.py render-gaps $TEMP/audit-ledger.json
+python henke/metricas/coverage_ledger.py render-gaps $TEMP/audit-ledger.json
 ```
 E cole a saída literalmente no relatório final:
 
@@ -120,6 +120,6 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos & Segurança [MECÂNICO] — Coverage Ledger Gate
 
-1. `python scripts/metricas/coverage_ledger.py init --root <dir> --out $TEMP/ledger.json [--profile standard|deep]`
-2. `python scripts/metricas/coverage_ledger.py verify $TEMP/ledger.json --min-pct 90 [--max-out-of-scope-pct 20.0] [--max-out-of-scope-per-dir-pct 20.0] [--against <ref>] [--require-critic]`
-3. `python scripts/metricas/coverage_ledger.py render-gaps $TEMP/ledger.json`
+1. `python henke/metricas/coverage_ledger.py init --root <dir> --out $TEMP/ledger.json [--profile standard|deep]`
+2. `python henke/metricas/coverage_ledger.py verify $TEMP/ledger.json --min-pct 90 [--max-out-of-scope-pct 20.0] [--max-out-of-scope-per-dir-pct 20.0] [--against <ref>] [--require-critic]`
+3. `python henke/metricas/coverage_ledger.py render-gaps $TEMP/ledger.json`

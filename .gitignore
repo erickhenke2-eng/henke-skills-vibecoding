@@ -27,6 +27,7 @@ build/
 .henke/evidence/
 .henke/exec_log.jsonl
 .henke/LEDGER.json
+.henke/events.jsonl
 # Locks de processo — lock órfão commitado herdaria trava morta no clone
 .henke/*.lock
 

@@ -26,8 +26,8 @@ def _ms(t0: float) -> int:
 
 
 def bench_gates(repo: Path) -> dict:
-    from scripts.gate_parallel import GateSpec, run_gates_parallel
-    mdir = ROOT / "scripts" / "metricas"
+    from henke.gate_parallel import GateSpec, run_gates_parallel
+    mdir = ROOT / "henke" / "metricas"
     specs = [
         GateSpec("hazard_scan",
                  (sys.executable, str(mdir / "hazard_scan.py"), str(repo)),
@@ -54,7 +54,7 @@ def bench_gates(repo: Path) -> dict:
 
 
 def bench_manifest(repo: Path) -> dict:
-    from scripts.metricas.scan_manifest import run_incremental_scan, scanner_specs
+    from henke.metricas.scan_manifest import run_incremental_scan, scanner_specs
     spec = {s.scanner_id: s for s in scanner_specs()}["a11y"]
     import os
     old = os.environ.pop("HENKE_STATE_DIR", None)
@@ -79,7 +79,7 @@ def bench_manifest(repo: Path) -> dict:
 
 
 def bench_tia(repo: Path) -> dict:
-    from scripts.import_graph import build_import_graph
+    from henke.import_graph import build_import_graph
     t0 = time.perf_counter()
     g = build_import_graph(repo)
     graph_ms = _ms(t0)

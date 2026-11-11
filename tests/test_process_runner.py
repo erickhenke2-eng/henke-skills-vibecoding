@@ -1,4 +1,4 @@
-"""Testes da fachada compatível de execução de processos (`scripts/process_runner.py`).
+"""Testes da fachada compatível de execução de processos (`henke/process_runner.py`).
 
 Valida:
 1. Execução normal (exit 0, stdout, stderr, cwd, env, UTF-8, built-ins, stream sem deadlock).
@@ -22,8 +22,8 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-import scripts.process_runner as process_runner
-from scripts.process_runner import (
+import henke.process_runner as process_runner
+from henke.process_runner import (
     ProcessExecutionResult,
     run_process,
 )

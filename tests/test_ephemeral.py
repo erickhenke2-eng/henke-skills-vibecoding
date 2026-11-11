@@ -1,4 +1,4 @@
-"""Testes de workspaces efêmeros (`scripts/ephemeral.py`).
+"""Testes de workspaces efêmeros (`henke/ephemeral.py`).
 
 Contrato: TTL com auto-destruição, marker validado, contenção de escrita,
 supervisão de filhos próprios e GC que só remove expirados com marker válido.
@@ -18,7 +18,7 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.ephemeral import (
+from henke.ephemeral import (
     EphemeralConfig,
     _MARKER_NAME,
     ephemeral_gc,

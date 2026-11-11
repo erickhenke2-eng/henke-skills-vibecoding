@@ -24,13 +24,6 @@ from tests.e2e.e2e_common import (
     SUITE_ROOT,
     SCRIPTS_DIR,
     CLI_PATH,
-    HAS_MISSION_CLASSIFIER,
-    HAS_PROCESS_RUNNER,
-    HAS_INSTALL_HOOK,
-    HAS_GATE_CACHE,
-    HAS_REPORT_GENERATOR,
-    CLI_HAS_INSTALL_HOOK,
-    CLI_HAS_REPORT,
     git_init,
     run_cli,
     setup_mock_stack,
@@ -56,8 +49,6 @@ class TestTier3CrossFeatureInteractions(unittest.TestCase):
 
     def test_t3_1_classifier_and_gate_cache_pipeline(self):
         """T3.1: Classifier detects stacks, gates run and cache; partial mutation re-runs only mutated stack."""
-        if not (HAS_MISSION_CLASSIFIER and HAS_GATE_CACHE):
-            self.skipTest("Requires both mission_classifier (M1) and gate_cache (M4)")
 
         classifier = get_mission_classifier_module()
         cache = get_gate_cache_module()
@@ -93,8 +84,6 @@ class TestTier3CrossFeatureInteractions(unittest.TestCase):
 
     def test_t3_2_install_hook_and_taskkill_timeout(self):
         """T3.2: Pre-commit hook handles hanging gate command via taskkill without hanging git commit."""
-        if not (HAS_INSTALL_HOOK and HAS_PROCESS_RUNNER):
-            self.skipTest("Requires both install_hook (M3) and process_runner (M2)")
 
         installer = get_install_hook_module()
         runner = get_process_runner_module()
@@ -111,8 +100,6 @@ class TestTier3CrossFeatureInteractions(unittest.TestCase):
 
     def test_t3_3_interactive_prompt_and_config_update(self):
         """T3.3: Interactive prompt enables stack in CONFIG.json, making it active for subsequent filtering."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Requires mission_classifier (M1)")
 
         classifier = get_mission_classifier_module()
         setup_mock_stack(self.repo_path, "rust")
@@ -137,8 +124,6 @@ class TestTier3CrossFeatureInteractions(unittest.TestCase):
 
     def test_t3_4_cache_eviction_under_ram_pressure_and_report_generation(self):
         """T3.4: High RAM load evicts cache LRU entries, report generator completes with full ledger."""
-        if not (HAS_GATE_CACHE and HAS_REPORT_GENERATOR):
-            self.skipTest("Requires both gate_cache (M4) and report_generator (M5)")
 
         cache = get_gate_cache_module()
         rep_gen = get_report_generator_module()
@@ -168,8 +153,6 @@ class TestTier3CrossFeatureInteractions(unittest.TestCase):
 
     def test_t3_5_taskkill_timeout_and_audit_ledger_hashing(self):
         """T3.5: Taskkill timeout during execution generates proper hashable output for ledger."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Requires process_runner (M2)")
 
         runner = get_process_runner_module()
         # Hanging command
@@ -185,8 +168,6 @@ class TestTier3CrossFeatureInteractions(unittest.TestCase):
 
     def test_t3_6_polyglot_repo_full_check_and_report(self):
         """T3.6: Polyglot repo (Python + Vite + Tailwind) detection and report generation."""
-        if not (HAS_MISSION_CLASSIFIER and HAS_REPORT_GENERATOR):
-            self.skipTest("Requires both mission_classifier (M1) and report_generator (M5)")
 
         classifier = get_mission_classifier_module()
         rep_gen = get_report_generator_module()

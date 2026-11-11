@@ -1,4 +1,4 @@
-"""Testes para scripts/henke_watch.py (Wave 7)."""
+"""Testes para henke/henke_watch.py (Wave 7)."""
 from __future__ import annotations
 
 import io
@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.gate_parallel import GateResult
-from scripts.henke_watch import WatchConfig, WatchController, _snapshot
+from henke.gate_parallel import GateResult
+from henke.henke_watch import WatchConfig, WatchController, _snapshot
 
 
 def _result(name="g", code=0, passed=True, stdout="ok"):

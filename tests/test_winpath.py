@@ -1,4 +1,4 @@
-r"""Testes de scripts/winpath.py (Wave 7 — R7).
+r"""Testes de henke/winpath.py (Wave 7 — R7).
 
 Cobertura real (sem mocks circulares; toda asserção verifica resultado):
 1. ``is_reserved_component`` bilateral (nul/CON.txt/aux /prn./COM1.log/lpt9
@@ -33,7 +33,7 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.winpath import (
+from henke.winpath import (
     FileDigest,
     PathSafetyError,
     TreeEntry,
@@ -547,7 +547,7 @@ class TestSha256File(TempTreeTest):
                 )
             return st
 
-        with patch("scripts.winpath._lstat", side_effect=fake_lstat):
+        with patch("henke.winpath._lstat", side_effect=fake_lstat):
             with self.assertRaises(UnstableFileError):
                 sha256_file(f)
         self.assertEqual(calls["n"], 2)
@@ -570,7 +570,7 @@ class TestSha256File(TempTreeTest):
                 )
             return st
 
-        with patch("scripts.winpath._lstat", side_effect=fake_lstat):
+        with patch("henke.winpath._lstat", side_effect=fake_lstat):
             with self.assertRaises(UnstableFileError):
                 sha256_file(f)
 

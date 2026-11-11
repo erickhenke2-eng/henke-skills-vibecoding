@@ -167,11 +167,11 @@ Responda em português direto:
 Bateria mínima de sanidade mecânica para aprovar a árvore (py/ts/tsx/js/mjs/rs/go):
 
 ```bash
-python scripts/metricas/assertless_scan.py <dir-de-testes>
-python scripts/repo_signals.py metrics --root <dir> | python scripts/metricas/crap_score.py --threshold 6
-python scripts/repo_signals.py edges --root <dir> > edges.json && python scripts/metricas/fence_check.py fence.json edges.json
-python scripts/metricas/hazard_scan.py <dir>
-python scripts/repo_signals.py churn --repo <dir> --order oldest-first | python scripts/metricas/tornado_scan.py --order oldest-first
+python henke/metricas/assertless_scan.py <dir-de-testes>
+python henke/repo_signals.py metrics --root <dir> | python henke/metricas/crap_score.py --threshold 6
+python henke/repo_signals.py edges --root <dir> > edges.json && python henke/metricas/fence_check.py fence.json edges.json
+python henke/metricas/hazard_scan.py <dir>
+python henke/repo_signals.py churn --repo <dir> --order oldest-first | python henke/metricas/tornado_scan.py --order oldest-first
 ```
 
 Contrato de saída: 0=verde · 1=vermelho · 2=não-veredito.

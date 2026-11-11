@@ -1,4 +1,4 @@
-"""Testes do detector de projeto (scripts/henke_detect.py).
+"""Testes do detector de projeto (henke/henke_detect.py).
 
 Cobre as fixtures da proposta M4: package.json+vitest, pyproject+pytest.ini,
 requirements.txt+tests/, diretório vazio (nulls sem erro) e o roundtrip de
@@ -13,7 +13,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "henke_detect.py"
+SCRIPT = ROOT / "henke" / "henke_detect.py"
 spec = importlib.util.spec_from_file_location("henke_detect", SCRIPT)
 detect = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(detect)

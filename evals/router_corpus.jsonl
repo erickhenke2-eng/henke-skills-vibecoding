@@ -40,7 +40,7 @@
 {"prompt": "os botões não dão resposta quando clico", "expect_top1": "henke-ui-feedback", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "o texto tá difícil de ler", "expect_top1": "henke-ui-tipografia", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "audita o design do app", "expect_top1": "henke-ui-auditoria", "expect_mode": "ANALISAR", "expect_auth": false}
-{"prompt": "essa tela tá com cara de ia, limpa isso", "expect_top1": "henke-ui-antislop", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "essa tela tá com cara de ia, limpa isso", "expect_top1": "henke-ui-antislop", "expect_mode": "EXECUTAR", "expect_auth": true, "note": "P1-04 union: sinal destrutivo \"limpa\" (ex-auto-only) — fail-closed"}
 {"prompt": "monta uma paleta de cores pro app", "expect_top1": "henke-ui-paleta", "expect_mode": "EXECUTAR", "expect_auth": false}
 {"prompt": "o formulário não valida direito", "expect_top1": "henke-code-formulario", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "o submit não funciona", "expect_top1": "henke-code-formulario", "expect_mode": "ANALISAR", "expect_auth": false}
@@ -123,7 +123,7 @@
 {"prompt": "inicia o henke aqui", "expect_top1": "henke-prepara", "expect_mode": "EXECUTAR", "expect_auth": false}
 {"prompt": "organiza a memória desse projeto", "expect_top1": "henke-prepara", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "faz uma faxina nesse código", "expect_top1": "henke-mem-faxina", "expect_mode": "EXECUTAR", "expect_auth": true}
-{"prompt": "limpa esse projeto, tá cheio de arquivo inútil", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": false}
+{"prompt": "limpa esse projeto, tá cheio de arquivo inútil", "expect_top1": "henke-mem-faxina", "expect_mode": "EXECUTAR", "expect_auth": true, "note": "P1-04 union: sinal destrutivo \"limpa\" (ex-auto-only) — fail-closed"}
 {"prompt": "que arquivos eu posso apagar sem medo?", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": true}
 {"prompt": "tem dependência que eu não uso?", "expect_top1": "henke-mem-faxina", "expect_mode": "ANALISAR", "expect_auth": false}
 {"prompt": "registra o que a gente fez hoje", "expect_top1": "henke-mem-diario", "expect_mode": "ANALISAR", "expect_auth": false}

@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("installer", ROOT / "scripts/install_skills.py")
+spec = importlib.util.spec_from_file_location("installer", ROOT / "henke/install_skills.py")
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 TARGETS = (".agents/skills", ".gemini/config/skills", ".gemini/skills", ".claude/skills")
@@ -47,17 +47,17 @@ class InstallTests(unittest.TestCase):
             for skill in ROOT.glob("henke-*/SKILL.md"):
                 self.assertEqual((target / skill.relative_to(ROOT)).read_bytes(), skill.read_bytes())
             # [HENKE-PATCH] portões métricos instalados junto às skills
-            self.assertTrue((target / "scripts/metricas/fence_check.py").is_file())
-            self.assertTrue((target / "scripts/metricas/polyglot.py").is_file())
-            self.assertTrue((target / "scripts/repo_signals.py").is_file())
-            self.assertTrue((target / "scripts" / "henke_router.py").is_file())
-            self.assertTrue((target / "scripts" / "metricas" / "hazard_scan.py").is_file())
-            self.assertTrue((target / "scripts" / "metricas" / "coverage_ledger.py").is_file())
-            self.assertTrue((target / "scripts" / "metricas" / "contract_closure.py").is_file())
-            self.assertTrue((target / "scripts" / "metricas" / "a11y_scan.py").is_file())
-            self.assertTrue((target / "scripts" / "metricas" / "mutant_hunt.py").is_file())
-            self.assertTrue((target / "scripts" / "henke_cli.py").is_file())
-            self.assertTrue((target / "scripts" / "run_state.py").is_file())
+            self.assertTrue((target / "henke/metricas/fence_check.py").is_file())
+            self.assertTrue((target / "henke/metricas/polyglot.py").is_file())
+            self.assertTrue((target / "henke/repo_signals.py").is_file())
+            self.assertTrue((target / "henke" / "henke_router.py").is_file())
+            self.assertTrue((target / "henke" / "metricas" / "hazard_scan.py").is_file())
+            self.assertTrue((target / "henke" / "metricas" / "coverage_ledger.py").is_file())
+            self.assertTrue((target / "henke" / "metricas" / "contract_closure.py").is_file())
+            self.assertTrue((target / "henke" / "metricas" / "a11y_scan.py").is_file())
+            self.assertTrue((target / "henke" / "metricas" / "mutant_hunt.py").is_file())
+            self.assertTrue((target / "henke" / "henke_cli.py").is_file())
+            self.assertTrue((target / "henke" / "run_state.py").is_file())
             self.assertTrue((target / "docs" / "designs" / "TEMPLATE.md").is_file())
             self.assertEqual((target / "unrelated.txt").read_text(), "preserve")
             self.assertFalse(list(target.glob(".henke-install-*")))
@@ -99,7 +99,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual((self.user / TARGETS[0] / "PROTOCOLO.md").read_text(), "old protocol")
 
     def test_missing_dependency_has_actionable_error(self):
-        result = subprocess.run([sys.executable, "-S", str(ROOT / "scripts/validate_skills.py")], capture_output=True, text=True, encoding="utf-8")
+        result = subprocess.run([sys.executable, "-S", str(ROOT / "henke/validate_skills.py")], capture_output=True, text=True, encoding="utf-8")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("pip install -r requirements.txt", result.stderr)
         self.assertNotIn("Traceback", result.stderr)

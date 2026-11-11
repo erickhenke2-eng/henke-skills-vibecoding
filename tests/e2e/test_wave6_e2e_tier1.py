@@ -19,13 +19,6 @@ from tests.e2e.e2e_common import (
     SUITE_ROOT,
     SCRIPTS_DIR,
     CLI_PATH,
-    HAS_MISSION_CLASSIFIER,
-    HAS_PROCESS_RUNNER,
-    HAS_INSTALL_HOOK,
-    HAS_GATE_CACHE,
-    HAS_REPORT_GENERATOR,
-    CLI_HAS_INSTALL_HOOK,
-    CLI_HAS_REPORT,
     git_init,
     run_cli,
     setup_mock_stack,
@@ -52,8 +45,6 @@ class TestTier1MissionClassifier(unittest.TestCase):
 
     def test_r1_1_python_stack_detection(self):
         """T1.1.1: Detects Python stack via pyproject.toml and source files."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         setup_mock_stack(self.repo_path, "python")
         detected = classifier.detect_stacks(self.repo_path)
@@ -62,8 +53,6 @@ class TestTier1MissionClassifier(unittest.TestCase):
 
     def test_r1_2_javascript_typescript_stack_detection(self):
         """T1.1.2: Detects JS/TS stack via package.json and tsconfig.json."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         setup_mock_stack(self.repo_path, "typescript")
         detected = classifier.detect_stacks(self.repo_path)
@@ -72,8 +61,6 @@ class TestTier1MissionClassifier(unittest.TestCase):
 
     def test_r1_3_rust_go_java_detection(self):
         """T1.1.3: Detects compiled languages: Rust, Go, Java."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         
         # Test Rust
@@ -100,8 +87,6 @@ class TestTier1MissionClassifier(unittest.TestCase):
 
     def test_r1_4_c_csharp_php_ruby_swift_detection(self):
         """T1.1.4: Detects remaining languages: C/C++, C#, PHP, Ruby, Kotlin/Swift."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
 
         for st in ["cpp", "csharp", "php", "ruby", "kotlin_swift"]:
@@ -117,8 +102,6 @@ class TestTier1MissionClassifier(unittest.TestCase):
 
     def test_r1_5_svelte_vite_tailwind_tooling_detection(self):
         """T1.1.5: Detects frontend tools (Svelte, Vite, Tailwind)."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         setup_mock_stack(self.repo_path, "svelte")
         setup_mock_stack(self.repo_path, "vite")
@@ -131,8 +114,6 @@ class TestTier1MissionClassifier(unittest.TestCase):
 
     def test_r1_6_selective_gate_filtering(self):
         """T1.1.6: Dynamic gate filtering executes gates only for identified stacks."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         setup_mock_stack(self.repo_path, "python")
         detected = classifier.detect_stacks(self.repo_path)
@@ -142,8 +123,6 @@ class TestTier1MissionClassifier(unittest.TestCase):
 
     def test_r1_7_unconfigured_stack_bypass_non_interactive(self):
         """T1.1.7: Unconfigured stacks are bypassed in non-interactive mode without crashing."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         setup_mock_stack(self.repo_path, "rust")
         cfg_file = self.repo_path / ".henke" / "CONFIG.json"
@@ -156,8 +135,6 @@ class TestTier1MissionClassifier(unittest.TestCase):
 
     def test_r1_8_unconfigured_stack_interactive_prompt_accept(self):
         """T1.1.8: User accepting [s/N] prompt enables stack in configuration."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
         classifier = get_mission_classifier_module()
         cfg_file = self.repo_path / ".henke" / "CONFIG.json"
         cfg_file.parent.mkdir(parents=True, exist_ok=True)
@@ -172,9 +149,7 @@ class TestTier1MissionClassifier(unittest.TestCase):
             self.assertTrue(content["stacks"].get("rust", {}).get("enabled", False))
 
     def test_r1_9_unconfigured_stack_interactive_prompt_decline(self):
-        """T1.1.9: User declining [s/N] prompt keeps stack disabled."""
-        if not HAS_MISSION_CLASSIFIER:
-            self.skipTest("Milestone 1 (mission_classifier.py) not yet implemented")
+        """T1.1.9/PT-11: decline retorna False sem persistir nada no repo."""
         classifier = get_mission_classifier_module()
         cfg_file = self.repo_path / ".henke" / "CONFIG.json"
         cfg_file.parent.mkdir(parents=True, exist_ok=True)
@@ -185,7 +160,7 @@ class TestTier1MissionClassifier(unittest.TestCase):
             res = classifier.prompt_unconfigured_stack("rust", cfg_file, interactive=True)
             self.assertFalse(res)
             content = json.loads(cfg_file.read_text(encoding="utf-8"))
-            self.assertFalse(content["stacks"].get("rust", {}).get("enabled", True))
+            self.assertNotIn("rust", content["stacks"])
 
     def test_r1_10_extensibility_documentation(self):
         """T1.1.10: docs/BRIDGES.md documents bridge adaptation and custom bridge schemas."""
@@ -210,8 +185,6 @@ class TestTier1InstallHook(unittest.TestCase):
 
     def test_r2_1_install_hook_basic_creation(self):
         """T1.2.1: henke install-hook installs .git/hooks/pre-commit with correct signature."""
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         installer = get_install_hook_module()
         ok, msg = installer.install_hook(self.repo_path, force=False)
         self.assertTrue(ok, f"Failed to install hook: {msg}")
@@ -222,8 +195,6 @@ class TestTier1InstallHook(unittest.TestCase):
 
     def test_r2_2_install_hook_idempotency(self):
         """T1.2.2: Multiple install-hook runs overwrite safely without duplicate content."""
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         installer = get_install_hook_module()
         ok1, _ = installer.install_hook(self.repo_path, force=False)
         ok2, _ = installer.install_hook(self.repo_path, force=False)
@@ -234,8 +205,6 @@ class TestTier1InstallHook(unittest.TestCase):
 
     def test_r2_3_install_hook_legacy_backup_without_force(self):
         """T1.2.3: Existing non-henke hook is backed up to .legacy when force=False."""
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         hook_file = self.repo_path / ".git" / "hooks" / "pre-commit"
         hook_file.parent.mkdir(parents=True, exist_ok=True)
         hook_file.write_text("#!/bin/sh\n# Custom foreign hook\necho custom\n", encoding="utf-8")
@@ -249,8 +218,6 @@ class TestTier1InstallHook(unittest.TestCase):
 
     def test_r2_4_install_hook_force_overwrite(self):
         """T1.2.4: With force=True, existing foreign hook is replaced directly."""
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         hook_file = self.repo_path / ".git" / "hooks" / "pre-commit"
         hook_file.parent.mkdir(parents=True, exist_ok=True)
         hook_file.write_text("#!/bin/sh\n# Old hook\n", encoding="utf-8")
@@ -263,8 +230,6 @@ class TestTier1InstallHook(unittest.TestCase):
 
     def test_r2_5_install_hook_rejects_non_git_repo(self):
         """T1.2.5: Fails with clear error code 2 when directory is not a git repo."""
-        if not HAS_INSTALL_HOOK:
-            self.skipTest("Milestone 3 (install_hook.py) not yet implemented")
         non_git_temp = tempfile.TemporaryDirectory()
         try:
             p = Path(non_git_temp.name)
@@ -315,8 +280,6 @@ class TestTier1ProcessRunner(unittest.TestCase):
 
     def test_r3_1_normal_execution_success(self):
         """T1.3.1: Command completing in time returns code 0 and stdout."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         res = runner.run_process([sys.executable, "-c", "print('hello_wave6')"], cwd=self.work_dir, timeout_sec=10)
         self.assertEqual(res.returncode, 0)
@@ -325,8 +288,6 @@ class TestTier1ProcessRunner(unittest.TestCase):
 
     def test_r3_2_timeout_triggers_taskkill_windows(self):
         """T1.3.2: Subprocess timeout invokes taskkill /F /T and sets timed_out=True."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         # Spawn a process that sleeps for 60 seconds, with timeout of 1 second
         cmd = [sys.executable, "-c", "import time; time.sleep(60)"]
@@ -352,8 +313,6 @@ time.sleep(120)
 """
         script_file.write_text(script_code, encoding="utf-8")
 
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         res = runner.run_process([sys.executable, str(script_file)], cwd=self.work_dir, timeout_sec=2.0)
         self.assertTrue(res.timed_out)
@@ -366,8 +325,6 @@ time.sleep(120)
 
     def test_r3_4_race_condition_exit_code_128_handling(self):
         """T1.3.4: Race condition when process dies just before taskkill is handled cleanly."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         # Fast exit process with short timeout
         res = runner.run_process([sys.executable, "-c", "import sys; sys.exit(0)"], cwd=self.work_dir, timeout_sec=0.1)
@@ -376,8 +333,6 @@ time.sleep(120)
 
     def test_r3_5_process_execution_result_contract(self):
         """T1.3.5: Return value satisfies ProcessExecutionResult interface contract."""
-        if not HAS_PROCESS_RUNNER:
-            self.skipTest("Milestone 2 (process_runner.py) not yet implemented")
         runner = get_process_runner_module()
         res = runner.run_process([sys.executable, "-c", "print('contract')"], cwd=self.work_dir)
         self.assertTrue(hasattr(res, "returncode"))
@@ -409,8 +364,6 @@ class TestTier1ReportGenerator(unittest.TestCase):
 
     def test_r4_1_report_generation_default_location(self):
         """T1.4.1: Generates HTML report at default location .henke/report.html."""
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         out = rep_gen.generate_report(self.repo_path)
         self.assertTrue(out.is_file())
@@ -418,8 +371,6 @@ class TestTier1ReportGenerator(unittest.TestCase):
 
     def test_r4_2_report_generation_custom_output(self):
         """T1.4.2: Generates HTML report at user-specified --out destination."""
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         custom_out = self.repo_path / "custom_audit.html"
         out = rep_gen.generate_report(self.repo_path, output_file=custom_out)
@@ -428,8 +379,6 @@ class TestTier1ReportGenerator(unittest.TestCase):
 
     def test_r4_3_report_self_contained_zero_external_cdns(self):
         """T1.4.3: 100% offline self-contained HTML (zero external http/https scripts or styles)."""
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         out = rep_gen.generate_report(self.repo_path)
         html_text = out.read_text(encoding="utf-8")
@@ -442,8 +391,6 @@ class TestTier1ReportGenerator(unittest.TestCase):
 
     def test_r4_4_report_mandatory_plain_language_section(self):
         """T1.4.4: Mandatory plain-language executive summary section present for non-technical users."""
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         out = rep_gen.generate_report(self.repo_path)
         html_text = out.read_text(encoding="utf-8").lower()
@@ -454,8 +401,6 @@ class TestTier1ReportGenerator(unittest.TestCase):
 
     def test_r4_5_report_visual_audit_status_cards(self):
         """T1.4.5: Visual audit results and gate status information rendered cleanly."""
-        if not HAS_REPORT_GENERATOR:
-            self.skipTest("Milestone 5 (report_generator.py) not yet implemented")
         rep_gen = get_report_generator_module()
         out = rep_gen.generate_report(self.repo_path)
         html_text = out.read_text(encoding="utf-8")
@@ -477,8 +422,6 @@ class TestTier1GateCache(unittest.TestCase):
 
     def test_r5_1_cache_key_determinism(self):
         """T1.5.1: Same gate, script, args, and file contents produce identical hash keys."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         k1 = cache.compute_cache_key("hazard", SCRIPTS_DIR / "metricas" / "hazard_scan.py", [".", "--json"], self.repo_path)
         k2 = cache.compute_cache_key("hazard", SCRIPTS_DIR / "metricas" / "hazard_scan.py", [".", "--json"], self.repo_path)
@@ -488,8 +431,6 @@ class TestTier1GateCache(unittest.TestCase):
 
     def test_r5_2_cache_hit_and_retrieve(self):
         """T1.5.2: Stored gate result can be retrieved on subsequent cache query."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         sample_key = "test_sample_key_12345"
         sample_result = {"returncode": 0, "stdout": "clean", "passed": True}
@@ -501,8 +442,6 @@ class TestTier1GateCache(unittest.TestCase):
 
     def test_r5_3_cache_invalidation_on_file_mutation(self):
         """T1.5.3: Mutating target source file changes the composite cache key."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         src_file = self.repo_path / "app.py"
         src_file.write_text("x = 1\n", encoding="utf-8")
@@ -516,8 +455,6 @@ class TestTier1GateCache(unittest.TestCase):
 
     def test_r5_4_ram_measurement_win32(self):
         """T1.5.4: RAM measurement on Windows queries Win32 psapi returning physical working set in MB."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         ram_mb = cache.get_current_ram_mb()
         self.assertIsInstance(ram_mb, (int, float))
@@ -526,8 +463,6 @@ class TestTier1GateCache(unittest.TestCase):
 
     def test_r5_5_ram_eviction_when_limit_exceeded(self):
         """T1.5.5: enforce_ram_limit evicts LRU entries when RAM exceeds ceiling."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         # Seed cache with multiple entries
         for i in range(10):
@@ -539,8 +474,6 @@ class TestTier1GateCache(unittest.TestCase):
 
     def test_r5_6_cache_miss_returns_none(self):
         """T1.5.6: Querying nonexistent cache key returns None without error."""
-        if not HAS_GATE_CACHE:
-            self.skipTest("Milestone 4 (gate_cache.py) not yet implemented")
         cache = get_gate_cache_module()
         res = cache.get_cached_gate("nonexistent_hash_ffffffff")
         self.assertIsNone(res)

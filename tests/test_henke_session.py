@@ -1,4 +1,4 @@
-"""Testes do sentinel de sessão (`scripts/henke_session.py`).
+"""Testes do sentinel de sessão (`henke/henke_session.py`).
 
 Contrato: sentinel JSON por sessão, heartbeat de 1h, registro de workspaces
 efêmeras validadas, GC que só marca `reaped` expirados e delega a
@@ -19,8 +19,8 @@ SUITE_ROOT = Path(__file__).resolve().parents[1]
 if str(SUITE_ROOT) not in sys.path:
     sys.path.insert(0, str(SUITE_ROOT))
 
-from scripts.ephemeral import EphemeralConfig, ephemeral_workspace
-from scripts.henke_session import (
+from henke.ephemeral import EphemeralConfig, ephemeral_workspace
+from henke.henke_session import (
     end_session,
     heartbeat,
     load_session,
@@ -138,7 +138,7 @@ class TestSessionGC(_RepoSessionCase):
         data["heartbeat_expires_at"] = (_utcnow() - timedelta(hours=3)).isoformat().replace("+00:00", "Z")
         path.write_text(json.dumps(data), encoding="utf-8")
 
-        with patch("scripts.henke_session.ephemeral_gc") as mock_gc:
+        with patch("henke.henke_session.ephemeral_gc") as mock_gc:
             reaped = session_gc(self.repo, now=_utcnow())
         self.assertEqual(reaped, 1)
         mock_gc.assert_called_once()

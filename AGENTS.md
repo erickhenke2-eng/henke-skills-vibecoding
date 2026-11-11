@@ -21,13 +21,13 @@ O cumprimento das diretrizes abaixo é **obrigatório e verificado mecanicamente
 
 3. **Seção Obrigatória "O que NÃO foi verificado":**
    - Todo relatório de entrega DEVE conter explicitamente o que ficou de fora (ex: endpoints externos, testes E2E com GPU real, variáveis de ambiente de produção).
-   - O script `python scripts/metricas/coverage_ledger.py render-gaps <ledger.json>` gera essa seção de forma mecânica e padronizada.
+   - O script `python henke/metricas/coverage_ledger.py render-gaps <ledger.json>` gera essa seção de forma mecânica e padronizada.
 
 ---
 
 ## 2. Máquina de Estados: Os 3 Modos de Operação
 
-Antes de executar qualquer ação, determine o modo da sessão (registrado em `.henke/runs/<run_id>.json` por `scripts/run_state.py`):
+Antes de executar qualquer ação, determine o modo da sessão (registrado em `.henke/runs/<run_id>.json` por `henke/run_state.py`):
 
 | Modo | Quando Usar | Permissões de Escrita | Portões Obrigatórios |
 |---|---|---|---|
@@ -35,7 +35,7 @@ Antes de executar qualquer ação, determine o modo da sessão (registrado em `.
 | **`PLANEJAR`** | Concepção, desenho de arquitetura, histórias, MVP. | **APENAS** em `docs/designs/` e `.henke/`. Proibido alterar código-fonte (`src/`, `packages/`). | `spec_drift.py`, `contract_closure.py`, `fence_check.py` |
 | **`EXECUTAR`** | Implementação cirúrgica, correção de bugs, integrações LLM, observabilidade, testes. | **APENAS nos arquivos declarados** em `## 4. Escopo Declarado` da spec aprovada. | `spec_drift.py`, `ratchet.py`, `hazard_scan.py`, `assertless_scan.py`, `fence_check.py`, `contract_closure.py`, `metaconfig_diff.py`, `a11y_scan.py`, `mutant_hunt.py` |
 
-> A tabela acima é o **espelho documental de `MODE_GATES`** em `scripts/henke_router.py` — a fonte única da matriz. `a11y_scan.py` e `mutant_hunt.py` entram com veredito **n/a** (exit 3): o portão rodou e declarou "nada a verificar" quando não há arquivo de UI / .py no diff — conta como veredito físico, nunca como verde (a run exige ≥1 exit 0 real); `run_state.py` orquestra a run, não é portão executável.
+> A tabela acima é o **espelho documental de `MODE_GATES`** em `henke/henke_router.py` — a fonte única da matriz. `a11y_scan.py` e `mutant_hunt.py` entram com veredito **n/a** (exit 3): o portão rodou e declarou "nada a verificar" quando não há arquivo de UI / .py no diff — conta como veredito físico, nunca como verde (a run exige ≥1 exit 0 real); `run_state.py` orquestra a run, não é portão executável.
 
 > ⚠️ **Trava de PUBLISH:**  
 > Ações destrutivas ou de publicação (`deploy`, `push --force`, remoção em massa de arquivos, `drop table`, `rollback`) exigem **autorização humana prévia e explícita** com alvo e comando confirmados.
@@ -62,46 +62,46 @@ Ao receber uma tarefa, assuma a postura do arquétipo correto:
 
 ## 4. Portões de Verificação Obrigatórios & CLI Unificada (`henke`)
 
-Antes de submeter qualquer commit ou concluir sua tarefa, execute os portões pertinentes (via `scripts/henke_cli.py` ou diretamente):
+Antes de submeter qualquer commit ou concluir sua tarefa, execute os portões pertinentes (via `henke/henke_cli.py` ou diretamente):
 
 ```bash
 # 0. CLI Unificada (rota, execução com hash-log e bateria de portões)
-python scripts/henke_cli.py route --prompt "<sua tarefa>" --repo .
-python scripts/henke_cli.py exec --repo . -- <comando_de_teste>
-python scripts/henke_cli.py check --repo . --spec docs/designs/<sua-feature>.md
+python henke/henke_cli.py route --prompt "<sua tarefa>" --repo .
+python henke/henke_cli.py exec --repo . -- <comando_de_teste>
+python henke/henke_cli.py check --repo . --spec docs/designs/<sua-feature>.md
 
 # 1. Roteamento e análise inicial de escopo
-python scripts/henke_router.py --prompt "<sua tarefa>" --repo .
+python henke/henke_router.py --prompt "<sua tarefa>" --repo .
 
 # 2. Varredura de riscos de segurança em código, IaC e CI/CD (não altera nada)
-python scripts/metricas/hazard_scan.py .
+python henke/metricas/hazard_scan.py .
 
 # 3. Verificação contra testes teatrais e cheats de acessibilidade (.sr-only)
-python scripts/metricas/assertless_scan.py <diretório_de_testes>
-python scripts/metricas/a11y_scan.py .
+python henke/metricas/assertless_scan.py <diretório_de_testes>
+python henke/metricas/a11y_scan.py .
 
 # 4. Testes de mutação cirúrgica no diff (caça a testes fracos)
-python scripts/metricas/mutant_hunt.py --target <arquivo.py> --diff --test-cmd "<cmd_teste>"
+python henke/metricas/mutant_hunt.py --target <arquivo.py> --diff --test-cmd "<cmd_teste>"
 
 # 5. Verificação de deriva de escopo (exige spec aprovada)
-python scripts/spec_drift.py --repo . --spec docs/designs/<sua-feature>.md
+python henke/spec_drift.py --repo . --spec docs/designs/<sua-feature>.md
 
 # 6. Verificação de fechamento bilateral de contrato e pontes
-python scripts/metricas/contract_closure.py --repo . --spec docs/designs/<sua-feature>.md --require-touched
+python henke/metricas/contract_closure.py --repo . --spec docs/designs/<sua-feature>.md --require-touched
 
 # 7. Inicialização e verificação de cobertura (para auditorias)
-python scripts/metricas/coverage_ledger.py init --root . --out $TEMP/ledger.json
-python scripts/metricas/coverage_ledger.py verify $TEMP/ledger.json --min-pct 90
+python henke/metricas/coverage_ledger.py init --root . --out $TEMP/ledger.json
+python henke/metricas/coverage_ledger.py verify $TEMP/ledger.json --min-pct 90
 
 # 8. Inspeção de metaconfiguração, lockfiles, untracked e anti-TOCTOU
-python scripts/metricas/metaconfig_diff.py --repo . --against main
+python henke/metricas/metaconfig_diff.py --repo . --against main
 
 # 9. Verificação de custódia, baseline git e manifesto de execução (run_state)
-python scripts/henke_gate.py check --repo .
-python scripts/run_state.py verify --run .henke/runs/<run_id>.json
+python henke/henke_gate.py check --repo .
+python henke/run_state.py verify --run .henke/runs/<run_id>.json
 
 # 10. Auditoria do ledger executável, exec_log.jsonl e expansão de lifecycle
-python scripts/audit_ledger.py --ledger .henke/LEDGER.json --require-exec-log
+python henke/audit_ledger.py --ledger .henke/LEDGER.json --require-exec-log
 ```
 
 Se qualquer um desses scripts retornar **código diferente de 0**, a tarefa **NÃO ESTÁ PRONTA**. Corrija a raiz da falha em vez de tentar contornar a verificação.

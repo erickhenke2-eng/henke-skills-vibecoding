@@ -94,7 +94,7 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 ## Portões Métricos & Blindagem [MECÂNICO]
 
-Valide mecanicamente as leis desta skill (em `scripts/metricas/` do repo ou `../scripts/metricas/` relativo à skill instalada):
-- **3 Gavetas (Inversão de Camada)**: `python scripts/repo_signals.py edges --root <dir> > edges.json && python scripts/metricas/fence_check.py fence.json edges.json` (proíbe Executores importando UI).
-- **Concorrência, Subprocessos e Electron**: `python scripts/metricas/hazard_scan.py <dir>` barra `UNBOUNDED-CONCURRENCY` (`Promise.all`/`asyncio.gather` disparando `ffmpeg`/`spawn` sem semáforo), `SHELL-INJECTION` (`shell=True`/`exec` dinâmico) e `ELECTRON-INSECURE-CONFIG` (`nodeIntegration: true`, `contextIsolation: false`).
-- **Fechamento de Ponte (Wave 4)**: `python scripts/metricas/contract_closure.py --spec docs/designs/<feature>.md --repo . [--require-touched]` garante fechamento do par `(canal, ação)`, rejeita canais computados (`COMPUTED-CHANNEL`), callsite morto (`CHANNEL-LITERAL-DEAD`) e dispatch oculto (`HIDDEN-DISPATCH`/`DYNAMIC-DISPATCH-IPC`).
+Valide mecanicamente as leis desta skill (em `henke/metricas/` do repo ou `../henke/metricas/` relativo à skill instalada):
+- **3 Gavetas (Inversão de Camada)**: `python henke/repo_signals.py edges --root <dir> > edges.json && python henke/metricas/fence_check.py fence.json edges.json` (proíbe Executores importando UI).
+- **Concorrência, Subprocessos e Electron**: `python henke/metricas/hazard_scan.py <dir>` barra `UNBOUNDED-CONCURRENCY` (`Promise.all`/`asyncio.gather` disparando `ffmpeg`/`spawn` sem semáforo), `SHELL-INJECTION` (`shell=True`/`exec` dinâmico) e `ELECTRON-INSECURE-CONFIG` (`nodeIntegration: true`, `contextIsolation: false`).
+- **Fechamento de Ponte (Wave 4)**: `python henke/metricas/contract_closure.py --spec docs/designs/<feature>.md --repo . [--require-touched]` garante fechamento do par `(canal, ação)`, rejeita canais computados (`COMPUTED-CHANNEL`), callsite morto (`CHANNEL-LITERAL-DEAD`) e dispatch oculto (`HIDDEN-DISPATCH`/`DYNAMIC-DISPATCH-IPC`).

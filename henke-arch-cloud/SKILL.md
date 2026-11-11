@@ -38,7 +38,7 @@ Você é o **Arquiteto Multi-Cloud (`ESTADISTA`)** da Suíte Henke. Segurança d
 ### Fase 1: Diagnóstico da Topologia & Provedor
 
 1. Leia `.henke/` (`MAPA.md`, `DECISOES.md`) e identifique o provedor alvo (**AWS**, **GCP**, **Cloudflare** ou híbrido/containers) e os manifestos de IaC presentes (`*.tf`, `Dockerfile*`, `docker-compose*.yml`, `serverless.yml`, `wrangler.toml`, `cloudbuild.yaml`).
-2. Rode o scanner de riscos de código e IaC: `python scripts/metricas/hazard_scan.py <alvo>`.
+2. Rode o scanner de riscos de código e IaC: `python henke/metricas/hazard_scan.py <alvo>`.
 
 ### Fase 2: Matriz de Blindagem Multi-Cloud (AWS + GCP + Cloudflare)
 
@@ -102,11 +102,11 @@ Esta skill opera sob a autoridade estrita do [PROTOCOLO.md](../PROTOCOLO.md) da 
 
 - [ ] **Entrega Real (Zero Stubs)**: Políticas IAM, manifestos IaC e configurações entregues completos e com menor privilégio real.
 - [ ] **Regra Portão vs Produto**: Nenhuma permissão wildcard (`*`) deixada "temporariamente" para fazer o deploy funcionar rápido.
-- [ ] **Ledger de Evidência**: `python scripts/metricas/hazard_scan.py <alvo>` executado com exit code documentado.
+- [ ] **Ledger de Evidência**: `python henke/metricas/hazard_scan.py <alvo>` executado com exit code documentado.
 - [ ] **Custódia de Ambiente**: Nenhum deploy ou provisionamento pago disparado sem autorização `PUBLISH`.
 - [ ] **Ressalvas Transparentes**: Controles que dependem do console da AWS/GCP/Cloudflare listados em "O que NÃO foi verificado".
 
 ## Portões Métricos & Segurança [MECÂNICO] — Multi-Cloud Gate
 
 1. **Varredura de IaC e Código Cloud**:
-   `python scripts/metricas/hazard_scan.py <alvo>` inspeciona código e manifestos IaC (`*.tf`, `*.tfvars`, `Dockerfile*`, `docker-compose*.y*ml`, `serverless.y*ml`, `wrangler.toml`, `cloudbuild.y*ml`, `Pulumi.y*ml`, `*policy*.json`, `iam*.json`, `*bucket*.json`, `firebase.json`) barrando `CLOUD-IAM-WILDCARD`, `CLOUD-BUCKET-PUBLIC`, `CLOUD-SECRET-MATERIAL`, `DOCKER-ESCALATED`, `IMDS-V1` e `ENV-COMMITTED` (incluindo `*service*account*.json`, `credentials.json`, `*.p12`, `*.kubeconfig`).
+   `python henke/metricas/hazard_scan.py <alvo>` inspeciona código e manifestos IaC (`*.tf`, `*.tfvars`, `Dockerfile*`, `docker-compose*.y*ml`, `serverless.y*ml`, `wrangler.toml`, `cloudbuild.y*ml`, `Pulumi.y*ml`, `*policy*.json`, `iam*.json`, `*bucket*.json`, `firebase.json`) barrando `CLOUD-IAM-WILDCARD`, `CLOUD-BUCKET-PUBLIC`, `CLOUD-SECRET-MATERIAL`, `DOCKER-ESCALATED`, `IMDS-V1` e `ENV-COMMITTED` (incluindo `*service*account*.json`, `credentials.json`, `*.p12`, `*.kubeconfig`).

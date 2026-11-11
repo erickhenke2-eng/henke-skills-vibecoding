@@ -5,10 +5,10 @@ Repositório central de governança, memória e automação para desenvolvimento
 
 ## 2. Estrutura de Diretórios & Função de Cada Pasta
 
-- `scripts/`: Portões mecânicos, CLI global, roteador determinístico, máquina de estados e instaladores em Python puro (`henke_cli.py`, `run_state.py`, `henke_gate.py`, `spec_drift.py`, `audit_ledger.py`, `henke_router.py`, `repo_signals.py`, `validate_skills.py`, `install_skills.py`).
-- `scripts/metricas/`: Bateria de portões métricos assimilados (`hazard_scan.py`, `assertless_scan.py`, `contract_closure.py`, `a11y_scan.py`, `metaconfig_diff.py`, `coverage_ledger.py`, `mutant_hunt.py`, `fence_check.py`, `ratchet.py`, `crap_score.py`, `tornado_scan.py`) e a biblioteca de extração de comentários `polyglot.py`. No total a suíte expõe **14 portões executáveis** despacháveis via `henke gate` (`GATE_MAP` de `scripts/henke_cli.py`): os 10 portões métricos registrados + `henke_gate.py`, `spec_drift.py`, `audit_ledger.py` e `repo_signals.py`.
-- `tests/`: Suíte de 56 testes automatizados com Python `unittest` cobrindo instaladores, validação de YAML, detecção de drift e portões mecânicos.
-- `evals/`: Cenários e baterias de avaliação comportamental, canários bilaterais (M1-M80) e benchmark adversarial (D1-D24 + C1-C4).
+- `henke/`: Portões + CLI (`cli_*`), máquina de estados (`rs_*`) e pipeline auto (`auto_*`) desmembrados por responsabilidade (<500L/módulo), roteador determinístico e instaladores em Python puro (`henke_cli.py`, `run_state.py`, `henke_auto.py`, `henke_gate.py`, `spec_drift.py`, `audit_ledger.py`, `henke_router.py`, `repo_signals.py`, `validate_skills.py`, `install_skills.py`).
+- `henke/metricas/`: Bateria de portões métricos assimilados (`hazard_scan.py`, `assertless_scan.py`, `contract_closure.py`, `a11y_scan.py`, `metaconfig_diff.py`, `coverage_ledger.py`, `mutant_hunt.py`, `fence_check.py`, `ratchet.py`, `crap_score.py`, `tornado_scan.py`) e a biblioteca de extração de comentários `polyglot.py`. No total a suíte expõe **14 portões executáveis** despacháveis via `henke gate` (`GATE_MAP` de `henke/henke_cli.py`): os 10 portões métricos registrados + `henke_gate.py`, `spec_drift.py`, `audit_ledger.py` e `repo_signals.py`.
+- `tests/`: Suíte de testes automatizados com Python `unittest` (unitários + e2e opacos em `tests/e2e/`) cobrindo instaladores, validação de YAML, detecção de drift e portões mecânicos.
+- `evals/`: Cenários e baterias de avaliação comportamental, canários bilaterais (M1-M84) e benchmark adversarial (D1-D24 + C2-C4).
 - `prompts/`: Catálogo de prompts mestres de orquestração universal (ex: Mega-Sprint 360 com checkpoint ou autopilot).
 - `docs/designs/`: Diretório reservado para Design Specs vinculadas a hash SHA-256 no padrão Google EGM.
 - `.henke/`: Memória persistente, cofre de decisões, diário de bordo e baseline de custódia do projeto.
@@ -31,9 +31,10 @@ Repositório central de governança, memória e automação para desenvolvimento
 ## 3. Arquivos de Entrada e Governança Vitais
 - `PROTOCOLO.md`: A constituição operacional v4.0 definindo os portões mecânicos e regras de custódia.
 - `README.md`: Documentação geral da suíte e manual de instalação.
-- `scripts/henke_cli.py`: CLI global unificada `henke` (`init`, `doctor`, `route`, `exec`, `check`, `gate`, `approve`, `scope`, `goldfish`) — dona do `GATE_MAP` com os 14 portões executáveis.
-- `scripts/run_state.py`: Máquina de estados executável de `.henke/runs/<run_id>.json`, derivando `outcome` (`verified|failed|blocked`) dos portões reais.
-- `scripts/henke_gate.py`: Portão mecânico de baseline e custódia física contra mutações indevidas.
-- `scripts/spec_drift.py`: Portão verificador de integridade de escopo e hash da spec.
-- `scripts/validate_skills.py`: Validador de conformidade sintática e semântica das 58 skills.
+- `henke/henke_cli.py`: CLI global unificada `henke` (`doctor`, `init`, `route`, `exec`, `check`, `approve`, `scope`, `goldfish`, `install-hook`, `report-html`, `test-impact`, `watch`, `clean`, `session`, `gate`, `run`, `report`, `status`, `setup`, `auto`, `trigger`) — dona do `GATE_MAP` com os 14 portões executáveis; fatiada em `cli_kernel`, `cli_base`, `cli_exec`, `cli_exec_proc`, `cli_check`, `cli_runs`, `cli_ops` e `cli_pipeline`.
+- `henke/run_state.py`: Máquina de estados executável de `.henke/runs/<run_id>.json`, derivando `outcome` (`verified|failed|blocked|unverified`) dos portões reais; fatiada em `rs_io`, `rs_custody`, `rs_git`, `rs_verify` e `rs_mutations`.
+- `henke/henke_auto.py`: Orquestrador "máquina de uma frase" (`route→policy→envelope→driver→gates/rework→tests→verify`); fatiado em `auto_kernel`, `auto_policy`, `auto_driver`, `auto_custody`, `auto_audit` e `auto_gates`.
+- `henke/henke_gate.py`: Portão mecânico de baseline e custódia física contra mutações indevidas.
+- `henke/spec_drift.py`: Portão verificador de integridade de escopo e hash da spec.
+- `henke/validate_skills.py`: Validador de conformidade sintática e semântica das 58 skills.
 - `install.ps1` / `install.sh`: Instaladores rápidos para Windows e Unix.
