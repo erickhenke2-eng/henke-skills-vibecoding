@@ -67,6 +67,36 @@ def _install_lock(user_root, timeout=LOCK_TIMEOUT_SEC):
                 pass
 
 
+def _assert_install_target(user_root: Path, target: Path) -> Path:
+    """Recusa destino atravessando symlink/junction em qualquer ancestral.
+
+    Verificar apenas target.is_symlink() e target.resolve() não basta:
+    ~/.agents -> /outro/local redireciona ~/.agents/skills sem tornar
+    skills um symlink. O limite de confiança é user_root, não target.resolve().
+    """
+    root = Path(user_root)
+    target = Path(target)
+    root_real = root.resolve()
+    try:
+        relative = target.absolute().relative_to(root.absolute())
+    except ValueError as exc:
+        raise ValueError(f"Destino fora da raiz do usuário: {target}") from exc
+    cursor = root
+    for part in relative.parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise ValueError(f"Ancestral de destino é link simbólico: {cursor}")
+        try:
+            st = cursor.lstat()
+        except FileNotFoundError:
+            st = None
+        if st is not None and getattr(st, "st_file_attributes", 0) & 0x400:
+            raise ValueError(f"Ancestral de destino é reparse point: {cursor}")
+        if not cursor.resolve().is_relative_to(root_real):
+            raise ValueError(f"Destino escapa da raiz do usuário: {cursor}")
+    return root_real
+
+
 def _resolve_source(repo, rel):
     """Resolve o caminho físico de um arquivo do inventário.
 
@@ -262,10 +292,10 @@ def install(repo, user_root, dry_run=False, lock_timeout=LOCK_TIMEOUT_SEC):
     # Lock exclusivo por destino: cobre TODA a transação stage→publish→manifesto
     # — instaladores paralelos não podem misturar versões dos artefatos.
     with _install_lock(user_root, timeout=lock_timeout):
-        _publish(repo, targets, files)
+        _publish(repo, targets, files, user_root=user_root)
 
 
-def _publish(repo, targets, files):
+def _publish(repo, targets, files, *, user_root):
     """Transação stage→publish→manifest (invocada sob _install_lock)."""
     # Stage all content before changing any installed file; keep unrelated skills intact.
     transactions, changed, created = [], [], []
@@ -280,6 +310,7 @@ def _publish(repo, targets, files):
     try:
         stale_map = {}
         for target in targets:
+            _assert_install_target(user_root, target)
             if target.is_symlink():
                 raise ValueError(f"Destino com link simbólico: {target}")
             mkdir(target)
@@ -354,8 +385,10 @@ def _publish(repo, targets, files):
                 (stage / "old").mkdir(exist_ok=True)
                 shutil.copy2(old_manifest, stage / "old" / MANIFEST)
         for target, stage in zip(targets, transactions):
+            root_resolved = _assert_install_target(user_root, target)
             target_resolved = target.resolve()
             for relative in files:
+                _assert_install_target(user_root, target)
                 destination = target.joinpath(*relative.parts)
                 mkdir(destination.parent)
                 # Rechecagem no instante da escrita (TOCTOU): entre a validação
@@ -365,12 +398,14 @@ def _publish(repo, targets, files):
                 if real_dest != destination.absolute() and not real_dest.is_relative_to(target_resolved):
                     raise ValueError(f"Destino escapa por link simbólico: {destination}")
                 parent_resolved = destination.parent.resolve()
-                if not parent_resolved.is_relative_to(target_resolved):
+                if (not parent_resolved.is_relative_to(target_resolved)
+                        or not parent_resolved.is_relative_to(root_resolved)):
                     raise ValueError(f"Diretório de destino atravessa link simbólico: {destination}")
                 # Record before replacing so rollback also handles an interrupted replacement.
                 changed.append((destination, stage / "old" / relative))
                 os.replace(stage / "new" / relative, destination)
             for rel, victim in stale_map[target]:
+                _assert_install_target(user_root, target)
                 changed.append((victim, stage / "stale" / rel))
                 victim.unlink()
                 directory = victim.parent
@@ -391,6 +426,7 @@ def _publish(repo, targets, files):
                     for rel in files
                 }
             }
+            _assert_install_target(user_root, target)
             staged_manifest = stage / "new" / MANIFEST
             staged_manifest.write_text(json.dumps(manifest_new, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
             changed.append((target / MANIFEST, stage / "old" / MANIFEST))
