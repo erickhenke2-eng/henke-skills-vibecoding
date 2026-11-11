@@ -270,7 +270,15 @@ def _cmd_exec(
             # em timeout). Hashear o rc real enquanto grava 124 envenenava a
             # cadeia: todo exec seguinte era recusado (wedge permanente).
             _persisted_exit = rc if not timed_out else 124
-            chain_payload = f"{prev_hash}|{cmd_str}|{_persisted_exit}|{discovered}|{stdout_sha256}"
+            # banca r5 — P1: `passed`/`evidence_reason` decidem elegibilidade e
+            # explicam a evidência, mas ficavam FORA do payload encadeado —
+            # editar no log (ou no ledger sem cruzamento) passava a cadeia
+            # intacta. Os campos entram no hash; o verificador exige fórmula
+            # que os cubra quando presentes.
+            chain_payload = (
+                f"{prev_hash}|{cmd_str}|{_persisted_exit}|{discovered}"
+                f"|{passed}|{stdout_sha256}|{_verdict.reason}"
+            )
             entry_hash = hashlib.sha256(chain_payload.encode("utf-8")).hexdigest()
 
             log_entry = {

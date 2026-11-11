@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from henke.cli_kernel import (
@@ -385,6 +386,28 @@ def _cmd_check(
                                   file=sys.stderr)
                             return 2
                         listed = set(p for p in lt_text.split("\0") if p)
+                        # banca r5 — staged-sanitize: no NTFS, `:` em nome de
+                        # arquivo vira ADS (`evil:pkg.py` escreve stream em
+                        # `evil`, nunca um arquivo com esse nome) e nomes de
+                        # dispositivo (NUL/AUX/COM1) não materializam — o blob
+                        # staged nunca era escaneado (exit 0 falso-verde).
+                        # Repo hostil forja o índice no Linux, onde `:` é legal.
+                        if os.name == "nt":
+                            # is_reserved_component replica a normalização
+                            # Win32 (strip espaço/ponto, stem pré-1º ponto) —
+                            # `nul `/`con `/`aux .txt` evadiriam split(".")[0].
+                            from henke.winpath import (
+                                is_reserved_component as _is_rsv)
+                            _nt_bad = sorted(
+                                p for p in listed
+                                if re.search(r'[:*?"<>|\x00-\x1f]', p)
+                                or any(_is_rsv(seg)
+                                       for seg in p.split("/") if seg))
+                            if _nt_bad:
+                                print("ERRO: índice contém paths que não "
+                                      "materializam no Windows (ADS/device): "
+                                      f"{_nt_bad[:5]}", file=sys.stderr)
+                                return 2
                         # Delta-F17: colisão de case no índice (`A.py`+`a.py`)
                         # materializa UM arquivo no FS case-insensitive — o
                         # blob do outro nunca é escaneado (falso-verde). Também

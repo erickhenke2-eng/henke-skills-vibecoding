@@ -98,9 +98,12 @@ def _lstat(path):
 # --------------------------------------------------------------------------
 
 _RESERVED_NAMES = frozenset(
-    {"CON", "PRN", "AUX", "NUL"}
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
     | {f"COM{i}" for i in range(1, 10)}
     | {f"LPT{i}" for i in range(1, 10)}
+    # Windows mapeia superscripts ¹²³ para COM1-3/LPT1-3 no namespace de
+    # devices DOS (quirk documentado) — sem eles `COM¹` evadia a checagem.
+    | {"COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"}
 )
 
 
@@ -344,9 +347,44 @@ def iter_tree(
         raise PathSafetyError(f"root não é diretório: {root_s!r}")
 
     prune_fold = frozenset(n.casefold() for n in prune_names)
+    root_real = os.path.normcase(os.path.realpath(root_s))
     queue: deque[tuple[str, str, int]] = deque([(root_s, "", 0)])
     while queue:
         dir_s, rel_prefix, depth = queue.popleft()
+        # TOCTOU (rodada 5): um diretório enfileirado como real pode ter sido
+        # trocado por junction/symlink entre o stat na descoberta e este
+        # scandir — scandir resolveria o alvo FORA da raiz. Revalida o nó
+        # físico agora: reparse virou skip e realpath tem que continuar
+        # contido na raiz real.
+        try:
+            st_dir = _lstat(dir_s)
+        except OSError as exc:
+            yield TreeEntry(
+                Path(dir_s), rel_prefix or ".", "error", 0, 0, _err_reason(exc)
+            )
+            continue
+        if _st_is_reparse(st_dir):
+            yield TreeEntry(
+                Path(dir_s), rel_prefix or ".", "skipped", 0,
+                st_dir.st_mtime_ns, "reparse_point",
+            )
+            continue
+        if not stat_mod.S_ISDIR(st_dir.st_mode):
+            yield TreeEntry(
+                Path(dir_s), rel_prefix or ".", "error", 0, 0,
+                "diretório enfileirado não é mais diretório",
+            )
+            continue
+        dir_real = os.path.normcase(os.path.realpath(dir_s))
+        # rstrip evita sep duplo quando root já é raiz de filesystem
+        # (`F:\`/`/`) — startswith em "F:\\" nunca casaria filho algum.
+        if (dir_real != root_real
+                and not dir_real.startswith(root_real.rstrip(os.sep) + os.sep)):
+            yield TreeEntry(
+                Path(dir_s), rel_prefix or ".", "error", 0, 0,
+                "diretório resolve fora da raiz (escape físico)",
+            )
+            continue
         try:
             with os.scandir(dir_s) as it:
                 entries = sorted(it, key=lambda e: (e.name.casefold(), e.name))
