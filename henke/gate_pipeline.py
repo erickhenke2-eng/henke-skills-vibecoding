@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 
 for _s in (sys.stdout, sys.stderr, sys.stdin):
     if hasattr(_s, "reconfigure"):
@@ -147,23 +148,39 @@ def main(argv: list[str] | None = None) -> int:
         if len(collector.stdout) > 4 * 1024 * 1024:
             print("gate_pipeline: saída do coletor excede 4MB — recusada", file=sys.stderr)
             return 2
-        tmp = artifact.with_suffix(artifact.suffix + f".{os.getpid()}.tmp")
+        # A20 (adversarial r3): o portão consome artefato POR-RUN — tmp+replace
+        # no canônico só impedia leitura truncada; um run concorrente podia
+        # substituir o conteúdo entre o replace e a leitura do portão, que
+        # então avaliava evidência de OUTRO run e passava verde. O canônico é
+        # promovido a "evidência do último veredito completo" pós-portão.
+        run_artifact = artifact.with_name(
+            f"{artifact.stem}.{os.getpid()}."
+            f"{uuid.uuid4().hex[:12]}{artifact.suffix}")
+        tmp = run_artifact.with_name(run_artifact.name + ".tmp")
         tmp.write_text(collector.stdout, encoding="utf-8")
-        os.replace(tmp, artifact)
+        os.replace(tmp, run_artifact)
     except OSError as exc:
         print(f"gate_pipeline: falha ao gravar artefato: {exc}", file=sys.stderr)
         return 2
 
     # 2) Portão real sobre o artefato.
     if gate == "ratchet":
-        gate_argv = [sys.executable, "-Es", str(GATES[gate]), "--baseline", str(args.baseline), "--current", str(artifact)]
+        gate_argv = [sys.executable, "-Es", str(GATES[gate]), "--baseline", str(args.baseline), "--current", str(run_artifact)]
     else:
-        gate_argv = [sys.executable, "-Es", str(GATES[gate]), str(args.fence), str(artifact)]
+        gate_argv = [sys.executable, "-Es", str(GATES[gate]), str(args.fence), str(run_artifact)]
     res = _run(gate_argv, cwd=repo)
     if res.stdout:
         sys.stdout.write(res.stdout)
     if res.stderr:
         sys.stderr.write(res.stderr)
+    try:
+        os.replace(run_artifact, artifact)
+    except OSError as exc:
+        # Veredito já emitido sobre a evidência correta — a falha só afeta
+        # a trilha canônica de auditoria, reportada como aviso.
+        print(f"gate_pipeline: veredito ok; falha ao promover evidência "
+              f"canônica ({exc}) — artefato do run preservado em {run_artifact}",
+              file=sys.stderr)
     return res.returncode
 
 

@@ -536,8 +536,11 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
             content = None
             if spec.scanner_id == "a11y":
                 try:
-                    content = fpath.read_bytes().decode("utf-8", errors="replace")
-                except OSError as exc:
+                    # UTF-8 estrito como o scan direto: errors="replace"
+                    # escaneava mojibake — divergência que aceitava bytes que
+                    # scan_a11y_file rejeita como ilegível (falso-verde).
+                    content = fpath.read_bytes().decode("utf-8")
+                except (OSError, UnicodeDecodeError) as exc:
                     reasons.append(f"scan_error:{rel}:{type(exc).__name__}")
                     failed = True
                     break

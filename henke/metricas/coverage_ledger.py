@@ -74,12 +74,17 @@ VALID_ASSUMPTION_STATUS = ("enforced", "unenforced", "unknown")
 # banca-v19 (rev FV-1): veredito de check exige token POSITIVO explícito
 # e nenhum token de falha — blocklist exata evadia "reprovado", "0", "❌".
 _RES_POS = re.compile(
-    r"\b(pass(ed|ou)?|ok|true|verified|verificado|verificada|success|"
-    r"succeeded|sucesso|aprovado|aprovada|clean|limpo|confirmed|confirmado|"
-    r"confirmada|válid|valid|green|yes|sim|conforme|satisfied)\b")
+    # Stems longos casam por prefixo (verified/verificada/approved/
+    # validated/...); tokens curtos exigem \b próprio para não casar
+    # "okay"/"simples"/"truest".
+    r"\b(?:ok\b|yes\b|sim\b|true\b|pass|verifi|succe|sucess|aprov|approv|"
+    r"clean|limp|confirm|válid|valid|green|conforme|satisf)")
 _RES_NEG = re.compile(
-    r"\b(fail|falh|reprov|violat|inconclusive|denied|timeout|errors?|"
-    r"não|not\b|❌|✗|✖|×)\b")
+    # Stems casam por prefixo (sem \b final): EN+PT compartilhados curtos
+    # (erro→error/erros, inconclus→inconclusive/inconclusivo, pend→pending/
+    # pendente, skip→skipped). Símbolos não-palavra ficam fora do \b.
+    r"\b(?:fail|falh|reprov|violat|inconclus|denied|timeout|erro|"
+    r"pend|skip|parcial|partial|não|not\b)|[❌✗✖×]")
 
 # banca-v18 (residual 5): critic_passes teatral — `[{"agent":"a"}]`, `[""]`
 # e `[{"note":"ok"}]` sem substância mintiam o gate --require-critic/deep.
