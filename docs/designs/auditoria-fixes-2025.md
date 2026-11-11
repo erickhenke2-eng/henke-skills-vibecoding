@@ -32,6 +32,7 @@ Auditoria completa (SHERLOCK, ledger em `$TEMP/henke-audit-ledger.json`, 73/73 u
 - `requirements.txt`
 - `docs/audit/coverage_ledger.json`
 - `docs/designs/auditoria-fixes-2025.md`
+- `tests/test_isoboot_guard.py`
 
 ## 5. Pontes de Contrato
 

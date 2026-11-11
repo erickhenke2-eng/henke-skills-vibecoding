@@ -34,6 +34,19 @@ def _entrypoint_files() -> list[Path]:
     return files
 
 
+def _user_site_dir(ubase: Path) -> Path:
+    """site-packages do user site (PYTHONUSERBASE) por plataforma:
+    nt: PythonXY/site-packages; posix: lib/pythonX.Y/site-packages;
+    darwin: lib/python/site-packages. Sem isso o PoC escrevia o artefato
+    hostil num diretório que o site nunca lê fora do Windows."""
+    v = sys.version_info
+    if os.name == "nt":
+        return ubase / ("Python%d%d" % v[:2]) / "site-packages"
+    if sys.platform == "darwin":
+        return ubase / "lib" / "python" / "site-packages"
+    return ubase / "lib" / ("python%d.%d" % v[:2]) / "site-packages"
+
+
 class TestCanonicalGuardSync(unittest.TestCase):
     """Todo entrypoint carrega o bloco canônico verbatim — divergência ou
     guarda ausente = regressão (P1-01: isolamento em TODOS os entrypoints)."""
@@ -217,7 +230,7 @@ class TestAdversarialRespawn(unittest.TestCase):
             td = Path(tds)
             repo = self._hostile_repo(td)
             ubase = td / "ubase"
-            usite = ubase / ("Python%s%s" % sys.version_info[:2]) / "site-packages"
+            usite = _user_site_dir(ubase)
             usite.mkdir(parents=True)
             (usite / "usercustomize.py").write_text(
                 "import henke.metricas.scan_manifest as _m\n"
@@ -242,7 +255,7 @@ class TestAdversarialRespawn(unittest.TestCase):
             td = Path(tds)
             repo = self._hostile_repo(td)
             ubase = td / "ubase"
-            usite = ubase / ("Python%s%s" % sys.version_info[:2]) / "site-packages"
+            usite = _user_site_dir(ubase)
             usite.mkdir(parents=True)
             (usite / "evil.pth").write_text(
                 "import os; os.environ.setdefault('ZZ_PTH_RAN','1')\n",
