@@ -250,7 +250,7 @@ def _changed_protected_files(repo: Path, against: str) -> tuple[list[tuple[str, 
     # Captura arquivos untracked (??) como adições ('A') na superfície worktree
     res_untracked = _git(repo, "ls-files", "--others", "--exclude-standard", "-z")
     if res_untracked.returncode != 0:
-        return None, res_untracked.stderr.strip() or "git ls-files --others falhou"
+        return None, f"git ls-files --others falhou: {res_untracked.stderr.strip()}"
     if res_untracked.returncode == 0:
         for rel in res_untracked.stdout.split("\0"):
             rel = rel.strip().replace("\\", "/")
@@ -266,7 +266,7 @@ def _changed_protected_files(repo: Path, against: str) -> tuple[list[tuple[str, 
     # supply-chain direto (M3 banca v6). Filtramos aos nomes protegidos.
     res_ignored = _git(repo, "ls-files", "--others", "--ignored", "--exclude-standard", "-z")
     if res_ignored.returncode != 0:
-        return None, res_ignored.stderr.strip() or "git ls-files --ignored falhou"
+        return None, f"git ls-files --ignored falhou: {res_ignored.stderr.strip()}"
     if res_ignored.returncode == 0:
         for rel in res_ignored.stdout.split("\0"):
             rel = rel.strip().replace("\\", "/")
