@@ -293,6 +293,25 @@ def verify_ledger(
                     f"EMPTY-CHECKS [{uid}]: unidade '{status}' exige pelo menos "
                     "1 check em 'checks[]' — status auditado sem evidência é "
                     "verde fabricado")
+            # BANCA-B2: lista não-vazia sem CONTEÚDO também era aceita —
+            # [{}] contava como auditado. Valida o conteúdo como 'covered'.
+            for chk in checks if isinstance(checks, list) else []:
+                if not isinstance(chk, dict):
+                    errors.append(f"INVALID-CHECK [{uid}]: check não-objeto")
+                    continue
+                if not chk.get("agent_id") or not chk.get("invariant") or not chk.get("result"):
+                    errors.append(f"INCOMPLETE-CHECK [{uid}]: check exige 'agent_id', 'invariant' e 'result'")
+                if chk.get("method") not in ("source", "local"):
+                    errors.append(f"INVALID-METHOD [{uid}]: check.method deve ser 'source' ou 'local'")
+                assumptions = chk.get("assumptions", [])
+                if not isinstance(assumptions, list):
+                    errors.append(f"INVALID-ASSUMPTIONS [{uid}]: 'assumptions' deve ser lista")
+                else:
+                    for a in assumptions:
+                        if not isinstance(a, dict) or a.get("status") not in VALID_ASSUMPTION_STATUS or not a.get("text"):
+                            errors.append(f"INVALID-ASSUMPTION [{uid}]: cada assumption exige 'text' e status in {VALID_ASSUMPTION_STATUS}")
+                        elif a.get("status") == "unenforced":
+                            unenforced_assumptions += 1
 
     for disk_rel in sorted(set(disk_files.keys()) - mapped_paths):
         errors.append(f"UNMAPPED-FILE: arquivo in-scope '{disk_rel}' não pertence a nenhuma unidade do ledger")

@@ -99,6 +99,7 @@ from henke.cli_pipeline import (
     _cmd_auto,
     _cmd_trigger,
 )
+import henke.cli_banca as _cli_banca
 
 
 def _ensure_isolated_main() -> None:
@@ -215,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
     p_gf.add_argument("--driver", default=None, help="Comando do revisor externo (sessão zerada)")
     p_gf.add_argument("--run", dest="run_ref", default=None, help="Run alvo (id ou caminho .henke/runs/<id>.json)")
     p_gf.add_argument("--json", action="store_true", help="Saída em JSON")
+
+    _cli_banca.register(sub)
 
     p_install = sub.add_parser("install-hook", help="Instala o pre-commit hook nativo no repositório Git")
     p_install.add_argument("--repo", type=Path, default=Path("."), help="Repositório alvo")
@@ -346,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
             run_ref=args.run_ref,
             as_json=args.json,
         )
+
+    if args.subcmd == "banca":
+        return _cli_banca.cmd_banca(args)
 
     if args.subcmd == "report":
         return _cmd_report(args.repo.resolve(), args.run_id)

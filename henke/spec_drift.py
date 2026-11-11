@@ -56,8 +56,11 @@ def _md_clean(text: str) -> str:
 # H5 (banca v14): `.*?Escopo` casava 'Itens fora de Escopo' (inversão
 # semântica — exclusões viravam escopo). Rejeita negação antes do termo.
 _SCOPE_HEAD_RE = re.compile(
+    # BANCA-SEC: wordlist de negação era loteria — 'off-limits' e 'vedado'
+    # passavam como escopo autorizado.
     r"(?m)^## 4\.\s+(?![^\n]*\b(?:fora|non-|not\s|out\s+of|exclu|proibid|"
-    r"n[aã]o|negad|forbid|denied|restrit|unauthor))Escopo\b[^\n]*?\n"
+    r"n[aã]o|negad|forbid|denied|restrit|unauthor|off.?\s?limit|vedad|"
+    r"forbid|barrad|impedid))Escopo\b[^\n]*?\n"
     r"(.*?)(?=\n#{1,6} |\Z)", flags=re.S)
 
 
@@ -171,7 +174,13 @@ def _git_paths_z(git_root: Path, *args: str) -> list[str]:
              # Repo hostil pode configurar core.fsmonitor=<cmd> (executado pelo
              # status/diff) e diff.external/textconv (executado em diffs com
              # patch) — neutralizado para TODA enumeração (banca v7 — F-02).
+             # BANCA-SEC: filter.*.clean via .gitattributes também executa —
+             # attr-file global isolado + lfs off (drivers custom seguem
+             # needs_validation, documentado no relatório).
              "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "-c", f"core.attributesFile={os.devnull}",
+             "-c", "filter.lfs.clean=", "-c", "filter.lfs.smudge=",
+             "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
              *args],
             cwd=str(git_root), capture_output=True, check=True, timeout=60,
             env=_GIT_ENV_F(git_root),

@@ -97,6 +97,13 @@ def run_process(
         if resolved:
             tokens[0] = resolved
         elif tokens[0].lower() in ("echo", "dir", "type", "del", "copy", "move", "md", "rd", "cls"):
+            # BANCA-A1: cmd /c re-parseia o rabo — builtin + metacaractere
+            # (`echo ok&calc`, `rd /s /q . & x` via test_cmd de PROJECT.json)
+            # executava comando injetado. Mesma guarda do cli_exec (A6 v14).
+            if any(any(c in '&|<>^%"' for c in str(t)) for t in tokens):
+                raise ValueError(
+                    "metacaractere de shell (&|<>) em comando builtin — "
+                    "recusado (cmd /c re-parseia o rabo)")
             tokens = ["cmd.exe", "/c"] + tokens
 
     work_dir = Path(cwd) if cwd is not None else Path.cwd()

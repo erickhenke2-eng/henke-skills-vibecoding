@@ -96,6 +96,24 @@ def _cmd_exec(
                   "— recusado (binário poderia ser plantado no repo).",
                   file=sys.stderr)
             return 2
+        elif not resolved:
+            # BANCA-C1: which-miss no POSIX caía direto no execvpe — `./x.sh`
+            # resolvia contra cwd=repo_root e executava o binário plantado,
+            # ainda logado como comando auditado. Caminho explícito (ou
+            # absoluto) para dentro do repo é recusado em toda plataforma.
+            _tok = Path(exec_tokens[0])
+            _cand = _tok if _tok.is_absolute() else (
+                (_rr / _tok) if _rr is not None else _tok)
+            try:
+                _cr = _cand.resolve()
+                if _rr is not None and (_cr == _rr or _rr in _cr.parents):
+                    print(
+                        f"ERRO: '{exec_tokens[0]}' resolve para caminho dentro "
+                        f"do repo ({_cr}) — recusado (repo-resident exec).",
+                        file=sys.stderr)
+                    return 2
+            except OSError:
+                pass
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
     # F-07 (banca v8): CWD poisoning — binário plantado no worktree não pode
@@ -227,7 +245,12 @@ def _cmd_exec(
                     print(f"ERRO: Log de execução corrompido em '{exec_log_path}': {exc}", file=sys.stderr)
                     return 2
 
-            chain_payload = f"{prev_hash}|{cmd_str}|{rc}|{discovered}|{stdout_sha256}"
+            # BANCA-B1: hash e persistência devem cobrir o MESMO valor de exit —
+            # o verificador recompõe a cadeia do campo persistido ('exit': 124
+            # em timeout). Hashear o rc real enquanto grava 124 envenenava a
+            # cadeia: todo exec seguinte era recusado (wedge permanente).
+            _persisted_exit = rc if not timed_out else 124
+            chain_payload = f"{prev_hash}|{cmd_str}|{_persisted_exit}|{discovered}|{stdout_sha256}"
             entry_hash = hashlib.sha256(chain_payload.encode("utf-8")).hexdigest()
 
             log_entry = {

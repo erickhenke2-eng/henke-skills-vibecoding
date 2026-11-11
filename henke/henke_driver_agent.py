@@ -188,7 +188,17 @@ def main() -> int:
             # Com /s /c o cmd.exe remove a 1ª e a última aspa da linha inteira:
             # path do shim com espaço ("C:\Program Files\nodejs\claude.cmd")
             # quebrava. String única com par de aspas externo resolve.
-            inner = subprocess.list2cmdline(argv)
+            # BANCA-A2: list2cmdline só cita espaço/tab/aspas — `&|<>^%` em
+            # elemento sem espaço (env TEMP envenenado, dir de PATH com &)
+            # chegava CRU ao re-parse do cmd. Escapa com ^ nos elementos que
+            # não receberão aspas; dentro de aspas o cmd trata &|<> como
+            # literal e ^% bloqueia expansão de variável.
+            def _cmd_arg_escape(t: str) -> str:
+                if not re.search(r'[ \t"]', t):
+                    return re.sub(r'([&|<>^%"])', r'^\1', t)
+                return t
+            inner = subprocess.list2cmdline(
+                [_cmd_arg_escape(a) for a in argv])
             cmdline = f'cmd.exe /d /s /c "{inner}"'
         try:
             res = subprocess.run(

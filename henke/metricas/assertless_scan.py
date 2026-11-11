@@ -770,6 +770,89 @@ def is_constant_tautology(node):
     return False
 
 
+def _dead_assert_ids(stmts):
+    """BANCA-C4: ids de ast.Assert em ramos mortos — `if False:`, `while
+    False:`, `for _ in []:` e qualquer stmt após return/raise/continue/break/
+    skip() no mesmo bloco nunca executam; contá-los como 'real' fabricava
+    falso-verde um token além de `assert True`."""
+    dead = set()
+
+    def _false_const(t):
+        if isinstance(t, ast.Constant):
+            return not bool(t.value)
+        if (isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not)
+                and isinstance(t.operand, ast.Constant)):
+            return bool(t.operand.value)
+        if isinstance(t, (ast.List, ast.Tuple, ast.Set)):
+            return not t.elts
+        return False
+
+    def _true_const(t):
+        if isinstance(t, ast.Constant):
+            return bool(t.value)
+        if (isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not)
+                and isinstance(t.operand, ast.Constant)):
+            return not bool(t.operand.value)
+        return False
+
+    def _empty_iter(t):
+        if isinstance(t, (ast.List, ast.Tuple, ast.Set)):
+            return not t.elts
+        if isinstance(t, ast.Dict):
+            return not t.keys
+        if isinstance(t, ast.Constant):
+            return isinstance(t.value, (str, bytes)) and not t.value
+        return False
+
+    def _terminating(s):
+        if isinstance(s, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+            return True
+        if isinstance(s, ast.Expr) and isinstance(s.value, ast.Call):
+            f = s.value.func
+            attr = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+            return attr in ("skip", "skipTest", "xfail", "skipif")
+        return False
+
+    def _mark_dead(block):
+        for s in block:
+            for n in ast.walk(s):
+                if isinstance(n, ast.Assert):
+                    dead.add(id(n))
+
+    def _walk(block):
+        terminated = False
+        for s in block:
+            if terminated:
+                _mark_dead([s])
+                continue
+            if isinstance(s, ast.If):
+                if _false_const(s.test):
+                    _mark_dead(s.body)
+                    _walk(s.orelse)
+                elif _true_const(s.test):
+                    _mark_dead(s.orelse)
+                    _walk(s.body)
+                else:
+                    _walk(s.body)
+                    _walk(s.orelse)
+            elif isinstance(s, ast.While) and _false_const(s.test):
+                _mark_dead(s.body)
+                _walk(s.orelse)
+            elif isinstance(s, (ast.For, ast.AsyncFor)) and _empty_iter(s.iter):
+                _mark_dead(s.body)
+                _walk(s.orelse)
+            else:
+                for field in ("body", "orelse", "finalbody"):
+                    _walk(getattr(s, field, []) or [])
+                for h in getattr(s, "handlers", []) or []:
+                    _walk(h.body)
+            if _terminating(s):
+                terminated = True
+
+    _walk(list(stmts))
+    return dead
+
+
 def classify(fn, helpers, b, module_consts, class_consts):
     """Return (real_assertions, mock_assertions, swallow_reason_or_None)."""
     real = mock = 0
@@ -777,8 +860,11 @@ def classify(fn, helpers, b, module_consts, class_consts):
     params = {a.arg for a in ast.walk(fn.args) if isinstance(a, ast.arg)}
     scope = Scope(constant_bindings(fn.body, module_consts, params),
                   assigned_values(fn.body), class_consts)
+    dead = _dead_assert_ids(fn.body)
     for node in own_scope(fn.body):
         if isinstance(node, ast.Assert):
+            if id(node) in dead:
+                continue
             # const_truth resolve `ok = True; assert ok` / `assert not done`
             # (done=False) — a mesma tautologia que is_constant_tautology pega
             # em literais, mas através de nomes vinculados (C2-banca).

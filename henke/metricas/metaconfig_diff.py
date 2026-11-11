@@ -133,6 +133,13 @@ def _is_protected(rel: str) -> str | None:
         return "package_json"
     if base_l in ("pyproject.toml", "cargo.toml"):
         return "toml"
+    # BANCA-SEC: exec-on-install/run fora do radar — devcontainer
+    # postCreateCommand, task runners e manifests alternativos.
+    if base_l in ("devcontainer.json", "taskfile.yml", "taskfile.yaml",
+                  "nx.json", "turbo.json", "composer.json", "makefile"):
+        return "whole_file"
+    if rel_l.endswith(".vscode/tasks.json") or rel_l.endswith(".vscode/launch.json"):
+        return "whole_file"
     if (
         rel_l in {s.lower() for s in _WHOLE_FILE_SENSITIVE}
         or rel_l in {s.lower() for s in _HENKE_CUSTODY}
@@ -168,13 +175,26 @@ def _git(repo: Path, *args) -> subprocess.CompletedProcess:
         from henke.state_paths import sanitized_child_env
     except ImportError:
         from state_paths import sanitized_child_env  # type: ignore[no-redef]
-    return subprocess.run(
-        ["git", "-c", "core.quotePath=false",
-         "-c", "core.fsmonitor=false", "-c", "diff.external=", *args],
-        cwd=str(repo), capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=30,
-        env=sanitized_child_env(repo),
-    )
+    # BANCA-SEC: .gitattributes hostil + filter.*.clean=<cmd> executava no
+    # status/diff do próprio portão. Neutraliza driver lfs (o comum) e o
+    # attr-file global; drivers custom em .git/config seguem needs_validation.
+    try:
+        return subprocess.run(
+            ["git", "-c", "core.quotePath=false",
+             "-c", "core.fsmonitor=false", "-c", "diff.external=",
+             "-c", f"core.attributesFile={os.devnull}",
+             "-c", "filter.lfs.clean=", "-c", "filter.lfs.smudge=",
+             "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
+             *args],
+            cwd=str(repo), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+            env=sanitized_child_env(repo),
+        )
+    except subprocess.TimeoutExpired:
+        # BANCA-SEC: timeout vazava como traceback exit 1 (código de veredito
+        # vermelho) — indeterminado é exit 2 como o resto do portão.
+        print("ERRO: git excedeu 30s — indeterminado.", file=sys.stderr)
+        raise SystemExit(2)
 
 
 def _parse_name_status_z(raw: str) -> list[tuple[str, str]]:

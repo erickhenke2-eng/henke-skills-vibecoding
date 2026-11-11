@@ -42,8 +42,12 @@ def _user_site_dir(ubase: Path) -> Path:
     v = sys.version_info
     if os.name == "nt":
         return ubase / ("Python%d%d" % v[:2]) / "site-packages"
-    if sys.platform == "darwin":
+    # BANCA-C2: darwin framework-build usa 'osx_framework_user'; pyenv/conda/
+    # uv usam posix_user (lib/pythonX.Y) — layout único deixava o PoC morto.
+    if sys.platform == "darwin" and getattr(sys, "_framework", None):
         return ubase / "lib" / "python" / "site-packages"
+    if sys.platform == "darwin":
+        return ubase / "lib" / ("python%d.%d" % v[:2]) / "site-packages"
     return ubase / "lib" / ("python%d.%d" % v[:2]) / "site-packages"
 
 

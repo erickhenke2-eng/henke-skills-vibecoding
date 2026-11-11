@@ -143,8 +143,16 @@ _URL_CRED_RE = re.compile(
     r"([A-Za-z0-9._%-]+):([^/\s'\"@]{3,})@([A-Za-z0-9.-]+)")
 _SQL_INTERP_PY_RE = re.compile(
     # A1 (banca v16): SQL canônica tem `'` dentro da f-string —
-    # `WHERE n='{x}'` quebrava o [^'"]*; tail tolera ' e cobre .format/%(
-    r"""(?ix)\b(?:f['"]{1,3}|['"]{1,3}[^'"]*%s)[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^"{]*(?:\{[^}]+\}|\{\}\s*['"]?\s*\.format\s*\(|['"]\s*%\s*[\w(])"""
+    # `WHERE n='{x}'` quebrava o [^'"]*; tail tolera ' e cobre .format/%(.
+    # BANCA-C3: `\b` antes da alternação impedia TODO match com aspa de
+    # abertura (`"..."` segue sempre char não-word) — %s-era inalcançável.
+    # Três formas explícitas: f-string com {...}, str.format, e interpolação
+    # %"..."%arg — a canônica SQLi `"...%s" % uid` agora casa.
+    r"""(?ix)(?:
+         \bf['"]{1,3}[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*\{[^}]+\}
+       | ['"]{1,3}[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*['"]{1,3}\s*\.format\s*\(
+       | ['"]{1,3}[^'"]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^'"]*%[sd][^'"]*['"]{1,3}\s*%\s*[\w(]
+       )""",
 )
 _SQL_INTERP_JS_RE = re.compile(
     r"""(?ix)`[^`]*\b(?:SELECT\s+.+?\s+FROM|INSERT\s+INTO\s+\w+|UPDATE\s+\w+\s+SET|DELETE\s+FROM\s+\w+)[^`]*\$\{[^}]+\}[^`]*`"""

@@ -59,13 +59,17 @@ def _pid_alive(pid: int) -> bool:
     if os.name == "nt":
         try:
             import ctypes
-            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+            # BANCA-B5: ctypes.windll.kernel32 + ctypes.GetLastError() lia o
+            # LAST-ERROR do thread errado (windll não seta use_last_error) —
+            # dono vivo classificado como morto quebrava lock de vivo.
+            _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            h = _k32.OpenProcess(0x1000, False, int(pid))
             if h:
-                ctypes.windll.kernel32.CloseHandle(h)
+                _k32.CloseHandle(h)
                 return True
             # M1 (banca v15): ERROR_ACCESS_DENIED(5) = processo existe mas
             # sem acesso — VIVO, não stale. 87 (param inválido) = morto.
-            return ctypes.GetLastError() == 5
+            return ctypes.get_last_error() == 5
         except (AttributeError, OSError, TypeError, ValueError):
             return True  # indeterminado → não quebra lock de vivo
     try:
@@ -100,6 +104,7 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
             # stale — só quebra com pid morto OU conteúdo inválido e velho.
             _stale = False
             _stat = None  # M11 (banca v15): stat falho deixava unbound
+            _raw = ""     # BANCA-B5: read falho com ino=0 deixava unbound
             try:
                 _stat = lock_path.stat()
                 _raw = lock_path.read_text(encoding="utf-8", errors="replace")
@@ -124,13 +129,16 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
                     # não deleta lock recriado por outro entre stat e unlink.
                     # M8 (banca v15): FS sem inode (FAT/WebDAV → st_ino=0)
                     # confundia locks distintos — compara conteúdo também.
-                    _same = ((_st2.st_ino, _st2.st_ctime_ns, _st2.st_size)
-                             == (_stat.st_ino, _stat.st_ctime_ns, _stat.st_size))
-                    if _stat is not None and _stat.st_ino == 0:
+                    # BANCA-B5: _stat None era dereferenciado ANTES do guard —
+                    # stat falho + segundo stat ok = AttributeError no lock.
+                    _same = (_stat is not None and (
+                        (_st2.st_ino, _st2.st_ctime_ns, _st2.st_size)
+                        == (_stat.st_ino, _stat.st_ctime_ns, _stat.st_size)))
+                    if _same and _stat is not None and _stat.st_ino == 0:
                         _same = _same and (
                             lock_path.read_text(
                                 encoding="utf-8", errors="replace") == _raw)
-                    if _stat is not None and _same:
+                    if _same:
                         lock_path.unlink()
                 except OSError:
                     pass

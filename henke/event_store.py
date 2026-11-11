@@ -117,6 +117,14 @@ def append_event(repo_root: Path | str, kind: str,
 
     from henke.run_state import _file_lock
     with _file_lock(path):
+        # BANCA-B4: append não pode estender cadeia corrompida — verificar
+        # integridade+âncora ANTES de continuar (extensão "lavava" reescrita).
+        if path.is_file() and path.stat().st_size > 0:
+            _pre_errors = verify(repo)
+            if _pre_errors:
+                raise ValueError(
+                    "events.jsonl falhou a verificação de integridade — "
+                    f"append recusado: {_pre_errors[0]}")
         prev_hash = "0" * 64
         seq = 0
         for ev in _iter_events(path):
@@ -177,6 +185,11 @@ def verify(repo_root: Path | str) -> list[str]:
             "âncora de ponta diverge do log — reescrita/truncamento de rabo")
     elif tip is not None and last_hash is None:
         errors.append("âncora existe mas log está vazio — log apagado")
+    elif tip is None and last_hash is not None:
+        # BANCA-B4: log com eventos mas sem âncora — âncora apagada permite
+        # reescrever o histórico inteiro como cadeia auto-consistente.
+        errors.append("log existe mas âncora de ponta ausente — "
+                      "histórico pode ter sido reescrito")
     return errors
 
 

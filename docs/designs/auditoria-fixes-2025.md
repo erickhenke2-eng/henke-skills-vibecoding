@@ -33,6 +33,18 @@ Auditoria completa (SHERLOCK, ledger em `$TEMP/henke-audit-ledger.json`, 73/73 u
 - `docs/audit/coverage_ledger.json`
 - `docs/designs/auditoria-fixes-2025.md`
 - `tests/test_isoboot_guard.py`
+- `henke/metricas/coverage_ledger.py`
+- `henke/metricas/hazard_scan.py`
+- `henke/metricas/assertless_scan.py`
+- `henke/metricas/metaconfig_diff.py`
+- `henke/spec_drift.py`
+- `henke/audit_ledger.py`
+- `henke/event_store.py`
+- `henke/rs_io.py`
+- `henke/process_runner.py`
+- `henke/henke_driver_agent.py`
+- `henke/cli_banca.py`
+- `henke/henke_cli.py`
 
 ## 5. Pontes de Contrato
 

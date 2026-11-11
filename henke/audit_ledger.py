@@ -107,10 +107,22 @@ def _npm_script_name(cmd: str) -> str | None:
     # `sudo npm install`, `nice -n5 npm t`, `timeout 10 npm run x`,
     # `cmd /c npm t` devolviam None e os hooks ficavam invisíveis.
     _WRAPPERS = {"env", "sudo", "doas", "nice", "nohup", "timeout", "time"}
+    # BANCA-B3: flags de wrapper que tomam arg separado (`sudo -u root`,
+    # `nice -n 5`, `timeout -s KILL`) — sem consumi-los, o arg virava "runner".
+    _WRAP_FLAG_ARG = {"-n", "-u", "-s", "-k", "--signal", "-o", "-v",
+                      "--preserve-status"}
+    # BANCA-B3: arg posicional do wrapper (`timeout 10 npm t` — a duração
+    # não é flag nem VAR=val e engolvia o nome do runner real).
+    _WRAP_POS_ARGS = {"timeout": 1}
     while toks and toks[0].lower() in _WRAPPERS:
-        toks.pop(0)
+        _w = toks.pop(0).lower()
         while toks and (toks[0].startswith("-") or "=" in toks[0]):
-            toks.pop(0)  # flags e VAR=val do wrapper
+            _wf = toks.pop(0)
+            if _wf in _WRAP_FLAG_ARG and toks and not toks[0].startswith("-"):
+                toks.pop(0)  # argumento separado da flag do wrapper
+        for _ in range(_WRAP_POS_ARGS.get(_w, 0)):
+            if toks:
+                toks.pop(0)  # arg posicional (ex.: duração do timeout)
     if len(toks) >= 2 and toks[0].lower() in ("cmd", "cmd.exe") and toks[1] == "/c":
         toks = toks[2:]
     if not toks or not re.fullmatch(
