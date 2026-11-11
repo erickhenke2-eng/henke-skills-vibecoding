@@ -366,10 +366,10 @@ def _cmd_check(
                         # staged — o conjunto extraído TEM que bater com o
                         # ls-tree do índice (fail-closed em divergência).
                         lt_res = subprocess.run(
-                            ["git", "ls-tree", "-r", "--name-only", tree],
+                            ["git", "ls-tree", "-rz", "--name-only", tree],
                             cwd=str(repo_root), capture_output=True,
                             text=True, env=_wt_env)
-                        listed = (set(lt_res.stdout.split())
+                        listed = (set(p for p in lt_res.stdout.split("\\0") if p)
                                   if lt_res.returncode == 0 else set())
                         missing = sorted(p for p in listed
                                          if p + "/" not in extracted
@@ -426,7 +426,19 @@ def _cmd_check(
             # declarou esta spec; sem âncora o portão reprova (fail-closed).
             anchor_sha, anchor_head = _resolve_spec_anchor(repo_root, spec_path)
             eff_hash = expected_hash or anchor_sha
-            drift_args = ["--repo", str(repo_root), "--spec", spec_path]
+            # Em --staged, a spec validada também deve vir do snapshot do
+            # índice, não do working tree com edições ainda não preparadas.
+            staged_spec = (target_root / spec_path) if staged and not Path(spec_path).is_absolute() else Path(spec_path)
+            if staged and Path(spec_path).is_absolute():
+                try:
+                    staged_spec = target_root / Path(spec_path).relative_to(repo_root)
+                except ValueError:
+                    print("ERRO: --spec absoluto fora do repositório em --staged.",
+                          file=sys.stderr)
+                    return 2
+            drift_args = ["--repo", str(repo_root), "--spec", str(staged_spec)]
+            if staged:
+                drift_args.append("--staged-index")
             if eff_hash:
                 drift_args += ["--expected-hash", eff_hash]
             if anchor_head:
