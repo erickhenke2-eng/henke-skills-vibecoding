@@ -215,7 +215,7 @@ class {cls}(object):
         if ent is None:
             return None
         src, orig, is_pkg, pkg_dir = ent
-        loader = _MutantLoader(src)
+        loader = {loader_cls}(src)
         spec = _ilu.spec_from_loader(fullname, loader, origin=orig, is_package=is_pkg)
         if is_pkg:
             # submodule_search_locations aponta para o pacote ORIGINAL — sem
@@ -225,7 +225,7 @@ class {cls}(object):
         return spec
 
 
-class _MutantLoader(_ia.Loader):
+class {loader_cls}(_ia.Loader):
     \"\"\"Executa o código do MUTANTE mas reporta __file__/__package__ do ORIGINAL:
     sem isso, recursos relativos a __file__ (assets ao lado do módulo) quebram
     no import e o mutante é 'morto' sem teste nenhum (A4-banca).\"\"\"
@@ -331,6 +331,10 @@ def run_mutant_hunt(
     # a suíte hostil DETECTAR o harness (PYTHONPATH/meta_path) e fingir kill.
     # Prefixo genérico + nome de classe aleatório por execução.
     _cls = "_I" + secrets.token_hex(8)
+    # banca-v18 (rev C-1): só o FINDER era randomizado — `_MutantLoader`
+    # literal deixava a suíte hostil detectar o mutante por
+    # type(mod.__loader__).__name__ e fingir kill_rate=100%. Aleatório igual.
+    _lcls = "_L" + secrets.token_hex(8)
     with tempfile.TemporaryDirectory() as td:
         stage = Path(td)
         mutant_path = stage / t.name
@@ -343,7 +347,8 @@ def run_mutant_hunt(
             for name in _import_module_names(t)
         }
         (stage / "sitecustomize.py").write_text(
-            _SITE_HOOK_TEMPLATE.format(mapping=mapping, cls=_cls), encoding="utf-8")
+            _SITE_HOOK_TEMPLATE.format(mapping=mapping, cls=_cls,
+                                       loader_cls=_lcls), encoding="utf-8")
 
         run_cwd = Path(cwd).resolve() if cwd is not None else Path.cwd()
         staged_env = _git_env(run_cwd)

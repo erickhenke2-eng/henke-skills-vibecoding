@@ -176,7 +176,13 @@ def _run_capture_tree(argv: list[str], *, cwd: Path, env: dict,
     except subprocess.TimeoutExpired:
         timed_out = True
         _kill_process_tree(proc)
-        out, err = proc.communicate()
+        # banca-v18 (rev B-F3): communicate() pós-kill sem timeout travava o
+        # exec para sempre quando neto órfão (setsid escapa do killpg)
+        # segurava o pipe — henke_gates já tinha o mesmo fix com timeout=10.
+        try:
+            out, err = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            out, err = b"", b""
     return proc.returncode, out or b"", err or b"", timed_out
 
 

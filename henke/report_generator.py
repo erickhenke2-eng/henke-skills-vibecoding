@@ -6,7 +6,7 @@ Gera relatórios de auditoria e qualidade totalmente offline e autocontidos (zer
 com painéis visuais para desenvolvedores e uma seção obrigatória de resumo em linguagem simples
 para stakeholders não técnicos.
 
-Parte integrante da Suíte Henke v4.0 (Wave 6 - R4).
+Parte integrante da Suíte Henke v4.1 (Wave 6 - R4).
 """
 
 from __future__ import annotations
@@ -472,7 +472,7 @@ def generate_report(repo_path: Path, output_file: Optional[Path] = None) -> Path
         "    </div>",
         "",
         "    <footer>",
-        "      Suíte Henke v4.0 • Protocolo de Verificação Determinística • 100% Offline & Autocontido",
+        "      Suíte Henke v4.1 • Protocolo de Verificação Determinística • 100% Offline & Autocontido",
         "    </footer>",
         "  </div>",
         "</body>",

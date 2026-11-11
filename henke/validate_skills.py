@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validação estrutural da Suíte Henke (PROTOCOLO v4.0).
+Validação estrutural da Suíte Henke (PROTOCOLO v4.1).
 Endurecido para rejeitar adulterações: YAML inválido, chaves duplicadas,
 links quebrados e ausência de marcadores mínimos. Não avalia semântica.
 """
@@ -86,10 +86,16 @@ def strip_code(text: str) -> str:
     return re.sub(r"(`+)[^`\n]*?\1", "", "".join(out))
 
 
+# banca-v18 (rev D-F1): `from henke._paths` PRIMEIRO resolvia a cópia
+# INSTALADA em site-packages quando o script roda por path (sys.path[0]=
+# dir do script) — validava/instalava a árvore errada e o checkout/cópia
+# temporária nunca era examinado. O validador valida a SUA própria árvore:
+# sibling `_paths` primeiro, pacote como fallback (console-script/wheel).
 try:
-    from henke._paths import suite_root
-except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _paths import suite_root
+except ImportError:
+    from henke._paths import suite_root
 root = suite_root()
 skills = sorted(p for p in root.glob("henke-*/SKILL.md") if p.is_file())
 errors = []

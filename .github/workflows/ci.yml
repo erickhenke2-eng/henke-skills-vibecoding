@@ -48,7 +48,10 @@ jobs:
 
       - name: Executar Bateria Completa de Testes Unitários (sob coverage)
         run: |
-          python -m coverage run --include="henke/*" -m unittest discover -s tests -p "test_*.py"
+          # banca-v18 (rev C-2): --include só FILTRA — módulo henke/* nunca
+          # importado sumia do denominador (portão cego a 0% real). --source
+          # ativa o scan da árvore e conta arquivos não-tocados.
+          python -m coverage run --source=henke -m unittest discover -s tests -p "test_*.py"
           # BANCA-C5: --fail-under transforma medição em portão (era cosmético);
           # 60% = ratchet honesto do baseline medido (~63%), sobe conforme
           # cobertura cresce. cov.json alimenta repo_signals --coverage.

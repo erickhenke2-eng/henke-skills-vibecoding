@@ -103,24 +103,32 @@ def _cmd_exec(
             # absoluto) para dentro do repo é recusado em toda plataforma.
             # +revisão cega: bare-name (`pytest` ausente) não é caminho —
             # só checa tokens com separador/ponto (fail-open do diagnóstico).
+            # banca-v18 (rev B-F1): bare-name com PATH sanitizado VAZIO —
+            # execvpe trata entrada vazia como CWD → busca `repo_root/pytest`
+            # e executa o plantado. which-miss de nome puro vira recusa igual
+            # ao Windows (comando ausente = diagnóstico, nunca execução).
             _tok_s = exec_tokens[0]
-            if (os.sep in _tok_s or "/" in _tok_s
+            if not (os.sep in _tok_s or "/" in _tok_s
                     or _tok_s.startswith(".") or Path(_tok_s).is_absolute()):
-                _tok = Path(_tok_s)
-                _cand = _tok if _tok.is_absolute() else (
-                    (_rr / _tok) if _rr is not None else _tok)
-                try:
-                    _cr = _cand.resolve()
-                    if (_cr.exists() and _rr is not None
-                            and (_cr == _rr or _rr in _cr.parents)):
-                        print(
-                            f"ERRO: '{exec_tokens[0]}' resolve para caminho "
-                            f"dentro do repo ({_cr}) — recusado "
-                            "(repo-resident exec).",
-                            file=sys.stderr)
-                        return 2
-                except OSError:
-                    pass
+                print(f"ERRO: '{_tok_s}' não resolve no PATH sanitizado "
+                      "— recusado (PATH vazio faria execvpe buscar no "
+                      "repo).", file=sys.stderr)
+                return 2
+            _tok = Path(_tok_s)
+            _cand = _tok if _tok.is_absolute() else (
+                (_rr / _tok) if _rr is not None else _tok)
+            try:
+                _cr = _cand.resolve()
+                if (_cr.exists() and _rr is not None
+                        and (_cr == _rr or _rr in _cr.parents)):
+                    print(
+                        f"ERRO: '{exec_tokens[0]}' resolve para caminho "
+                        f"dentro do repo ({_cr}) — recusado "
+                        "(repo-resident exec).",
+                        file=sys.stderr)
+                    return 2
+            except OSError:
+                pass
     child_env["PYTHONUTF8"] = "1"
     child_env["PYTHONIOENCODING"] = "utf-8"
     # F-07 (banca v8): CWD poisoning — binário plantado no worktree não pode
@@ -175,7 +183,12 @@ def _cmd_exec(
     # --exec-log fora de .henke/exec_log.jsonl não pode ancorar o tip do repo
     # (ancoraria a ponta de outro arquivo, corrompendo a custódia canônica).
     _canonical_log = (repo_root / ".henke" / "exec_log.jsonl").resolve()
-    _is_canonical = exec_log_path.resolve() == _canonical_log
+    # banca-v18 (rev B-F5): Path== é case-sensitive mas NTFS não —
+    # `.henke/EXEC_LOG.JSONL` escrevia no arquivo canônico SEM verificação
+    # de cadeia nem atualização de tip → wedge permanente do exec seguinte.
+    _is_canonical = (
+        os.path.normcase(str(exec_log_path.resolve()))
+        == os.path.normcase(str(_canonical_log)))
     try:
         with _rs._file_lock(exec_log_path):
             prev_hash = "0" * 64
@@ -354,7 +367,10 @@ def _cmd_exec(
                 print(f"ERRO: exec_log revertido após falha de custódia: {exc}",
                       file=sys.stderr)
                 return 2
-    except TimeoutError as exc:
+    except (TimeoutError, OSError) as exc:
+        # banca-v18 (rev B-F12): OSError de _file_lock (mkdir EACCES/ELOOP
+        # no .henke) escapava como traceback exit 1 — falha de infra é
+        # diagnóstico padronizado, não crash.
         print(f"ERRO: {exc}", file=sys.stderr)
         return 2
 

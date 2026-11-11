@@ -6,7 +6,7 @@ O cumprimento das diretrizes abaixo é **obrigatório e verificado mecanicamente
 
 ---
 
-## 1. Princípios Fundamentais (PROTOCOLO v4.0 — 58 Skills)
+## 1. Princípios Fundamentais (PROTOCOLO v4.1 — 58 Skills)
 
 1. **A Regra dos Dois Agentes (Elefante vs. Peixinho Dourado & Banca Adversarial):**
    - Nunca use o mesmo agente para implementar código e se auto-aprovar no mesmo prompt.
@@ -42,7 +42,7 @@ Antes de executar qualquer ação, determine o modo da sessão (registrado em `.
 
 ---
 
-## 3. Os 3 Arquétipos Operacionais & Especializações v4.0
+## 3. Os 3 Arquétipos Operacionais & Especializações v4.1
 
 Ao receber uma tarefa, assuma a postura do arquétipo correto:
 

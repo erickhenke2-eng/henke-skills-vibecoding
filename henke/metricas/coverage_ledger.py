@@ -273,6 +273,16 @@ def verify_ledger(
                     continue
                 if not chk.get("agent_id") or not chk.get("invariant") or not chk.get("result"):
                     errors.append(f"INCOMPLETE-CHECK [{uid}]: check exige 'agent_id', 'invariant' e 'result'")
+                # banca-v18 (rev B-F7): `result` era validado só por
+                # truthiness — "failed"/"violated" é truthy e mintava check
+                # válido: a invariante REPROVANDO contava como cobertura.
+                _res = str(chk.get("result", "")).strip().lower()
+                if _res in ("fail", "failed", "violated", "error", "false",
+                            "no", "n/a", "none", "inconclusive"):
+                    errors.append(f"FAILED-RESULT [{uid}]: check com result "
+                                  f"'{_res}' não pode contar como evidência "
+                                  "de cobertura — invariante reprovada é "
+                                  "finding, não covered")
                 if chk.get("method") not in ("source", "local"):
                     errors.append(f"INVALID-METHOD [{uid}]: check.method deve ser 'source' ou 'local'")
                 assumptions = chk.get("assumptions", [])
@@ -301,6 +311,16 @@ def verify_ledger(
                     continue
                 if not chk.get("agent_id") or not chk.get("invariant") or not chk.get("result"):
                     errors.append(f"INCOMPLETE-CHECK [{uid}]: check exige 'agent_id', 'invariant' e 'result'")
+                # banca-v18 (rev B-F7): `result` era validado só por
+                # truthiness — "failed"/"violated" é truthy e mintava check
+                # válido: a invariante REPROVANDO contava como cobertura.
+                _res = str(chk.get("result", "")).strip().lower()
+                if _res in ("fail", "failed", "violated", "error", "false",
+                            "no", "n/a", "none", "inconclusive"):
+                    errors.append(f"FAILED-RESULT [{uid}]: check com result "
+                                  f"'{_res}' não pode contar como evidência "
+                                  "de cobertura — invariante reprovada é "
+                                  "finding, não covered")
                 if chk.get("method") not in ("source", "local"):
                     errors.append(f"INVALID-METHOD [{uid}]: check.method deve ser 'source' ou 'local'")
                 assumptions = chk.get("assumptions", [])
@@ -461,7 +481,15 @@ def verify_ledger(
 
     # 4. Verificação do Coverage Critic (obrigatório em profile 'deep' ou --require-critic)
     critic_passes = data.get("critic_passes", [])
-    has_critic = isinstance(critic_passes, list) and len(critic_passes) > 0
+    # banca-v18 (rev B-F8): `isinstance(list) and len>0` aceitava [null],
+    # [{}] e ["x"] — critic teatral satisfazia --require-critic/deep.
+    # O produtor (cli_banca consolidate) grava dict {agent, round, scope};
+    # exige pelo menos agent+round não-vazios.
+    has_critic = (isinstance(critic_passes, list)
+                  and len(critic_passes) > 0
+                  and all(isinstance(cp, dict) and cp.get("agent")
+                          and cp.get("round")
+                          for cp in critic_passes))
     outcome = "verified" if not errors else "failed"
     if not errors and (profile == "deep" or require_critic) and not has_critic:
         outcome = "partial"

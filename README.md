@@ -16,7 +16,7 @@ Quem cria sistemas com IA no fluxo de vibecoding conhece bem o ciclo da loucura:
 4. **O Chute Aleatório no Debug:** O servidor dá erro 500 e a IA tenta 7 chutes no escuro, quebrando o banco, o contrato front-back e a sua paciência.
 5. **A Vitória Teatral (Falso-Verde):** A IA afirma que "todos os testes passaram com 100% de sucesso", mas quando você vai ver, ela escreveu testes sem nenhuma asserção real (`assertless`), criou mocks circulares ou usou truques de CSS (`.sr-only`) para forçar o teste a passar.
 
-A **Suíte Henke v4.0** nasceu para aniquilar esses 5 problemas combinando **58 Macro-Skills especializadas**, a **CLI unificada `henke`** (`henke/henke_cli.py`) e **14 Portões Mecânicos determinísticos (fail-closed exit code)**.
+A **Suíte Henke v4.1** nasceu para aniquilar esses 5 problemas combinando **58 Macro-Skills especializadas**, a **CLI unificada `henke`** (`henke/henke_cli.py`) e **14 Portões Mecânicos determinísticos (fail-closed exit code)**.
 
 ---
 
@@ -95,7 +95,7 @@ Você **não precisa memorizar** 58 skills nem adivinhar qual chamar primeiro. B
 
 A eficácia da Suíte Henke é testada contra um corpus físico de **defeitos reais** e **controles legítimos**:
 
-| Métrica | Base Original (`f2f9c64`) | Wave 1 (`f847f25`) | **Wave 5 (v4.0 Atual)** |
+| Métrica | Base Original (`f2f9c64`) | Wave 1 (`f847f25`) | **Wave 5 (v4.1 Atual)** |
 |---|---|---|---|
 | **Cobertura Instrumental de Defeitos** | `3/15` (20,0%) | `11/15` (73,3%) | **`100,0%`** |
 | **Defeitos Detectados (Recall)** | `3/15` (20,0%) | `11/15` (73,3%) | **`100,0%`** |
