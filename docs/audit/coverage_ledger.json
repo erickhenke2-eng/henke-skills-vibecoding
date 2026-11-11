@@ -1,2327 +1,1420 @@
 {
- "schema_version": "1.0",
- "metadata": {
-  "root": "F:/DEV/ACTIVE/henke-skills",
-  "profile": "standard",
-  "tree_hash": "724097ef58907332e7e633cc1af3ea92fdbac0870cff2a4f0775d51b303031e6",
-  "total_units": 73,
-  "run_status": "completed"
- },
- "critic_passes": [],
- "findings": [
-  {
-   "id": "AUD-05",
-   "status": "needs_validation",
-   "severity": null,
-   "title": "Caminho end-to-end do driver de agente externo (henke auto --driver)",
-   "blockers": "requer CLI de agente externo instalado e run aprovada por humano; dry-run cobre parsing mas não a execução real do driver",
-   "validation_plan": "em repo de teste com spec: henke auto --driver <cli> --dry-run; depois run real com approve; conferir envelope em .henke/runs/*.goldfish.json e exec_log",
-   "trace": [
+  "schema_version": "1.0",
+  "metadata": {
+    "root": "F:/DEV/ACTIVE/henke-skills",
+    "profile": "standard",
+    "tree_hash": "5d730f6b3bcf3f7768e7ab5a2782e9ddf5d674360b8ff90c7471f793c6944600",
+    "total_units": 74,
+    "run_status": "in_progress"
+  },
+  "critic_passes": [],
+  "findings": [],
+  "units": [
     {
-     "file": "henke/auto_driver.py",
-     "line": 178
+      "unit_id": "unit:henke/henke_cli.py",
+      "path": "henke/henke_cli.py",
+      "sha256": "63afdf97adc09e9c370aad9114b4c1fe032f1964ef367a8ae42ff471d24e66f3",
+      "lines": 443,
+      "priority": "high",
+      "risk_score": 30,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 45,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
     },
     {
-     "file": "henke/henke_driver_agent.py",
-     "line": 166
-    }
-   ]
-  },
-  {
-   "id": "AUD-06",
-   "status": "needs_validation",
-   "severity": null,
-   "title": "Passos de CI do workflow modificado nunca observados verdes",
-   "blockers": "branch local diverge de origin/main; job 'packaging' e matrix py3.10 nunca rodaram num push visível desta sessão",
-   "validation_plan": "push da branch e leitura do run do Actions; ou replicação local dos steps (validate_skills, unittest discover sob coverage, canaries*, bench*, hazard/assertless dogfood, install dry-run, packaging)",
-   "trace": [
-    {
-     "file": ".github/workflows/ci.yml",
-     "line": 21
+      "unit_id": "unit:henke/henke_router.py",
+      "path": "henke/henke_router.py",
+      "sha256": "111cd0b4749c6f93b295af78436df8a1e6e104086e1dd75d186308157c88dc75",
+      "lines": 696,
+      "priority": "high",
+      "risk_score": 28,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 92,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
     },
     {
-     "file": ".github/workflows/ci.yml",
-     "line": 79
-    }
-   ]
-  }
- ],
- "units": [
-  {
-   "unit_id": "unit:henke/henke_cli.py",
-   "path": "henke/henke_cli.py",
-   "sha256": "e36820c91158afdd0294873045e43bf7996e1f9707643c9d682881e17592da35",
-   "lines": 437,
-   "priority": "high",
-   "risk_score": 30,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 5,
-    "max_complexity": 44,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "dispatch argparse completo para os 20 subcomandos; isoboot repetido dentro de main() cobre o caminho console-script do pip; argv programático não respawna",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_router.py",
-   "path": "henke/henke_router.py",
-   "sha256": "111cd0b4749c6f93b295af78436df8a1e6e104086e1dd75d186308157c88dc75",
-   "lines": 696,
-   "priority": "high",
-   "risk_score": 28,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 4,
-    "max_complexity": 92,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_router_corpus.py + tests/test_mission_classifier.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/auto_kernel.py",
-   "path": "henke/auto_kernel.py",
-   "sha256": "4fb74e84182603ad1d9326027ed88c9c0f5a64b6822186f41aa985813734cd4c",
-   "lines": 318,
-   "priority": "high",
-   "risk_score": 25,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 6,
-    "max_complexity": 18,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "_child_env delega a sanitized_child_env; fingerprint de aprovação liga prompt+route+driver+policy; redação de segredos antes de persistir/despachar; MAX_REWORK=2; HARD_ALWAYS_ASK imune a --yes/policy",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/polyglot.py",
-   "path": "henke/metricas/polyglot.py",
-   "sha256": "74bb8813fae46533b41b7d56fd8dcf8c909db762306e59abf211a3d944da47bd",
-   "lines": 938,
-   "priority": "high",
-   "risk_score": 25,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 5,
-    "max_complexity": 42,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/scan_manifest.py",
-   "path": "henke/metricas/scan_manifest.py",
-   "sha256": "db646f21bc1d5f5acfce15dc3122eb0dfb6c951fcaa2f25359f6df596ec1c06f",
-   "lines": 647,
-   "priority": "high",
-   "risk_score": 25,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 5,
-    "max_complexity": 50,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/rs_io.py",
-   "path": "henke/rs_io.py",
-   "sha256": "ac89143e8101f7fd1d2111e441602db38e077bdc315939957118a56b8f70926b",
-   "lines": 227,
-   "priority": "high",
-   "risk_score": 25,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 5,
-    "max_complexity": 21,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "escrita atômica com fsync de arquivo+diretório; lock O_EXCL com detecção de stale por pid/inode/conteúdo; _pid_alive correto no Windows (OpenProcess+err5); config_dir recusa APPDATA envenenado dentro do repo",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/run_state.py",
-   "path": "henke/run_state.py",
-   "sha256": "04af5d1dcd0389d6b57745c78f4d4ee308500ee1789b7e783b4d1e63763ba799",
-   "lines": 306,
-   "priority": "high",
-   "risk_score": 25,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 15,
-    "max_complexity": 44,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "submódulos rs_* carregados por path explícito (anti-PYTHONPATH hostil); outcome sempre derivado, nunca declarado (STATE-DERIVED-CONFLICT); mutações atômicas sob _file_lock",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/spec_drift.py",
-   "path": "henke/spec_drift.py",
-   "sha256": "80b0faddc5b5507094d547552698ddb400cf117c273c6f156d69e8bf90487cdf",
-   "lines": 488,
-   "priority": "high",
-   "risk_score": 25,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 7,
-    "max_complexity": 19,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "spec lida uma única vez (bytes) — sha256 e escopo derivados do mesmo buffer (anti-TOCTOU); regex de escopo rejeita negação ('fora de escopo'); comentários HTML/fences removidos antes do parse",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/winpath.py",
-   "path": "henke/winpath.py",
-   "sha256": "81e5e26f31db8c0ec0ae3ce0c926af8f1b18a4617f30b81a74917fc2b4900d11",
-   "lines": 449,
-   "priority": "high",
-   "risk_score": 25,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 7,
-    "max_complexity": 18,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_winpath.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/cli_exec.py",
-   "path": "henke/cli_exec.py",
-   "sha256": "dc459c5b3530bd279543841449926440e90d9e97d1fd7aa76e6fe7d06449d51d",
-   "lines": 347,
-   "priority": "high",
-   "risk_score": 24,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 70,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "env do filho agora DELEGA a sanitized_child_env (fonte única; união estrita das duas listas: NODE_*/PSModulePath/ComSpec/PATHEXT/CDPATH/CARGO_/GEM_HOME do helper + PYTEST_/COVERAGE_/PWD/OLDPWD/RUBYLIB/CLASSPATH extras do exec); PATH sem o repo, recusa de binário repo-resident e which-miss no Windows, hash-chain exec_log com âncora de ponta",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "exec_log/LEDGER âncora local é por-máquina — não prova custódia entre clones",
-       "status": "enforced"
-      }
-     ],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/process_supervisor.py",
-   "path": "henke/process_supervisor.py",
-   "sha256": "061fb3978cec54ad214be8c868e313d388465d55f780b7f99b666c4e8292b5dd",
-   "lines": 535,
-   "priority": "high",
-   "risk_score": 24,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 5,
-    "max_complexity": 14,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "Job Object por filho com KILL_ON_JOB_CLOSE; filho criado suspenso e só executa após associação; POSIX mata só o PGID do filho (guarda own_pgid); streams drenados com hash completo",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/audit_ledger.py",
-   "path": "henke/audit_ledger.py",
-   "sha256": "c0b36b480bdec513afb3fb1ba72966381414350ef9b6b8060912e1c9b67d53d4",
-   "lines": 774,
-   "priority": "high",
-   "risk_score": 23,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 4,
-    "max_complexity": 39,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via verify_log_chain consumido por cli_exec a cada exec + tests/test_event_store.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/gate_parallel.py",
-   "path": "henke/gate_parallel.py",
-   "sha256": "8bacd72e052cd3d7c76b4d220b240743b9f687fa19d92d0ea7779a233cb58791",
-   "lines": 145,
-   "priority": "high",
-   "risk_score": 23,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 6,
-    "max_complexity": 13,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_gate_parallel.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_clean.py",
-   "path": "henke/henke_clean.py",
-   "sha256": "468696515b825e442940c3df186058147f917d4b2906f2106c4b04558ea6f3bf",
-   "lines": 618,
-   "priority": "high",
-   "risk_score": 23,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 4,
-    "max_complexity": 19,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "quarentena transacional src->staging->payload com verificação de hash por árvore; reparse points e junctions descendentes recusados (fail-closed); falha restaura origem, nunca perde dados",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/hazard_scan.py",
-   "path": "henke/metricas/hazard_scan.py",
-   "sha256": "43d5a72ad1d90704d67afa6d1e99cc01e92383b3baf2dfe0b231070cd56d73d4",
-   "lines": 1482,
-   "priority": "high",
-   "risk_score": 23,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 4,
-    "max_complexity": 133,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/process_runner.py",
-   "path": "henke/process_runner.py",
-   "sha256": "d86fe9ecebd4b79f98d2dbcc74c723fd1196a71451266b7a494177a784687daf",
-   "lines": 121,
-   "priority": "high",
-   "risk_score": 23,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 4,
-    "max_complexity": 17,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_process_runner.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/cli_check.py",
-   "path": "henke/cli_check.py",
-   "sha256": "31db0bb14dada42b8c6c2e69164f2ff361a2bd45c1be08089ef361dd4f3dc07e",
-   "lines": 605,
-   "priority": "high",
-   "risk_score": 22,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 69,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_check_aggregation.py + tests/test_gates.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/cli_exec_proc.py",
-   "path": "henke/cli_exec_proc.py",
-   "sha256": "3d63e806028e3d5f3dc27e165fc7069a4f1b8707854745f4385cade2be27e85f",
-   "lines": 208,
-   "priority": "high",
-   "risk_score": 22,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 17,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_deepseek_regressions.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/cli_ops.py",
-   "path": "henke/cli_ops.py",
-   "sha256": "fa043caf7bdd217c329336598c23913d6764dc327cfda17fd79b3c0bdcfc6c13",
-   "lines": 152,
-   "priority": "high",
-   "risk_score": 22,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 16,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_check_aggregation.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/cli_pipeline.py",
-   "path": "henke/cli_pipeline.py",
-   "sha256": "5b52b9c59cb2eca5f0fb5279d5e4c3a4e435236ae0f9ee937cd3ec980cda5541",
-   "lines": 318,
-   "priority": "high",
-   "risk_score": 22,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 21,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_gates.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/cli_runs.py",
-   "path": "henke/cli_runs.py",
-   "sha256": "650a3385d0847988fe5f7b0ce3bc457ca678ab68ccef6f9ab4b75568578f5dc8",
-   "lines": 254,
-   "priority": "high",
-   "risk_score": 22,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 13,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_check_aggregation.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/state_paths.py",
-   "path": "henke/state_paths.py",
-   "sha256": "a8b60647e5a12184abbded76bca9b206c37390b60a162fce7a0109e556362a8f",
-   "lines": 112,
-   "priority": "high",
-   "risk_score": 22,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 28,
-    "max_complexity": 12,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "secret_dir e cache_root fora da árvore auditada, chaveados por sha256(repo); sanitized_child_env centraliza strip-list de todos os filhos",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/event_store.py",
-   "path": "henke/event_store.py",
-   "sha256": "63f2ccbc1f0a3bfac443e340317e01eeb52debc90ed287e73b1e88dcb7aa6566",
-   "lines": 307,
-   "priority": "high",
-   "risk_score": 21,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 3,
-    "max_complexity": 23,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_event_store.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/gate_cache.py",
-   "path": "henke/gate_cache.py",
-   "sha256": "279d48ab209810f5bee644f065f3afda6b89eb662b000764116e79792b3237fc",
-   "lines": 659,
-   "priority": "high",
-   "risk_score": 21,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 3,
-    "max_complexity": 21,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_gate_cache.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/install_hook.py",
-   "path": "henke/install_hook.py",
-   "sha256": "3a1ed0a1df053f9987adce016c2d059775dd37c5ebff21f08a96ab4437803dd0",
-   "lines": 270,
-   "priority": "high",
-   "risk_score": 21,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 3,
-    "max_complexity": 17,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_install_hook.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/a11y_scan.py",
-   "path": "henke/metricas/a11y_scan.py",
-   "sha256": "38a9e68ffce22b2906db90a69a79520a48004606e307f2d7d10ee71f53e1bb85",
-   "lines": 343,
-   "priority": "high",
-   "risk_score": 21,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 3,
-    "max_complexity": 22,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/mission_classifier.py",
-   "path": "henke/mission_classifier.py",
-   "sha256": "fb8b90b003a2cfd1131dc02568c3ebb4ff436c2193f9032226a336d7d3a70c29",
-   "lines": 794,
-   "priority": "high",
-   "risk_score": 21,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 3,
-    "max_complexity": 56,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_mission_classifier.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/rs_custody.py",
-   "path": "henke/rs_custody.py",
-   "sha256": "ff4cbad3555ab522e20324f996123be71a662bd53cc681b89d706dd48b5fa7d0",
-   "lines": 341,
-   "priority": "high",
-   "risk_score": 21,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 3,
-    "max_complexity": 15,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_run_state_security.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/rs_verify.py",
-   "path": "henke/rs_verify.py",
-   "sha256": "c934d2dde4c3547f8d61a4f6bc14dab06a941b2490f1fef40c91169ca2764c77",
-   "lines": 488,
-   "priority": "high",
-   "risk_score": 21,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 3,
-    "max_complexity": 76,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_run_state_security.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:evals/canaries_wave7.py",
-   "path": "evals/canaries_wave7.py",
-   "sha256": "d1323afa181c9a9fd333b5223910816f65a7caecb265f531374f235bd41b8881",
-   "lines": 194,
-   "priority": "high",
-   "risk_score": 20,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 23,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via step CI (ci.yml:62) + tests/test_evals.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/gate_pipeline.py",
-   "path": "henke/gate_pipeline.py",
-   "sha256": "6112bcd3011ca309beea15cd41673bafffa564b1a5dddb55948bae413ccdcfec",
-   "lines": 186,
-   "priority": "high",
-   "risk_score": 20,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 26,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_gates.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_report.py",
-   "path": "henke/henke_report.py",
-   "sha256": "f6ede77572a8d3cb294acfe8e910bb658f28bc882d6e497ea356cac63ec2bacd",
-   "lines": 409,
-   "priority": "high",
-   "risk_score": 20,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 80,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_report.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/install_skills.py",
-   "path": "henke/install_skills.py",
-   "sha256": "a13772933e14743f3c06f91e4875166702bffb29d84c7cfb0aab114c1b829daf",
-   "lines": 472,
-   "priority": "high",
-   "risk_score": 20,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 59,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "instalação transacional com rollback; re-check de symlink no instante da escrita (anti-TOCTOU); manifesto com sha256 dos bytes instalados",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/validate_skills.py",
-   "path": "henke/validate_skills.py",
-   "sha256": "5634dfdf039fa5c39e18421bb0f3bdfa51feaa2e9d15ca915c694b3c5a61ac0b",
-   "lines": 231,
-   "priority": "high",
-   "risk_score": 20,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 26,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "UniqueKeyLoader herda yaml.SafeLoader (sem desserialização insegura); exige 58 skills, marcadores canônicos do PROTOCOLO.md, frontmatter delimitado e corpo >=200 chars",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/auto_driver.py",
-   "path": "henke/auto_driver.py",
-   "sha256": "a7ad9752b0f81c91cbb2d00fe832fb8863b39b667c176782ca5512578a9c0ded",
-   "lines": 331,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 17,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_auto.py + tests/test_driver_sandbox.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/cli_kernel.py",
-   "path": "henke/cli_kernel.py",
-   "sha256": "96beaafc76befd076711f5223aee4916ff16d5d0687d195fc3331101ca2ae458",
-   "lines": 78,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 7,
-    "max_complexity": 4,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_cli_pack.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/ephemeral.py",
-   "path": "henke/ephemeral.py",
-   "sha256": "6d59b16634225d5e7f09736a6212376cc3800d89c5fcd5a7a136414df13fac76",
-   "lines": 247,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 5,
-    "max_complexity": 9,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_ephemeral.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_auto.py",
-   "path": "henke/henke_auto.py",
-   "sha256": "b81caf86583380f7f2038f07e1b7d94d2e20115986d2295498c141d8c87509a6",
-   "lines": 442,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 57,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_auto.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_watch.py",
-   "path": "henke/henke_watch.py",
-   "sha256": "fe602d0e63aba94be0bc830ba19cee4e5613243e7373af31e85ef648fd648d3c",
-   "lines": 173,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 18,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_henke_watch.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/assertless_scan.py",
-   "path": "henke/metricas/assertless_scan.py",
-   "sha256": "c92f955fd80a382836b5be21b9eb069d5f26d0d05c9e996e613042057e1fdf2b",
-   "lines": 1183,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 53,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/contract_closure.py",
-   "path": "henke/metricas/contract_closure.py",
-   "sha256": "22a94c4b66973f52b5c918f0aca4f339cb2ffe9da513d1a22461438e80a22caf",
-   "lines": 578,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 46,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/mutant_hunt.py",
-   "path": "henke/metricas/mutant_hunt.py",
-   "sha256": "c7a61a17355641e89096ce37b0627fa7acfc1d11e37cfc0e682dba95a7333178",
-   "lines": 698,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 28,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "mutantes executados apenas em processo-filho supervisionado via meta_path shadow em tempdir; baseline verde exigido antes de contar kills; timeout nunca conta como kill",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/repo_signals.py",
-   "path": "henke/repo_signals.py",
-   "sha256": "b895e62989c8c0a5766c1994e6d474cdd59091b0c6dca2d0b485308368740fe1",
-   "lines": 504,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 37,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/report_generator.py",
-   "path": "henke/report_generator.py",
-   "sha256": "3a6046aa16daed0bbc22a7e183005af19fc902b4a78cb735a294d12dbd7d92a7",
-   "lines": 529,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 72,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_report.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/security_signals.py",
-   "path": "henke/security_signals.py",
-   "sha256": "00e402b93830b8de16d5f2afa3f849af25b6a0efa1246bbb687ccb3c13a44782",
-   "lines": 325,
-   "priority": "high",
-   "risk_score": 19,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 23,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_security_signals.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/cli_base.py",
-   "path": "henke/cli_base.py",
-   "sha256": "be93c1a74384d7040875d2d6de65229d45a3d111bfbf8941cda710a53883efd3",
-   "lines": 106,
-   "priority": "high",
-   "risk_score": 18,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 11,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_cli_pack.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:evals/canaries.py",
-   "path": "evals/canaries.py",
-   "sha256": "afaa42d173958180b4ce28312b6cd1fbf85b06178a6ad633661603d2e26a0656",
-   "lines": 157,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 16,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via step CI 'Executar Canários' (ci.yml:53) + tests/test_evals.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:evals/canaries_metricas.py",
-   "path": "evals/canaries_metricas.py",
-   "sha256": "1bc26ac62f6cda0a171c8dde4aa47cc9f5ee909487bacfe06c69c819372e787a",
-   "lines": 1309,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 248,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via step CI (ci.yml:56) + tests/test_evals.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/_paths.py",
-   "path": "henke/_paths.py",
-   "sha256": "13954ac531bc41bddf19df702a6ab3db2b5821dd766fc65926cd0a4830090bb2",
-   "lines": 57,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 7,
-    "max_complexity": 7,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via imports por todos os entrypoints + tests/test_cli_pack.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/auto_audit.py",
-   "path": "henke/auto_audit.py",
-   "sha256": "b6b4f2193cd7aec9c08d6d9344bd2392d69841925c5f8f227585faebcfb6e167",
-   "lines": 286,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 94,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_auto.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/auto_custody.py",
-   "path": "henke/auto_custody.py",
-   "sha256": "68cd7c797bb6cd9fe0bc632aecb3d53c198818de573d1d0ab3a74f25c5533589",
-   "lines": 296,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 28,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_auto.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/auto_gates.py",
-   "path": "henke/auto_gates.py",
-   "sha256": "5f6de898e3fee1987ee18901c298bfed11c105a32e28c2dabbd00351b6852588",
-   "lines": 424,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 24,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_auto.py + tests/test_wave7_integration.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_driver_agent.py",
-   "path": "henke/henke_driver_agent.py",
-   "sha256": "1017eb8e9fd0ee4ea73a40d709c71cbc310eb28828a4e92a8c64ff77dd6089e5",
-   "lines": 244,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 28,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_driver_sandbox.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_gate.py",
-   "path": "henke/henke_gate.py",
-   "sha256": "4314c147dae100d94539df2eb4b8421028e16eba599ddef238107c011a3a1bf7",
-   "lines": 433,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 49,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_gate.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_gates.py",
-   "path": "henke/henke_gates.py",
-   "sha256": "56755fa6df6e399946fd03af9ff063166a5c40dd1944dcf182c4f0a928903144",
-   "lines": 642,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 52,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_gates.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/coverage_ledger.py",
-   "path": "henke/metricas/coverage_ledger.py",
-   "sha256": "39d7bbf4cdb04ba1f4e0fcc648a99068f365540a89297fce177a4fa2b9cb52d5",
-   "lines": 594,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 104,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/metaconfig_diff.py",
-   "path": "henke/metricas/metaconfig_diff.py",
-   "sha256": "9f172d07287bf65859dcc802807c6687658734d1020ca3a3531d1c33852985bc",
-   "lines": 442,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 21,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "detecta mutação de metaconfig sem spec — reprovou exit 1 na fase sem spec; com spec audit-fixes verde (exit 0)",
-     "result": "ok",
-     "assumptions": [],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/rs_mutations.py",
-   "path": "henke/rs_mutations.py",
-   "sha256": "52c4b926589fb50e7c3c4f0f2e45b48abbf2833d49a90426300d20fd7d39ca67",
-   "lines": 404,
-   "priority": "high",
-   "risk_score": 17,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 32,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_run_state_security.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:evals/bench_corpus.py",
-   "path": "evals/bench_corpus.py",
-   "sha256": "ff22117dc8df45344771b404fbc836d5283886ca6ab8bb2046dfdbb5262b106f",
-   "lines": 569,
-   "priority": "high",
-   "risk_score": 15,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 59,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via step CI 'bench_corpus --strict' (ci.yml:59); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/_isoboot.py",
-   "path": "henke/_isoboot.py",
-   "sha256": "1f7bb4d1e33c916d6ab5afd956029cb3ccc59e36bee29579f9365f3a530937bb",
-   "lines": 263,
-   "priority": "high",
-   "risk_score": 15,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 21,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "invariant": "prova estrutural de isolamento via structseq sys.flags + identidade sys≡os.sys + orig_argv; respawn -Es por execv/spawnv com citação MSVCRT; propaga -S/-P do invocador",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "fronteira declarada: startup que substitui builtins/meta_path em nível total está fora do alcance de guarda em-processo",
-       "status": "unenforced"
-      }
-     ],
-     "agent_id": "sherlock-devin-audit",
-     "method": "source"
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_detect.py",
-   "path": "henke/henke_detect.py",
-   "sha256": "3d63c00c1bab97fa1efb30c757967d6e647e35772a35362d473416febb508c8a",
-   "lines": 454,
-   "priority": "high",
-   "risk_score": 15,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 26,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_detect.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/fence_check.py",
-   "path": "henke/metricas/fence_check.py",
-   "sha256": "645cae56c86c90cb6c5b1ab4e88cfae60fd26aac4e8eb6917167d22f3731e2fb",
-   "lines": 134,
-   "priority": "high",
-   "risk_score": 15,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 18,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/ratchet.py",
-   "path": "henke/metricas/ratchet.py",
-   "sha256": "9aa8999067751c744553e194cbc835b80767094aa7fddd52869c690877eb6835",
-   "lines": 403,
-   "priority": "high",
-   "risk_score": 15,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 19,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/tornado_scan.py",
-   "path": "henke/metricas/tornado_scan.py",
-   "sha256": "16c26843c4724feb665ed71d9ef633ab8554a7c5ce2a1ac81a63052e5eb94e85",
-   "lines": 372,
-   "priority": "high",
-   "risk_score": 15,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 18,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/henke_session.py",
-   "path": "henke/henke_session.py",
-   "sha256": "b8e225715ae699f4d4fb210788f0611f0d84c4d57961bd248bd78977249a8caf",
-   "lines": 190,
-   "priority": "high",
-   "risk_score": 14,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 3,
-    "max_complexity": 8,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_henke_session.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/import_graph.py",
-   "path": "henke/import_graph.py",
-   "sha256": "6ea1fb58005b1d22f7ad31eda91fa51bc4bba43774255450cea5b727f2982a4d",
-   "lines": 77,
-   "priority": "high",
-   "risk_score": 14,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 4,
-    "max_complexity": 6,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_import_graph.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/crap_score.py",
-   "path": "henke/metricas/crap_score.py",
-   "sha256": "5a18a9bca06edc2ee0237e56c8976bd410d3d9d0f292341f6e875e55e6b21185",
-   "lines": 217,
-   "priority": "high",
-   "risk_score": 14,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 14,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_metric_gates.py + suíte pytest (581 verdes); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/auto_policy.py",
-   "path": "henke/auto_policy.py",
-   "sha256": "30672db7b14c0d6e2a1237105cf58e771f0fa6f3b1b4701cf0619eb9cc040955",
-   "lines": 279,
-   "priority": "high",
-   "risk_score": 13,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 1,
-    "max_complexity": 11,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_auto.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/exec_contract.py",
-   "path": "henke/exec_contract.py",
-   "sha256": "db3994b4bb4e6555c7f86f0dce64311c71637994147743070c5b6f3fc3375e61",
-   "lines": 118,
-   "priority": "high",
-   "risk_score": 13,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 9,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_exec_contract.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/rs_git.py",
-   "path": "henke/rs_git.py",
-   "sha256": "ba07cb244643ecaea22af0839fe3a482c1c521aeb52913a3297c4694214d0de6",
-   "lines": 109,
-   "priority": "medium",
-   "risk_score": 11,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 2,
-    "max_complexity": 7,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via tests/test_run_state_security.py; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:evals/bench_wave7.py",
-   "path": "evals/bench_wave7.py",
-   "sha256": "384d829b0f9c0853e43b7fecf113bdcf7a20db89bdaad9f1ae7155b4269d7408",
-   "lines": 112,
-   "priority": "medium",
-   "risk_score": 8,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 3,
-    "entry_surface": true
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via step CI (ci.yml:65); pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:evals/__init__.py",
-   "path": "evals/__init__.py",
-   "sha256": "32e096b2ab25ac0e24dd5627bc15379873bf810bafce628b2ee7df517f83a947",
-   "lines": 1,
-   "priority": "low",
-   "risk_score": 1,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 1,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via marcador de pacote trivial; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  },
-  {
-   "unit_id": "unit:henke/metricas/__init__.py",
-   "path": "henke/metricas/__init__.py",
-   "sha256": "aebd241b7020f6b33f5e4a2876c5b6dbb6114152aab403807118e4e4be5d0db3",
-   "lines": 2,
-   "priority": "low",
-   "risk_score": 1,
-   "risk_signals": {
-    "hazard_hits": 0,
-    "fan_in": 0,
-    "max_complexity": 1,
-    "entry_surface": false
-   },
-   "status": "covered",
-   "reason": "",
-   "checks": [
-    {
-     "agent_id": "sherlock-devin-audit",
-     "method": "local",
-     "invariant": "scan estático limpo (hazard_scan exit 0, 121 arquivos) e execução verde via marcador de pacote trivial; pytest total: 581 passed/7 skipped",
-     "result": "ok",
-     "assumptions": [
-      {
-       "text": "suíte verde não prova cobertura de linha — repo não mede coverage (sem pytest-cov no CI); ramificações mortas podem existir sem detecção",
-       "status": "unenforced"
-      }
-     ]
-    }
-   ],
-   "attempts": [],
-   "prior_status": null
-  }
- ]
+      "unit_id": "unit:henke/auto_kernel.py",
+      "path": "henke/auto_kernel.py",
+      "sha256": "4fb74e84182603ad1d9326027ed88c9c0f5a64b6822186f41aa985813734cd4c",
+      "lines": 318,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 6,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/polyglot.py",
+      "path": "henke/metricas/polyglot.py",
+      "sha256": "74bb8813fae46533b41b7d56fd8dcf8c909db762306e59abf211a3d944da47bd",
+      "lines": 938,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 42,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/scan_manifest.py",
+      "path": "henke/metricas/scan_manifest.py",
+      "sha256": "db646f21bc1d5f5acfce15dc3122eb0dfb6c951fcaa2f25359f6df596ec1c06f",
+      "lines": 647,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 50,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/rs_io.py",
+      "path": "henke/rs_io.py",
+      "sha256": "068dd9c85789aa302d9b7cab0ccc10e8d6b32a3e2ad6bf471fcf3d7e65c4d83f",
+      "lines": 235,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 21,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/run_state.py",
+      "path": "henke/run_state.py",
+      "sha256": "04af5d1dcd0389d6b57745c78f4d4ee308500ee1789b7e783b4d1e63763ba799",
+      "lines": 306,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 15,
+        "max_complexity": 44,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/spec_drift.py",
+      "path": "henke/spec_drift.py",
+      "sha256": "ffa5bca60077207d02fafbcccf8026887fc5249cbfe04f2d309d8c2cc06585ed",
+      "lines": 504,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 7,
+        "max_complexity": 19,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/winpath.py",
+      "path": "henke/winpath.py",
+      "sha256": "81e5e26f31db8c0ec0ae3ce0c926af8f1b18a4617f30b81a74917fc2b4900d11",
+      "lines": 449,
+      "priority": "high",
+      "risk_score": 25,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 7,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_exec.py",
+      "path": "henke/cli_exec.py",
+      "sha256": "7d1068bf80a798b2f2fbcccc439f245d04ce07c4143eee1ce8992f1bc22ab700",
+      "lines": 377,
+      "priority": "high",
+      "risk_score": 24,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 83,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/process_supervisor.py",
+      "path": "henke/process_supervisor.py",
+      "sha256": "061fb3978cec54ad214be8c868e313d388465d55f780b7f99b666c4e8292b5dd",
+      "lines": 535,
+      "priority": "high",
+      "risk_score": 24,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 14,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/audit_ledger.py",
+      "path": "henke/audit_ledger.py",
+      "sha256": "51597259fe253711121d31f117dd159a87e9c3a61c20d842f321ff9d29270db0",
+      "lines": 794,
+      "priority": "high",
+      "risk_score": 23,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 39,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/gate_parallel.py",
+      "path": "henke/gate_parallel.py",
+      "sha256": "8bacd72e052cd3d7c76b4d220b240743b9f687fa19d92d0ea7779a233cb58791",
+      "lines": 145,
+      "priority": "high",
+      "risk_score": 23,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 6,
+        "max_complexity": 13,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_clean.py",
+      "path": "henke/henke_clean.py",
+      "sha256": "468696515b825e442940c3df186058147f917d4b2906f2106c4b04558ea6f3bf",
+      "lines": 618,
+      "priority": "high",
+      "risk_score": 23,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 19,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/hazard_scan.py",
+      "path": "henke/metricas/hazard_scan.py",
+      "sha256": "89019204c0a9452a1b96d44d01958817f81cfd76fe4542e5b1d9eb5cc1a886e2",
+      "lines": 1492,
+      "priority": "high",
+      "risk_score": 23,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 133,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/process_runner.py",
+      "path": "henke/process_runner.py",
+      "sha256": "5e34f9072de613354344e2f07df0d5ab60ff89456d9584df6eecb9368c22672d",
+      "lines": 132,
+      "priority": "high",
+      "risk_score": 23,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 20,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_check.py",
+      "path": "henke/cli_check.py",
+      "sha256": "31db0bb14dada42b8c6c2e69164f2ff361a2bd45c1be08089ef361dd4f3dc07e",
+      "lines": 605,
+      "priority": "high",
+      "risk_score": 22,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 69,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_exec_proc.py",
+      "path": "henke/cli_exec_proc.py",
+      "sha256": "3d63e806028e3d5f3dc27e165fc7069a4f1b8707854745f4385cade2be27e85f",
+      "lines": 208,
+      "priority": "high",
+      "risk_score": 22,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 17,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_ops.py",
+      "path": "henke/cli_ops.py",
+      "sha256": "fa043caf7bdd217c329336598c23913d6764dc327cfda17fd79b3c0bdcfc6c13",
+      "lines": 152,
+      "priority": "high",
+      "risk_score": 22,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 16,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_pipeline.py",
+      "path": "henke/cli_pipeline.py",
+      "sha256": "5b52b9c59cb2eca5f0fb5279d5e4c3a4e435236ae0f9ee937cd3ec980cda5541",
+      "lines": 318,
+      "priority": "high",
+      "risk_score": 22,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 21,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_runs.py",
+      "path": "henke/cli_runs.py",
+      "sha256": "650a3385d0847988fe5f7b0ce3bc457ca678ab68ccef6f9ab4b75568578f5dc8",
+      "lines": 254,
+      "priority": "high",
+      "risk_score": 22,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 13,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/state_paths.py",
+      "path": "henke/state_paths.py",
+      "sha256": "a8b60647e5a12184abbded76bca9b206c37390b60a162fce7a0109e556362a8f",
+      "lines": 112,
+      "priority": "high",
+      "risk_score": 22,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 29,
+        "max_complexity": 12,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/event_store.py",
+      "path": "henke/event_store.py",
+      "sha256": "ff1c848838a939dae84ff360800a9f1c5d0d59e370010d2c21b7b96e7d22b78d",
+      "lines": 324,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 23,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/gate_cache.py",
+      "path": "henke/gate_cache.py",
+      "sha256": "279d48ab209810f5bee644f065f3afda6b89eb662b000764116e79792b3237fc",
+      "lines": 659,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 21,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/install_hook.py",
+      "path": "henke/install_hook.py",
+      "sha256": "3a1ed0a1df053f9987adce016c2d059775dd37c5ebff21f08a96ab4437803dd0",
+      "lines": 270,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 17,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/a11y_scan.py",
+      "path": "henke/metricas/a11y_scan.py",
+      "sha256": "38a9e68ffce22b2906db90a69a79520a48004606e307f2d7d10ee71f53e1bb85",
+      "lines": 343,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 22,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/mission_classifier.py",
+      "path": "henke/mission_classifier.py",
+      "sha256": "fb8b90b003a2cfd1131dc02568c3ebb4ff436c2193f9032226a336d7d3a70c29",
+      "lines": 794,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 56,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/rs_custody.py",
+      "path": "henke/rs_custody.py",
+      "sha256": "ff4cbad3555ab522e20324f996123be71a662bd53cc681b89d706dd48b5fa7d0",
+      "lines": 341,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 15,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/rs_verify.py",
+      "path": "henke/rs_verify.py",
+      "sha256": "c934d2dde4c3547f8d61a4f6bc14dab06a941b2490f1fef40c91169ca2764c77",
+      "lines": 488,
+      "priority": "high",
+      "risk_score": 21,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 76,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/canaries_wave7.py",
+      "path": "evals/canaries_wave7.py",
+      "sha256": "d1323afa181c9a9fd333b5223910816f65a7caecb265f531374f235bd41b8881",
+      "lines": 194,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 23,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/gate_pipeline.py",
+      "path": "henke/gate_pipeline.py",
+      "sha256": "6112bcd3011ca309beea15cd41673bafffa564b1a5dddb55948bae413ccdcfec",
+      "lines": 186,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 26,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_report.py",
+      "path": "henke/henke_report.py",
+      "sha256": "f6ede77572a8d3cb294acfe8e910bb658f28bc882d6e497ea356cac63ec2bacd",
+      "lines": 409,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 80,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/install_skills.py",
+      "path": "henke/install_skills.py",
+      "sha256": "a13772933e14743f3c06f91e4875166702bffb29d84c7cfb0aab114c1b829daf",
+      "lines": 472,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 59,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/validate_skills.py",
+      "path": "henke/validate_skills.py",
+      "sha256": "5634dfdf039fa5c39e18421bb0f3bdfa51feaa2e9d15ca915c694b3c5a61ac0b",
+      "lines": 231,
+      "priority": "high",
+      "risk_score": 20,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 26,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/auto_driver.py",
+      "path": "henke/auto_driver.py",
+      "sha256": "a7ad9752b0f81c91cbb2d00fe832fb8863b39b667c176782ca5512578a9c0ded",
+      "lines": 331,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 17,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_kernel.py",
+      "path": "henke/cli_kernel.py",
+      "sha256": "96beaafc76befd076711f5223aee4916ff16d5d0687d195fc3331101ca2ae458",
+      "lines": 78,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 7,
+        "max_complexity": 4,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/ephemeral.py",
+      "path": "henke/ephemeral.py",
+      "sha256": "6d59b16634225d5e7f09736a6212376cc3800d89c5fcd5a7a136414df13fac76",
+      "lines": 247,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 5,
+        "max_complexity": 9,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_auto.py",
+      "path": "henke/henke_auto.py",
+      "sha256": "b81caf86583380f7f2038f07e1b7d94d2e20115986d2295498c141d8c87509a6",
+      "lines": 442,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 57,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_watch.py",
+      "path": "henke/henke_watch.py",
+      "sha256": "fe602d0e63aba94be0bc830ba19cee4e5613243e7373af31e85ef648fd648d3c",
+      "lines": 173,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/assertless_scan.py",
+      "path": "henke/metricas/assertless_scan.py",
+      "sha256": "e40911810d3a26eb069164609526d4cdcbd0801dfe62763a1691dbbbcb66e2a0",
+      "lines": 1281,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 53,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/contract_closure.py",
+      "path": "henke/metricas/contract_closure.py",
+      "sha256": "22a94c4b66973f52b5c918f0aca4f339cb2ffe9da513d1a22461438e80a22caf",
+      "lines": 578,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 46,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/mutant_hunt.py",
+      "path": "henke/metricas/mutant_hunt.py",
+      "sha256": "c7a61a17355641e89096ce37b0627fa7acfc1d11e37cfc0e682dba95a7333178",
+      "lines": 698,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 28,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/repo_signals.py",
+      "path": "henke/repo_signals.py",
+      "sha256": "b895e62989c8c0a5766c1994e6d474cdd59091b0c6dca2d0b485308368740fe1",
+      "lines": 504,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 37,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/report_generator.py",
+      "path": "henke/report_generator.py",
+      "sha256": "3a6046aa16daed0bbc22a7e183005af19fc902b4a78cb735a294d12dbd7d92a7",
+      "lines": 529,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 72,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/security_signals.py",
+      "path": "henke/security_signals.py",
+      "sha256": "00e402b93830b8de16d5f2afa3f849af25b6a0efa1246bbb687ccb3c13a44782",
+      "lines": 325,
+      "priority": "high",
+      "risk_score": 19,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 23,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_base.py",
+      "path": "henke/cli_base.py",
+      "sha256": "be93c1a74384d7040875d2d6de65229d45a3d111bfbf8941cda710a53883efd3",
+      "lines": 106,
+      "priority": "high",
+      "risk_score": 18,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 11,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/canaries.py",
+      "path": "evals/canaries.py",
+      "sha256": "afaa42d173958180b4ce28312b6cd1fbf85b06178a6ad633661603d2e26a0656",
+      "lines": 157,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 16,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/canaries_metricas.py",
+      "path": "evals/canaries_metricas.py",
+      "sha256": "1bc26ac62f6cda0a171c8dde4aa47cc9f5ee909487bacfe06c69c819372e787a",
+      "lines": 1309,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 248,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/_paths.py",
+      "path": "henke/_paths.py",
+      "sha256": "13954ac531bc41bddf19df702a6ab3db2b5821dd766fc65926cd0a4830090bb2",
+      "lines": 57,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 7,
+        "max_complexity": 7,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/auto_audit.py",
+      "path": "henke/auto_audit.py",
+      "sha256": "b6b4f2193cd7aec9c08d6d9344bd2392d69841925c5f8f227585faebcfb6e167",
+      "lines": 286,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 94,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/auto_custody.py",
+      "path": "henke/auto_custody.py",
+      "sha256": "68cd7c797bb6cd9fe0bc632aecb3d53c198818de573d1d0ab3a74f25c5533589",
+      "lines": 296,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 28,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/auto_gates.py",
+      "path": "henke/auto_gates.py",
+      "sha256": "5f6de898e3fee1987ee18901c298bfed11c105a32e28c2dabbd00351b6852588",
+      "lines": 424,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 24,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_driver_agent.py",
+      "path": "henke/henke_driver_agent.py",
+      "sha256": "483d05acba1a7e19ae53318a4b7dc22d7e19d692d57e4ee25b51c1fb039d9259",
+      "lines": 254,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 30,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_gate.py",
+      "path": "henke/henke_gate.py",
+      "sha256": "4314c147dae100d94539df2eb4b8421028e16eba599ddef238107c011a3a1bf7",
+      "lines": 433,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 49,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_gates.py",
+      "path": "henke/henke_gates.py",
+      "sha256": "56755fa6df6e399946fd03af9ff063166a5c40dd1944dcf182c4f0a928903144",
+      "lines": 642,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 52,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/coverage_ledger.py",
+      "path": "henke/metricas/coverage_ledger.py",
+      "sha256": "8b4bf6f112a8e92c94e537769eac27b4f4ce365190c85fe8b2de3f9ac692b4c8",
+      "lines": 613,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 117,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/metaconfig_diff.py",
+      "path": "henke/metricas/metaconfig_diff.py",
+      "sha256": "46a417eff51f2d90043c41317b92fd332f29faf88a42cd923d5ab84323a16377",
+      "lines": 462,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 21,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/rs_mutations.py",
+      "path": "henke/rs_mutations.py",
+      "sha256": "52c4b926589fb50e7c3c4f0f2e45b48abbf2833d49a90426300d20fd7d39ca67",
+      "lines": 404,
+      "priority": "high",
+      "risk_score": 17,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 32,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/bench_corpus.py",
+      "path": "evals/bench_corpus.py",
+      "sha256": "ff22117dc8df45344771b404fbc836d5283886ca6ab8bb2046dfdbb5262b106f",
+      "lines": 569,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 59,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/_isoboot.py",
+      "path": "henke/_isoboot.py",
+      "sha256": "1f7bb4d1e33c916d6ab5afd956029cb3ccc59e36bee29579f9365f3a530937bb",
+      "lines": 263,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 21,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/cli_banca.py",
+      "path": "henke/cli_banca.py",
+      "sha256": "343dc4852b0581fb3b6677580716b26a7cabc50250412a4543fcdb8aecf9a90b",
+      "lines": 223,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 8,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_detect.py",
+      "path": "henke/henke_detect.py",
+      "sha256": "3d63c00c1bab97fa1efb30c757967d6e647e35772a35362d473416febb508c8a",
+      "lines": 454,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 26,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/fence_check.py",
+      "path": "henke/metricas/fence_check.py",
+      "sha256": "645cae56c86c90cb6c5b1ab4e88cfae60fd26aac4e8eb6917167d22f3731e2fb",
+      "lines": 134,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/ratchet.py",
+      "path": "henke/metricas/ratchet.py",
+      "sha256": "9aa8999067751c744553e194cbc835b80767094aa7fddd52869c690877eb6835",
+      "lines": 403,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 19,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/tornado_scan.py",
+      "path": "henke/metricas/tornado_scan.py",
+      "sha256": "16c26843c4724feb665ed71d9ef633ab8554a7c5ce2a1ac81a63052e5eb94e85",
+      "lines": 372,
+      "priority": "high",
+      "risk_score": 15,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 18,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/henke_session.py",
+      "path": "henke/henke_session.py",
+      "sha256": "b8e225715ae699f4d4fb210788f0611f0d84c4d57961bd248bd78977249a8caf",
+      "lines": 190,
+      "priority": "high",
+      "risk_score": 14,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 3,
+        "max_complexity": 8,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/import_graph.py",
+      "path": "henke/import_graph.py",
+      "sha256": "6ea1fb58005b1d22f7ad31eda91fa51bc4bba43774255450cea5b727f2982a4d",
+      "lines": 77,
+      "priority": "high",
+      "risk_score": 14,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 4,
+        "max_complexity": 6,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/crap_score.py",
+      "path": "henke/metricas/crap_score.py",
+      "sha256": "5a18a9bca06edc2ee0237e56c8976bd410d3d9d0f292341f6e875e55e6b21185",
+      "lines": 217,
+      "priority": "high",
+      "risk_score": 14,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 14,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/auto_policy.py",
+      "path": "henke/auto_policy.py",
+      "sha256": "30672db7b14c0d6e2a1237105cf58e771f0fa6f3b1b4701cf0619eb9cc040955",
+      "lines": 279,
+      "priority": "high",
+      "risk_score": 13,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 1,
+        "max_complexity": 11,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/exec_contract.py",
+      "path": "henke/exec_contract.py",
+      "sha256": "db3994b4bb4e6555c7f86f0dce64311c71637994147743070c5b6f3fc3375e61",
+      "lines": 118,
+      "priority": "high",
+      "risk_score": 13,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 9,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/rs_git.py",
+      "path": "henke/rs_git.py",
+      "sha256": "ba07cb244643ecaea22af0839fe3a482c1c521aeb52913a3297c4694214d0de6",
+      "lines": 109,
+      "priority": "medium",
+      "risk_score": 11,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 2,
+        "max_complexity": 7,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/bench_wave7.py",
+      "path": "evals/bench_wave7.py",
+      "sha256": "384d829b0f9c0853e43b7fecf113bdcf7a20db89bdaad9f1ae7155b4269d7408",
+      "lines": 112,
+      "priority": "medium",
+      "risk_score": 8,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 3,
+        "entry_surface": true
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:evals/__init__.py",
+      "path": "evals/__init__.py",
+      "sha256": "32e096b2ab25ac0e24dd5627bc15379873bf810bafce628b2ee7df517f83a947",
+      "lines": 1,
+      "priority": "low",
+      "risk_score": 1,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 1,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    },
+    {
+      "unit_id": "unit:henke/metricas/__init__.py",
+      "path": "henke/metricas/__init__.py",
+      "sha256": "aebd241b7020f6b33f5e4a2876c5b6dbb6114152aab403807118e4e4be5d0db3",
+      "lines": 2,
+      "priority": "low",
+      "risk_score": 1,
+      "risk_signals": {
+        "hazard_hits": 0,
+        "fan_in": 0,
+        "max_complexity": 1,
+        "entry_surface": false
+      },
+      "status": "pending",
+      "reason": "",
+      "checks": [],
+      "attempts": [],
+      "prior_status": null
+    }
+  ]
 }
