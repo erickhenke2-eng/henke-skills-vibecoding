@@ -371,6 +371,34 @@ def _cmd_check(
                             text=True, env=_wt_env)
                         listed = (set(p for p in lt_res.stdout.split("\0") if p)
                                   if lt_res.returncode == 0 else set())
+                        # Delta-F17: colisão de case no índice (`A.py`+`a.py`)
+                        # materializa UM arquivo no FS case-insensitive — o
+                        # blob do outro nunca é escaneado (falso-verde). Também
+                        # cobre arquivo que vira prefixo-dir de outro por case
+                        # (`A.py` vs `a.py/x`). Fail-closed: snapshot ambíguo
+                        # não é verificável.
+                        _by_fold: dict[str, list[str]] = {}
+                        for _p in listed:
+                            _by_fold.setdefault(_p.casefold(), []).append(_p)
+                        _collide = sorted(
+                            _vs[0] for _vs in _by_fold.values() if len(_vs) > 1)
+                        if not _collide:
+                            for _p in listed:
+                                _anc = ""
+                                for _part in _p.casefold().split("/")[:-1]:
+                                    _anc = (f"{_anc}/{_part}" if _anc
+                                            else _part)
+                                    if _anc in _by_fold:
+                                        _collide.append(_p)
+                                        break
+                                if _collide:
+                                    break
+                        if _collide:
+                            print("ERRO: índice contém paths que colidem por "
+                                  "case (FS insensível não materializa os "
+                                  f"dois blobs): {_collide[:5]}",
+                                  file=sys.stderr)
+                            return 2
                         missing = sorted(p for p in listed
                                          if p + "/" not in extracted
                                          and p not in extracted)

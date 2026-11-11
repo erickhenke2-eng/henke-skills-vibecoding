@@ -78,8 +78,8 @@ _RES_POS = re.compile(
     r"succeeded|sucesso|aprovado|aprovada|clean|limpo|confirmed|confirmado|"
     r"confirmada|válid|valid|green|yes|sim|conforme|satisfied)\b")
 _RES_NEG = re.compile(
-    r"\b(fail|falh|reprov|violat|inconclusive|denied|timeout|errors?|"
-    r"não|not\b|❌|✗|✖|×)\b")
+    r"\b(?:fail|falh|reprov|violat|inconclusive|denied|timeout|error|"
+    r"não|not\b)|[❌✗✖×]")
 
 # banca-v18 (residual 5): critic_passes teatral — `[{"agent":"a"}]`, `[""]`
 # e `[{"note":"ok"}]` sem substância mintiam o gate --require-critic/deep.
