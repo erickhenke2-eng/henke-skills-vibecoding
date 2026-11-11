@@ -201,7 +201,11 @@ class _StreamDrain(threading.Thread):
         while True:
             try:
                 chunk = self._stream.read(65536)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as exc:
+                # EOF legítimo é b"". Erro de leitura NÃO é EOF: sem
+                # diagnóstico, um filho exit=0 virava evidência íntegra
+                # mesmo com stdout/stderr parcialmente capturados.
+                self.error = f"{type(exc).__name__}: {exc}"
                 break
             if not chunk:
                 break
@@ -450,9 +454,12 @@ class ChildSupervisor:
                 child._proc.kill()
                 child._proc.wait()
         duration_ms = int((time.monotonic() - started) * 1000)
+        capture_incomplete = False
         if child._drains is not None:
             for d in child._drains:
                 d.join(timeout=10.0)
+            capture_incomplete = any(
+                d.error is not None or d.is_alive() for d in child._drains)
             out_text, out_hash, out_trunc = child._drains[0].finish()
             err_text, err_hash, err_trunc = child._drains[1].finish()
         else:
@@ -462,6 +469,11 @@ class ChildSupervisor:
 
         if timed_out:
             returncode = TIMEOUT_RETURNCODE
+        elif capture_incomplete:
+            # Não é válido atribuir PASS ao comando se os streams não foram
+            # drenados até EOF. 125 = infraestrutura inconclusiva.
+            returncode = SUPERVISOR_UNAVAILABLE
+            child._term_reason = "stream_capture_incomplete"
         else:
             rc = child._proc.returncode
             returncode = rc if isinstance(rc, int) else (0 if not child._terminated else 1)
