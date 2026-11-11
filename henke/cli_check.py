@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from henke.cli_kernel import (
@@ -385,6 +386,28 @@ def _cmd_check(
                                   file=sys.stderr)
                             return 2
                         listed = set(p for p in lt_text.split("\0") if p)
+                        # banca r5 — staged-sanitize: no NTFS, `:` em nome de
+                        # arquivo vira ADS (`evil:pkg.py` escreve stream em
+                        # `evil`, nunca um arquivo com esse nome) e nomes de
+                        # dispositivo (NUL/AUX/COM1) não materializam — o blob
+                        # staged nunca era escaneado (exit 0 falso-verde).
+                        # Repo hostil forja o índice no Linux, onde `:` é legal.
+                        if os.name == "nt":
+                            _nt_bad = sorted(
+                                p for p in listed
+                                if re.search(r'[:*?"<>|\x00-\x1f]', p)
+                                or any(seg.split(".")[0].upper() in
+                                       {"CON", "PRN", "AUX", "NUL",
+                                        "COM1", "COM2", "COM3", "COM4", "COM5",
+                                        "COM6", "COM7", "COM8", "COM9",
+                                        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
+                                        "LPT6", "LPT7", "LPT8", "LPT9"}
+                                       for seg in p.split("/") if seg))
+                            if _nt_bad:
+                                print("ERRO: índice contém paths que não "
+                                      "materializam no Windows (ADS/device): "
+                                      f"{_nt_bad[:5]}", file=sys.stderr)
+                                return 2
                         # Delta-F17: colisão de case no índice (`A.py`+`a.py`)
                         # materializa UM arquivo no FS case-insensitive — o
                         # blob do outro nunca é escaneado (falso-verde). Também

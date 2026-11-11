@@ -454,6 +454,14 @@ def _verify_log_chain_core(raw_lines: list[str], log_p: Path) -> tuple[list[str]
         cand_pipe = hashlib.sha256(
             f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{sha_r}".encode("utf-8")
         ).hexdigest()
+        # banca r5 — P1: registros com campos de decisão (testes_passados /
+        # evidence_reason) só são íntegros sob fórmula que os cubra —
+        # o pipe legado não os hasheava e uma edição de 'passed' sobrevivia
+        # com cadeia válida. Legado só aceita registro SEM esses campos.
+        passed_r = rec.get("testes_passados")
+        cand_pipe_v2 = hashlib.sha256(
+            f"{prev_r}|{cmd_r}|{exit_r}|{tests_r}|{passed_r}|{sha_r}".encode("utf-8")
+        ).hexdigest()
         body_no_ehash = {k: v for k, v in rec.items() if k != "entry_hash"}
         cand_json1 = hashlib.sha256(
             json.dumps(body_no_ehash, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -461,7 +469,11 @@ def _verify_log_chain_core(raw_lines: list[str], log_p: Path) -> tuple[list[str]
         cand_json2 = hashlib.sha256(
             json.dumps(body_no_ehash, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        if ehash_r not in (cand_pipe, cand_json1, cand_json2):
+        _has_decision = "testes_passados" in rec or "evidence_reason" in rec
+        _covers = ehash_r in (cand_json1, cand_json2) or (
+            _has_decision and ehash_r == cand_pipe_v2)
+        _legacy = not _has_decision and ehash_r == cand_pipe
+        if not (_covers or _legacy):
             errors.append(
                 f"UNVERIFIED_EXECUTION_EVIDENCE: entry_hash adulterado na linha {idx} de '{log_p.name}'."
             )
@@ -472,6 +484,7 @@ def _verify_log_chain_core(raw_lines: list[str], log_p: Path) -> tuple[list[str]
             "cmd": cmd_r,
             "exit": exit_r,
             "testes_descobertos": tests_r,
+            "testes_passados": passed_r,
             "stdout_sha256": sha_r,
         })
 
@@ -565,6 +578,7 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
             continue
         e_exit = entry.get("exit", entry.get("exit_code"))
         e_tests = entry.get("testes_descobertos")
+        e_passed = entry.get("testes_passados")
         e_sha = entry.get("stdout_sha256")
 
         matched = False
@@ -572,6 +586,11 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
             if vrec["cmd"] not in (full_cmd, raw_cmd):
                 continue
             if vrec["exit"] != e_exit or vrec["testes_descobertos"] != e_tests:
+                continue
+            # banca r5 — P1: 'passed' decide elegibilidade — o cruzamento
+            # exige identidade com o log, senão uma edição do ledger (0→1)
+            # virava verde com cadeia íntegra.
+            if e_passed is not None and vrec.get("testes_passados") != e_passed:
                 continue
             if e_sha is not None and vrec["stdout_sha256"] != str(e_sha).strip():
                 continue
