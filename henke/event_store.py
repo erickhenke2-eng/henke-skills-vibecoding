@@ -234,7 +234,10 @@ def verify(repo_root: Path | str) -> list[str]:
                 path.read_text(encoding="utf-8").splitlines(), 1):
             _ln = _ln.strip()
             if not _ln:
-                continue
+                # Linha vazia/whitespace no meio ou no fim do stream não
+                # participa da hash-chain: antes passava como íntegra.
+                errors.append(f"linha {_ln_no}: linha vazia fora da cadeia de eventos")
+                break
             try:
                 _obj = json.loads(_ln)
             except json.JSONDecodeError:
