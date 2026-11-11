@@ -54,11 +54,11 @@ _FRONTS = {
 def _gate_env(repo: Path):
     # +revisão cega: subprocessos do dossier herdam env cru — usa o
     # sanitizador canônico como os outros portões.
-    try:
-        from henke.state_paths import sanitized_child_env
-        return sanitized_child_env(repo)
-    except Exception:
-        return None
+    # banca-v18 (rev B-F10): `except → None` fazia subprocess.run herdar o
+    # env CRU — o fallback silencioso reintroduzia o defeito que o comentário
+    # dizia corrigir. Import falho = fail-closed, não env degradado.
+    from henke.state_paths import sanitized_child_env
+    return sanitized_child_env(repo)
 
 
 def _run_gate(script: Path, args: list[str], out_file: Path | None,
@@ -85,8 +85,8 @@ def _cmd_dossier(repo: Path, out_dir: Path) -> int:
     rc_metrics = _run_gate(
         _PKG / "repo_signals.py", ["metrics", "--root", str(repo)],
         out_dir / "metrics.tsv", repo)
-    _run_gate(_METRICAS / "hazard_scan.py", [str(repo)],
-              out_dir / "hazards.txt", repo)
+    rc_hazard = _run_gate(_METRICAS / "hazard_scan.py", [str(repo)],
+                          out_dir / "hazards.txt", repo)
     # +revisão cega: git log com a mesma higiene dos portões (fsmonitor/
     # diff.external/attr-file/lfs off, env sanitizado, timeout).
     try:
@@ -100,15 +100,25 @@ def _cmd_dossier(repo: Path, out_dir: Path) -> int:
     except (subprocess.TimeoutExpired, OSError):
         log_text = "(git log indisponível)"
     (out_dir / "gitlog.txt").write_text(log_text, encoding="utf-8")
-    _run_gate(
+    rc_ledger = _run_gate(
         _METRICAS / "coverage_ledger.py",
         ["init", "--root", str(repo), "--out", str(out_dir / "ledger.json")],
         None, repo)
+    # banca-v18 (rev B-F10): rcs de hazard_scan/coverage_ledger eram
+    # descartados — dossier incompleto (sem ledger.json) saía com exit 0,
+    # falso-verde para o orquestrador que o consome.
+    missing = [p for p in ("ledger.json", "metrics.tsv")
+               if not (out_dir / p).is_file()]
     print(json.dumps({
         "dossier": str(out_dir), "repo": str(repo),
         "artifacts": sorted(p.name for p in out_dir.iterdir()),
-        "metrics_rc": rc_metrics,
+        "metrics_rc": rc_metrics, "hazard_rc": rc_hazard,
+        "ledger_rc": rc_ledger,
     }, indent=1))
+    if missing:
+        print(f"ERRO: artefatos do dossiê ausentes: {missing}",
+              file=sys.stderr)
+        return 2
     return 0
 
 

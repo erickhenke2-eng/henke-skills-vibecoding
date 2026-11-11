@@ -58,19 +58,27 @@ def _pid_alive(pid: int) -> bool:
     inocente com PID reciclado e sempre retornava vivo."""
     if os.name == "nt":
         try:
+            # banca-v18 (rev B-F4): pid fora de faixa (10^20 de lock-lixo)
+            # caía fora do except: ctypes.ArgumentError no Windows e
+            # OverflowError no os.kill POSIX — crashava _file_lock inteiro.
+            # PID válido ∈ [1, 2**32); fora disso o conteúdo é lixo → stale.
+            _pid_i = int(pid)
+            if not 0 < _pid_i < 2**32:
+                return False
             import ctypes
             # BANCA-B5: ctypes.windll.kernel32 + ctypes.GetLastError() lia o
             # LAST-ERROR do thread errado (windll não seta use_last_error) —
             # dono vivo classificado como morto quebrava lock de vivo.
             _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            h = _k32.OpenProcess(0x1000, False, int(pid))
+            h = _k32.OpenProcess(0x1000, False, _pid_i)
             if h:
                 _k32.CloseHandle(h)
                 return True
             # M1 (banca v15): ERROR_ACCESS_DENIED(5) = processo existe mas
             # sem acesso — VIVO, não stale. 87 (param inválido) = morto.
             return ctypes.get_last_error() == 5
-        except (AttributeError, OSError, TypeError, ValueError):
+        except (AttributeError, OSError, TypeError, ValueError,
+                OverflowError):
             return True  # indeterminado → não quebra lock de vivo
     try:
         os.kill(pid, 0)
@@ -142,6 +150,15 @@ def _file_lock(target: Path, timeout: float = 10.0, poll: float = 0.05):
                         lock_path.unlink()
                 except OSError:
                     pass
+                # banca-v18 (rev B-F2): `continue` aqui pulava o check de
+                # deadline — lock stale irremovível (diretório, permissão)
+                # girava o loop pra sempre ~100% CPU e TimeoutError nunca
+                # disparava. O deadline precisa valer também neste caminho.
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        f"timeout aguardando lock de escrita "
+                        f"(stale irremovível): {lock_path}")
+                time.sleep(poll)
                 continue
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"timeout aguardando lock de escrita: {lock_path}")

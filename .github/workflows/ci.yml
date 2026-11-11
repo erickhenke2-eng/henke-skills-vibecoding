@@ -47,13 +47,34 @@ jobs:
         run: python henke/validate_skills.py
 
       - name: Executar Bateria Completa de Testes Unitários (sob coverage)
+        shell: bash
         run: |
-          python -m coverage run --include="henke/*" -m unittest discover -s tests -p "test_*.py"
+          # banca-v18 (rev C-2): --include só FILTRA — módulo henke/* nunca
+          # importado sumia do denominador (portão cego a 0% real). --source
+          # ativa o scan da árvore e conta arquivos não-tocados.
+          # Efeito colateral honesto: módulos exercitados só VIA SUBPROCESSO
+          # (validate_skills, fence_check, ratchet, crap_score, tornado_scan)
+          # mediriam 0% falso. Solução: coverage de subprocesso — .pth em
+          # site-packages chama process_startup() quando COVERAGE_PROCESS_START
+          # está setada; data_file absoluto em temp (subprocesso pode ter cwd
+          # diferente) e parallel=true gera um arquivo por processo.
+          COVDIR=$(python -c "import tempfile; print(tempfile.mkdtemp())")
+          COVRC="$COVDIR/henke.coveragerc"
+          COVDATA="$COVDIR/henke_cov"
+          REPO_H=$(python -c "import os; print(os.path.abspath('henke'))")
+          PURELIB=$(python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          printf 'import os; os.getenv("COVERAGE_PROCESS_START") and __import__("coverage").process_startup()\n' > "$PURELIB/zz_henke_subprocess_cov.pth"
+          # Testes rodam copias temporarias de henke/ — [paths] mapeia qualquer
+          # */henke para o modulo canonico do repo (mesma copia, mesma cobertura).
+          # ignore_errors: copias em temp ja deletadas no report nao quebram o passo.
+          printf '[run]\nsource = henke\nparallel = true\ndata_file = %s\n\n[paths]\nsource = %s */henke *\\henke\n\n[report]\nignore_errors = true\n' "$COVDATA" "$REPO_H" > "$COVRC"
+          export COVERAGE_PROCESS_START="$COVRC"
+          python -m coverage run --rcfile="$COVRC" -m unittest discover -s tests -p "test_*.py"
+          python -m coverage combine --rcfile="$COVRC"
           # BANCA-C5: --fail-under transforma medição em portão (era cosmético);
           # 60% = ratchet honesto do baseline medido (~63%), sobe conforme
-          # cobertura cresce. cov.json alimenta repo_signals --coverage.
-          python -m coverage report -m --skip-empty --fail-under=60
-          python -m coverage json -o cov.json
+          # cobertura cresce.
+          python -m coverage report --rcfile="$COVRC" -m --skip-empty --fail-under=60
 
       - name: Executar Bateria de Canários Adversariais (Evals)
         run: python evals/canaries.py

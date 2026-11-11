@@ -23,8 +23,17 @@ top-level) is legitimate — declare it with --assert-helper, which is a written
 excusal, echoed on the run's own output line so a captured artifact carries the
 record. Nothing is allow-listed by default: pytest's `raises`/`warns`/
 `deprecated_call` count only through a real pytest binding (`pytest.raises`, or
-a name imported `from pytest import raises`), so a `.raises()` method on an
-arbitrary object is not an assertion, and neither is `.suppress()`.
+a name imported `from pytest import raises`) AND only as the `context_expr` of
+a `with` — a bare `pytest.raises(E)` statement creates and discards the
+context, so a `.raises()` method on an arbitrary object is not an assertion,
+and neither is `.suppress()`. banca-v18 (rev C-N): `except AssertionError`
+counts as a swallower (it catches exactly the assert's failure); `assert m` /
+`assert m.foo` / `assert hasattr(m, 'x')` over a Mock-bound name are truthy
+tautologies, not assertions; dead branches fold via the literal evaluator
+(`if 1 == 2`, `if __name__ == "__main__"`, `while 2-2`, `for _ in range(0)`,
+`match <const>: case <const diferente>` — non-literal patterns stay residual);
+and `@skip`/`@xfail`/`@expectedFailure`/`@skipif(<const true>)` decorated
+functions are never collected, so they are not tests at all.
 
 Watched names are resolved by IMPORT BINDING, not by spelling, so renaming one
 at import does not defeat a rule: `from contextlib import suppress as quiet`,
@@ -111,7 +120,11 @@ IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PYTEST_ASSERT = frozenset({"raises", "warns", "deprecated_call"})
 MOCK_OBS = frozenset({"called", "call_count", "call_args", "call_args_list",
                       "await_count", "await_args", "mock_calls"})
-BROAD_EXC = frozenset({"Exception", "BaseException"})
+# banca-v18 (rev C-N): AssertionError entra na rede de engolidores —
+# `except AssertionError: pass` captura exatamente a falha do assert, logo um
+# try cujo assert é a única "verificação" vira teste que não pode ir vermelho
+# (a mesma fome de falso-verde do `except Exception`, só que cirúrgica).
+BROAD_EXC = frozenset({"Exception", "BaseException", "AssertionError"})
 SELF_NAMES = frozenset({"self", "cls"})
 
 # [HENKE-PATCH] padrões léxicos para testes não-Python (corpo já mascarado).
@@ -191,7 +204,9 @@ def scan_polyglot(path: Path, helpers):
                 inner = body[b:e + 1] if e != -1 else ""
                 if not inner:
                     continue
-                if re.search(r"\b(throw|expect|assert|return|fail|rejects)\b", inner):
+                # banca-v18 (rev C-N): `return` NÃO é propagação — encerra o
+                # teste cedo com a falha engolida (`catch(e){ return; }`).
+                if re.search(r"\b(throw|expect|assert|fail|rejects)\b", inner):
                     continue
                 # isenção: catch(e){ x = e } com 'x' inspecionada fora do catch
                 # (expect(x), f(x) asserido, ou qualquer uso posterior)
@@ -770,57 +785,144 @@ def is_constant_tautology(node):
     return False
 
 
-def _dead_assert_ids(stmts):
+# banca-v18 (rev C-N): dobragem de ramos mortos NÃO-literais — reutiliza o
+# avaliador de literais (literal_value) com `__name__` preso a uma string que
+# nunca é "__main__" (sob pytest o módulo é importado pelo nome, então a
+# guarda `if __name__ == "__main__":` é inalcançável no collection run).
+_DEAD_SCOPE_CONSTS = {"__name__": [(-1, ast.Constant(value="<test-module>"))]}
+
+
+def _fold_dead(t, consts=None):
+    """Dobra expressões constantes de guarda — Compare/BinOp/BoolOp/UnaryOp
+    sobre literais e o compare-string de `__name__` (banca-v18 rev C-N).
+    `consts` opcional: bindings por-ponto do escopo analisado (nome local
+    preso a literal — `done = False; if done:` é ramo morto)."""
+    return literal_value(t, consts if consts is not None else _DEAD_SCOPE_CONSTS)
+
+
+def _dead_false(t, consts=None):
+    """True quando o teste do ramo dobra para falsy — o corpo nunca executa."""
+    v = _fold_dead(t, consts)
+    if v is not _UNKNOWN:
+        return not bool(v)
+    # +revisão cega: TYPE_CHECKING é False em runtime — bloco só existe
+    # pro type-checker; assert/def dentro nunca executa.
+    if isinstance(t, ast.Name) and t.id == "TYPE_CHECKING":
+        return True
+    if (isinstance(t, ast.Attribute) and t.attr == "TYPE_CHECKING"
+            and isinstance(t.value, ast.Name) and t.value.id == "typing"):
+        return True
+    if isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not):
+        return _dead_true(t.operand, consts)
+    return False
+
+
+def _dead_true(t, consts=None):
+    """True quando o teste do ramo dobra para truthy — o orelse nunca executa."""
+    v = _fold_dead(t, consts)
+    if v is not _UNKNOWN:
+        return bool(v)
+    if isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not):
+        return _dead_false(t.operand, consts)
+    return False
+
+
+def _dead_empty_iter(t, consts=None):
+    """True quando o iterável do `for` dobra para vazio — corpo nunca executa.
+
+    banca-v18 (rev C-N): `for _ in range(0)`/`range(<const><=0)` (e qualquer
+    literal/container dobrável) itera zero vezes."""
+    v = _fold_dead(t, consts)
+    if v is not _UNKNOWN:
+        try:
+            return len(v) == 0
+        except TypeError:
+            pass
+    if (isinstance(t, ast.Call) and isinstance(t.func, ast.Name)
+            and t.func.id == "range" and t.args and not t.keywords):
+        args = [_fold_dead(a, consts) for a in t.args]
+        if all(isinstance(a, int) and not isinstance(a, bool) for a in args):
+            try:
+                return len(range(*args)) == 0
+            except (ValueError, TypeError, OverflowError):
+                return False
+    return False
+
+
+def _dead_match_case(subject_v, case) -> bool:
+    """`match <const>` com `case <const diferente>` — braço inalcançável.
+
+    Residual (banca-v18 rev C-N): padrões não-literais — guard (`case x if`),
+    capture, sequence/mapping/class e OR-patterns — seguem conservadores e o
+    braço conta como vivo."""
+    pat = case.pattern
+    return (subject_v is not _UNKNOWN
+            and isinstance(pat, ast.MatchValue)
+            and isinstance(pat.value, ast.Constant)
+            and pat.value.value != subject_v)
+
+
+def _terminating_stmt(s) -> bool:
+    if isinstance(s, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+        return True
+    if isinstance(s, ast.Expr) and isinstance(s.value, ast.Call):
+        f = s.value.func
+        attr = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+        # +revisão cega: pytest.fail()/sys.exit() também terminam o bloco.
+        return attr in ("skip", "skipTest", "xfail", "skipif",
+                        "fail", "exit")
+    return False
+
+
+def _live_stmt_children(node):
+    """Itera os filhos-statement de `node`, podando corpos provadamente mortos
+    (`if`/`while`/`for`/`match` com guarda dobrável) — banca-v18 (rev C-N)."""
+    if isinstance(node, ast.If):
+        if _dead_false(node.test):
+            yield from node.orelse
+            return
+        if _dead_true(node.test):
+            yield from node.body
+            return
+        yield from node.body
+        yield from node.orelse
+        return
+    if isinstance(node, ast.While):
+        if not _dead_false(node.test):
+            yield from node.body
+        yield from node.orelse
+        return
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        if not _dead_empty_iter(node.iter):
+            yield from node.body
+        yield from node.orelse
+        return
+    match_t = getattr(ast, "Match", None)
+    if match_t is not None and isinstance(node, match_t):
+        subject_v = _fold_dead(node.subject)
+        for c in node.cases:
+            if not _dead_match_case(subject_v, c):
+                yield c
+        return
+    for child in ast.iter_child_nodes(node):
+        yield child
+
+
+def _dead_assert_ids(stmts, consts=None):
     """BANCA-C4: ids de ast.Assert em ramos mortos — `if False:`, `while
     False:`, `for _ in []:` e qualquer stmt após return/raise/continue/break/
     skip() no mesmo bloco nunca executam; contá-los como 'real' fabricava
-    falso-verde um token além de `assert True`."""
+    falso-verde um token além de `assert True`.
+
+    banca-v18 (rev C-N): ramos mortos NÃO-literais (`if 1 == 2`,
+    `if __name__ == "__main__"`, `while 2-2`, `for _ in range(0)`,
+    `match <const>: case <outro const>`) agora dobram via literal_value —
+    antes cada assert morto contava como vivo. `consts` traz os bindings
+    por-ponto do escopo (nome local preso a literal também dobra)."""
     dead = set()
-
-    def _false_const(t):
-        if isinstance(t, ast.Constant):
-            return not bool(t.value)
-        # +revisão cega: TYPE_CHECKING é False em runtime — bloco só existe
-        # pro type-checker; assert dentro nunca executa.
-        if isinstance(t, ast.Name) and t.id == "TYPE_CHECKING":
-            return True
-        if (isinstance(t, ast.Attribute) and t.attr == "TYPE_CHECKING"
-                and isinstance(t.value, ast.Name) and t.value.id == "typing"):
-            return True
-        if (isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not)
-                and isinstance(t.operand, ast.Constant)):
-            return bool(t.operand.value)
-        if isinstance(t, (ast.List, ast.Tuple, ast.Set)):
-            return not t.elts
-        return False
-
-    def _true_const(t):
-        if isinstance(t, ast.Constant):
-            return bool(t.value)
-        if (isinstance(t, ast.UnaryOp) and isinstance(t.op, ast.Not)
-                and isinstance(t.operand, ast.Constant)):
-            return not bool(t.operand.value)
-        return False
-
-    def _empty_iter(t):
-        if isinstance(t, (ast.List, ast.Tuple, ast.Set)):
-            return not t.elts
-        if isinstance(t, ast.Dict):
-            return not t.keys
-        if isinstance(t, ast.Constant):
-            return isinstance(t.value, (str, bytes)) and not t.value
-        return False
-
-    def _terminating(s):
-        if isinstance(s, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
-            return True
-        if isinstance(s, ast.Expr) and isinstance(s.value, ast.Call):
-            f = s.value.func
-            attr = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
-            # +revisão cega: pytest.fail()/sys.exit() também terminam o bloco.
-            return attr in ("skip", "skipTest", "xfail", "skipif",
-                            "fail", "exit")
-        return False
+    match_t = getattr(ast, "Match", None)
+    # __name__ é default; um binding local explícito de __name__ prevalece.
+    _consts = {**_DEAD_SCOPE_CONSTS, **(consts or {})}
 
     def _mark_dead(block):
         for s in block:
@@ -835,21 +937,36 @@ def _dead_assert_ids(stmts):
                 _mark_dead([s])
                 continue
             if isinstance(s, ast.If):
-                if _false_const(s.test):
+                if _dead_false(s.test, _consts):
                     _mark_dead(s.body)
                     _walk(s.orelse)
-                elif _true_const(s.test):
+                elif _dead_true(s.test, _consts):
                     _mark_dead(s.orelse)
                     _walk(s.body)
                 else:
                     _walk(s.body)
                     _walk(s.orelse)
-            elif isinstance(s, ast.While) and _false_const(s.test):
-                _mark_dead(s.body)
+            elif isinstance(s, ast.While):
+                if _dead_false(s.test, _consts):
+                    _mark_dead(s.body)
+                else:
+                    _walk(s.body)
                 _walk(s.orelse)
-            elif isinstance(s, (ast.For, ast.AsyncFor)) and _empty_iter(s.iter):
-                _mark_dead(s.body)
+            elif isinstance(s, (ast.For, ast.AsyncFor)):
+                if _dead_empty_iter(s.iter, _consts):
+                    _mark_dead(s.body)
+                else:
+                    _walk(s.body)
                 _walk(s.orelse)
+            elif match_t is not None and isinstance(s, match_t):
+                # banca-v18 (rev C-N): braço `case <const diferente>` de
+                # `match <const>` é inalcançável — seus asserts são mortos.
+                subject_v = _fold_dead(s.subject, _consts)
+                for c in s.cases:
+                    if _dead_match_case(subject_v, c):
+                        _mark_dead(c.body)
+                    else:
+                        _walk(c.body)
             else:
                 for field in ("body", "orelse", "finalbody"):
                     _walk(getattr(s, field, []) or [])
@@ -858,11 +975,74 @@ def _dead_assert_ids(stmts):
                 # +revisão cega: match-statement guarda corpos em `cases`.
                 for c in getattr(s, "cases", []) or []:
                     _walk(c.body)
-            if _terminating(s):
+            if _terminating_stmt(s):
                 terminated = True
 
     _walk(list(stmts))
     return dead
+
+
+# banca-v18 (rev C-N): fábricas cujo retorno é sempre um objeto-Mock truthy.
+_MOCK_FACTORIES = frozenset({
+    "Mock", "MagicMock", "AsyncMock", "NonCallableMock",
+    "NonCallableMagicMock", "PropertyMock", "create_autospec",
+})
+
+
+def _is_mock_factory_call(v) -> bool:
+    """True quando `v` é um Call para uma fábrica de Mock conhecida (bare ou
+    atributo — `Mock()`, `mock.MagicMock()`, `m.mock.Mock()`)."""
+    if not isinstance(v, ast.Call):
+        return False
+    f = v.func
+    leaf = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+    return leaf in _MOCK_FACTORIES
+
+
+def _mock_bound_names(scope) -> frozenset:
+    """Nomes (incl. chaves pontilhadas `self.m`) cujos bindings são TODOS
+    chamadas a fábricas de Mock — `assert nome`/`assert nome.attr` sobre eles
+    é truthy-tautológico, nunca vai vermelho (banca-v18 rev C-N)."""
+    names = set()
+    for name, values in scope.assigned.items():
+        if values and all(_is_mock_factory_call(v) for v in values):
+            names.add(name)
+    return frozenset(names)
+
+
+def _truthy_mock_assert(test, scope, mock_names) -> bool:
+    """True quando o assert olha um objeto Mock sem comparação — `assert m`,
+    `assert m.foo`, `assert hasattr(m, 'x')` — child-mock/self são sempre
+    truthy, logo a asserção não pode falhar (banca-v18 rev C-N).
+
+    Atributo em MOCK_OBS (`m.called`, `m.call_count`) NÃO entra — é
+    observação real do double e segue o caminho mock-only. Nome/atributo
+    rebindado para valor não-Mock também segue o caminho normal."""
+    if isinstance(test, ast.Name):
+        return test.id in mock_names
+    if isinstance(test, ast.Attribute):
+        if test.attr in MOCK_OBS:
+            return False
+        cur = test
+        while isinstance(cur, ast.Attribute):
+            dotted = _dotted_name(cur)
+            if dotted is not None and dotted in scope.assigned:
+                # atributo rebindado explicitamente — truthy só se TODOS os
+                # bindings forem mocks.
+                return dotted in mock_names
+            cur = cur.value
+        return isinstance(cur, ast.Name) and cur.id in mock_names
+    if (isinstance(test, ast.Call) and isinstance(test.func, ast.Name)
+            and test.func.id == "hasattr" and test.args
+            and "hasattr" not in scope.assigned):
+        cur = test.args[0]
+        while isinstance(cur, ast.Attribute):
+            dotted = _dotted_name(cur)
+            if dotted is not None and dotted in scope.assigned:
+                return dotted in mock_names
+            cur = cur.value
+        return isinstance(cur, ast.Name) and cur.id in mock_names
+    return False
 
 
 def classify(fn, helpers, b, module_consts, class_consts):
@@ -872,7 +1052,8 @@ def classify(fn, helpers, b, module_consts, class_consts):
     params = {a.arg for a in ast.walk(fn.args) if isinstance(a, ast.arg)}
     scope = Scope(constant_bindings(fn.body, module_consts, params),
                   assigned_values(fn.body), class_consts)
-    dead = _dead_assert_ids(fn.body)
+    dead = _dead_assert_ids(fn.body, scope.consts)
+    mock_names = _mock_bound_names(scope)
     for node in own_scope(fn.body):
         if isinstance(node, ast.Assert):
             if id(node) in dead:
@@ -881,6 +1062,11 @@ def classify(fn, helpers, b, module_consts, class_consts):
             # (done=False) — a mesma tautologia que is_constant_tautology pega
             # em literais, mas através de nomes vinculados (C2-banca).
             if is_constant_tautology(node.test) or const_truth(node.test, scope) is True:
+                pass
+            elif _truthy_mock_assert(node.test, scope, mock_names):
+                # banca-v18 (rev C-N): `assert m`/`assert m.foo`/`assert
+                # hasattr(m, 'x')` sobre Mock — truthy-assert que nunca vai
+                # vermelho; não é asserção real nem observação do double.
                 pass
             elif observes_only_mock([node.test], scope):
                 mock += 1
@@ -892,16 +1078,30 @@ def classify(fn, helpers, b, module_consts, class_consts):
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             # A17 (banca v16): `with pytest.raises(E):`/`assertRaises`/`fail()`
             # é a forma canônica de asserção negativa — conta como asserção.
+            # banca-v18 (rev C-N): só conta quando o objeto-base resolve para
+            # pytest (módulo ou `from pytest import`) ou self/cls do unittest —
+            # `.raises`/`.assertRaises` sobre base arbitrária
+            # (`MagicMock().raises(E)`) é chamável comum descartado, não
+            # contexto de asserção.
             for _i in node.items:
                 _ce = _i.context_expr
                 _f = _ce.func if isinstance(_ce, ast.Call) else None
-                _attr = (_f.attr if isinstance(_f, ast.Attribute)
-                         else (_f.id if isinstance(_f, ast.Name) else ""))
-                _base = (_f.value.id if isinstance(_f, ast.Attribute)
-                         and isinstance(_f.value, ast.Name) else None)
-                if (_attr in ("raises", "assertRaises", "assertWarns",
-                              "assertLogs", "warns")
-                        or (_attr == "fail" and _base in b.pytest_mods)):
+                if _f is None:
+                    continue
+                if isinstance(_f, ast.Name):
+                    if _f.id in b.pytest_bare:
+                        real += 1
+                    continue
+                if not isinstance(_f, ast.Attribute):
+                    continue
+                _attr = _f.attr
+                _base = (_f.value.id if isinstance(_f.value, ast.Name)
+                         else None)
+                if ((_attr in PYTEST_ASSERT or _attr == "fail")
+                        and _base in b.pytest_mods):
+                    real += 1
+                elif (_attr in ("assertRaises", "assertWarns", "assertLogs")
+                        and _base in SELF_NAMES):
                     real += 1
             if not swallow and any(suppresses_broadly(i.context_expr, b) for i in node.items):
                 swallow = "suppress() of a broad exception — the test cannot go red"
@@ -922,13 +1122,15 @@ def classify(fn, helpers, b, module_consts, class_consts):
                         pass
                     else:
                         real += 1
-                elif f.attr in PYTEST_ASSERT and base in b.pytest_mods:
-                    real += 1
+                # banca-v18 (rev C-N): `pytest.raises(E)`/`warns`/
+                # `deprecated_call` como statement FORA de `with` cria e
+                # descarta o contexto — zero efeito. Só conta como real na
+                # posição `context_expr` de ast.With (ramo acima).
                 elif f.attr in helpers:
                     real += 1
                 elif MOCK_ASSERT.match(f.attr):
                     mock += 1
-            elif isinstance(f, ast.Name) and (f.id in helpers or f.id in b.pytest_bare):
+            elif isinstance(f, ast.Name) and f.id in helpers:
                 real += 1
     return real, mock, swallow
 
@@ -959,22 +1161,69 @@ def class_constants(tree):
     return {name: consts_for(name) for name in own}
 
 
+# banca-v18 (rev C-N): decorators que impedem o teste de reprovar — a função
+# marcada NUNCA valida o arquivo, logo entra como não-teste (fora do scanned).
+_SKIP_DECO_NAMES = frozenset({"skip", "xfail", "expectedFailure"})
+_SKIPCOND_DECO_NAMES = frozenset({"skipif", "skipIf", "skipUnless"})
+
+
+def _deco_is_skip(d) -> bool:
+    """True quando o decorator é um skip/xfail/expectedFailure — por nome
+    (`@skip`, `@expectedFailure`) ou por atributo (`@unittest.skip`,
+    `@pytest.mark.skip`, `@pytest.mark.xfail`).
+
+    `skipIf`/`skipif`/`skipUnless` só não-testam quando a condição dobra a
+    constante que torna o skip incondicional — `@skipUnless(sys.platform ==
+    'win32')` roda em alguma plataforma e segue contando (banca-v18 rev C-N)."""
+    f = d.func if isinstance(d, ast.Call) else d
+    parts = []
+    cur = f
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+    if not parts:
+        return False
+    last = parts[0]  # atributo mais externo / nome puro
+    if last in _SKIP_DECO_NAMES:
+        return True
+    if last in _SKIPCOND_DECO_NAMES:
+        if not isinstance(d, ast.Call) or not d.args:
+            # `@skipif` sem condição visível → trata como skip incondicional.
+            return last != "skipUnless"
+        cond = _fold_dead(d.args[0])
+        if cond is _UNKNOWN:
+            return False  # condicional dinâmico — pode rodar → conta como teste
+        return bool(cond) if last != "skipUnless" else not bool(cond)
+    return False
+
+
 def test_functions(node, by_class, class_consts=None):
     """Every (test function, enclosing class constants) reachable at module scope.
 
-    pytest collects a `def` that a version guard, a `try/except ImportError`, or
-    a nested class merely wraps — all of them are module attributes at runtime.
-    Reading only `tree.body` would silently under-collect and hand back a green
-    verdict over tests it never scanned, so recursion stops only at the boundary
-    of another function's scope.
+    pytest collects a `def` que uma guarda de versão, um `try/except
+    ImportError` ou uma classe aninhada apenas envolve — todos são atributos
+    de módulo em runtime. Ler só `tree.body` sub-coletaria em silêncio e
+    devolveria verde sobre testes nunca lidos, então a recursão só para na
+    fronteira do escopo de outra função.
+
+    banca-v18 (rev C-N): `def test_*` dentro de ramo morto de módulo
+    (`if TYPE_CHECKING:`, `if False:`, `if __name__ == "__main__":`,
+    `while False:`) nunca é coletável — o corpo morto é podado via
+    `_live_stmt_children`. E função decorada com skip/xfail/expectedFailure
+    nunca reprova → não conta como teste.
     """
     class_consts = class_consts or {}
-    for child in ast.iter_child_nodes(node):
+    for child in _live_stmt_children(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if TEST_FUNC.match(child.name):
+            if (TEST_FUNC.match(child.name)
+                    and not any(_deco_is_skip(d) for d in child.decorator_list)):
                 yield child, class_consts
         elif isinstance(child, ast.ClassDef):
-            yield from test_functions(child, by_class, by_class.get(child.name, {}))
+            # classe inteira marcada como skip → nenhum método roda.
+            if not any(_deco_is_skip(d) for d in child.decorator_list):
+                yield from test_functions(child, by_class, by_class.get(child.name, {}))
         elif not isinstance(child, ast.Lambda):
             yield from test_functions(child, by_class, class_consts)
 

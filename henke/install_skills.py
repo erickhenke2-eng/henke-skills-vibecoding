@@ -250,7 +250,10 @@ def install(repo, user_root, dry_run=False, lock_timeout=LOCK_TIMEOUT_SEC):
     _validator = Path(__file__).resolve().parent / "validate_skills.py"
     if not _validator.is_file():
         _validator = _resolve_source(repo, Path("henke/validate_skills.py"))
-    subprocess.run([sys.executable, "-Es", str(_validator)], check=True)
+    # banca-v18 (rev D-F6): único filho da suíte sem timeout — validador
+    # pendurado travava o instalador para sempre.
+    subprocess.run([sys.executable, "-Es", str(_validator)],
+                   check=True, timeout=300)
     files = inventory(repo)
     targets = [user_root / p for p in (".agents/skills", ".gemini/config/skills", ".gemini/skills", ".claude/skills")]
     if dry_run:

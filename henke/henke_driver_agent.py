@@ -107,13 +107,16 @@ def _safe_env(repo: str | Path | None = None) -> dict:
         from henke.state_paths import sanitized_child_env
         return sanitized_child_env(Path(repo) if repo is not None else None)
     except Exception:
+        # banca-v18 (rev D-F5): prefixos case-sensitivos mas o env do Windows
+        # é case-INSENSITIVE — `git_dir`/`pythonpath`/`dyld_library_path`
+        # minúsculos sobreviviam ao fallback e chegavam ao filho.
         return {k: v for k, v in os.environ.items()
-                if not (k.startswith("GIT_") or k.startswith("PYTHON")
-                        or k.startswith("LD_") or k.startswith("DYLD_")
-                        or k.upper().startswith("NPM_CONFIG")
-                        or k in ("BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS",
-                                 "PERL5OPT", "PERL5LIB", "RUBYOPT",
-                                 "DOTNET_STARTUP_HOOKS"))}
+                if not (k.upper().startswith(("GIT_", "PYTHON", "LD_",
+                                              "DYLD_", "NPM_CONFIG"))
+                        or k.upper() in ("BASH_ENV", "ENV", "ZDOTDIR",
+                                         "NODE_OPTIONS", "PERL5OPT",
+                                         "PERL5LIB", "RUBYOPT",
+                                         "DOTNET_STARTUP_HOOKS"))}
 
 
 def main() -> int:

@@ -108,5 +108,13 @@ def sanitized_child_env(repo_root: Path | None = None) -> dict:
         env["PATH"] = os.pathsep.join(keep)
     env.setdefault("PYTHONUTF8", "1")
     env.setdefault("PYTHONIOENCODING", "utf-8")
+    # banca-v18 (rev A-1/2/3/4): a trava do CreateProcess só existia se o
+    # PROCESSO-PAI já tivesse no env — os 12 módulos que a setam em nível de
+    # os.environ não cobrem entry-points standalone (henke_router,
+    # henke_gates, gate_cache, test_impact). Sem ela no BLOCO DO FILHO,
+    # `git` com cwd=<repo hostil> busca CWD primeiro → `git.exe` plantado
+    # executa dentro do custodiante. Injeta aqui: uma linha cobre todos os
+    # chamadores.
+    env["NoDefaultCurrentDirectoryInExePath"] = "1"
     return env
 

@@ -493,6 +493,13 @@ def get_cached_gate(
     # 1. Check consolidated gate_cache.json if present
     consolidated_file = cache_dir / "gate_cache.json"
     consolidated = _read_json_safe(consolidated_file)
+    # banca-v18 (rev D-F4): event_store.rebuild_derived escreve o MESMO
+    # arquivo em schema wrapped {"schema":N,"entries":{…}} — flat lookup
+    # sempre errava após rebuild (cache morto) e o store produzia híbrido.
+    # Aceita os dois schemas na leitura.
+    if (isinstance(consolidated, dict)
+            and isinstance(consolidated.get("entries"), dict)):
+        consolidated = consolidated["entries"]
     if consolidated and key in consolidated:
         item = consolidated[key]
         if isinstance(item, dict) and _verify_entry_hmac(secret, key, item):
@@ -553,10 +560,26 @@ def store_cached_gate(
         # 2. Update consolidated gate_cache.json atomically
         consolidated_file = cache_dir / "gate_cache.json"
         consolidated = _read_json_safe(consolidated_file) or {}
-        consolidated[key] = entry
+        # banca-v18 (rev D-F4): se o arquivo está no schema wrapped do
+        # event_store, mescla dentro de "entries" preservando o wrapper —
+        # um escritor flat produzia híbrido {"schema":2,"entries":{…},"<key>":{…}}.
+        if (isinstance(consolidated, dict)
+                and isinstance(consolidated.get("entries"), dict)):
+            consolidated["entries"][key] = entry
+        else:
+            consolidated[key] = entry
         _atomic_write_file(consolidated_file, json.dumps(consolidated, ensure_ascii=False, indent=2))
     except Exception:
-        pass
+        # banca-v18 (rev B-F11): falha de persistência deixava o veredito
+        # NOVO só em memória enquanto o STALE assinado ficava em disco —
+        # o próximo processo confiava no antigo. Melhor servir nada do que
+        # divergir: descarta o in-memory e tenta remover o arquivo velho.
+        with _CACHE_LOCK:
+            _IN_MEMORY_CACHE.pop(key, None)
+        try:
+            gate_file.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------------------

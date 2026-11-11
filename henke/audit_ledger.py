@@ -103,6 +103,17 @@ def _npm_script_name(cmd: str) -> str | None:
     """Extrai o nome do script npm via tokenizer — pula runner, flags e os
     argumentos das flags que tomam valor separado."""
     toks = cmd.strip().split()
+    # banca-v18 (rev B-F9): `VAR=1 npm test` — assignments POSIX no início
+    # do comando não são wrappers e escondiam o runner; e `sh -c "npm t"`
+    # carrega o lifecycle dentro do payload. Desmonta ambos antes.
+    while toks and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", toks[0]):
+        toks.pop(0)
+    if (len(toks) >= 3 and toks[0].lower() in ("sh", "bash", "zsh", "dash",
+                                             "ksh")
+            and toks[1] == "-c"):
+        toks = toks[2].strip().split()
+        while toks and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", toks[0]):
+            toks.pop(0)
     # A5 (banca v16): wrappers escondiam o runner — `env npm test`,
     # `sudo npm install`, `nice -n5 npm t`, `timeout 10 npm run x`,
     # `cmd /c npm t` devolviam None e os hooks ficavam invisíveis.

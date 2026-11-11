@@ -1,4 +1,4 @@
-"""Testes do pacote CLI v4.0+: run/report/status/setup/auto/goldfish/exec --timeout.
+"""Testes do pacote CLI v4.1+: run/report/status/setup/auto/goldfish/exec --timeout.
 
 Cobre o roundtrip `run init` + `record-gate` + `verify`, as 5 seções do `report`,
 a propagação de `--timeout` no `exec` (flag > PROJECT.json > 180s), o HARD STOP
