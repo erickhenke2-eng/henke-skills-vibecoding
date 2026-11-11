@@ -58,8 +58,9 @@ jobs:
           # site-packages chama process_startup() quando COVERAGE_PROCESS_START
           # está setada; data_file absoluto em temp (subprocesso pode ter cwd
           # diferente) e parallel=true gera um arquivo por processo.
-          COVRC=$(mktemp --suffix=.coveragerc 2>/dev/null || echo "$RUNNER_TEMP/henke.coveragerc")
-          COVDATA=$(mktemp -u 2>/dev/null || echo "$RUNNER_TEMP/henke_cov")
+          COVDIR=$(python -c "import tempfile; print(tempfile.mkdtemp())")
+          COVRC="$COVDIR/henke.coveragerc"
+          COVDATA="$COVDIR/henke_cov"
           PURELIB=$(python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
           printf 'import os; os.getenv("COVERAGE_PROCESS_START") and __import__("coverage").process_startup()\n' > "$PURELIB/zz_henke_subprocess_cov.pth"
           printf '[run]\nsource = henke\nparallel = true\ndata_file = %s\n' "$COVDATA" > "$COVRC"
