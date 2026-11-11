@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -113,6 +115,74 @@ class TestStagedNonMaterializableNames(unittest.TestCase):
     def test_device_name_fails_closed(self):
         rc = self._stage_collision(["aux"])
         self.assertEqual(rc, 2, "nome de dispositivo passou como staged válido")
+
+
+class TestSupervisorDeadline(unittest.TestCase):
+    """PoC GPT Sol (proof_pipe_wait): wait(0.2) bloqueou 21s quando um
+    descendente segurou o pipe de saída. O deadline deve cobrir a operação
+    inteira, não só o proc.wait."""
+
+    @unittest.skipUnless(os.name == "nt", "Job Object é específico do Windows")
+    def test_wait_honors_deadline_when_descendant_holds_pipe(self):
+        import time
+        from henke.process_supervisor import ChildSupervisor
+
+        sup = ChildSupervisor()
+        try:
+            child = sup.start(
+                [sys.executable, "-c",
+                 "import subprocess,sys; "
+                 "subprocess.Popen([sys.executable,'-c','import time;"
+                 "time.sleep(60)'], stdout=sys.stdout, stderr=sys.stderr); "
+                 "sys.stdout.flush()"],
+                cwd=".")
+            t0 = time.monotonic()
+            res = sup.wait(child, timeout_sec=0.5)
+            elapsed = time.monotonic() - t0
+        finally:
+            sup.close()
+        self.assertLess(elapsed, 8.0,
+                        f"wait() esticou {elapsed:.1f}s além do deadline")
+        self.assertTrue(res.timed_out,
+                        f"deadline estourado mas timed_out={res.timed_out} "
+                        f"(rc={res.returncode}, reason={res.termination_reason})")
+
+
+class TestIterTreeJunctionSwap(unittest.TestCase):
+    """PoC GPT Sol (proof_iter_tree_junction): um diretório enfileirado como
+    real trocado por junction antes do scandir fazia iter_tree emitir e
+    hashear arquivo fora da raiz."""
+
+    @unittest.skipUnless(os.name == "nt", "junction é específico do Windows")
+    def test_swapped_junction_dir_is_not_traversed(self):
+        import subprocess
+        from henke.winpath import iter_tree
+
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / "repo"
+            outside = Path(td) / "outside"
+            (repo / "queued").mkdir(parents=True)
+            outside.mkdir()
+            (outside / "external.txt").write_text("outside\n")
+
+            # Troca o diretório real por junction ANTES do iter_tree pop —
+            # mesmo efeito do swap entre stat e scandir.
+            (repo / "queued").rmdir()
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J",
+                 str(repo / "queued"), str(outside)],
+                check=True, capture_output=True)
+
+            emitted = list(iter_tree(repo))
+            kinds = {(e.relative_path, e.kind, e.reason) for e in emitted}
+            self.assertFalse(
+                any(e.relative_path == "queued/external.txt"
+                    and e.kind == "file" for e in emitted),
+                f"arquivo externo emitido como conteúdo do repo: {kinds}")
+            self.assertTrue(
+                any(e.relative_path == "queued"
+                    and e.kind in ("skipped", "error") for e in emitted),
+                f"troca por junction não reportada: {kinds}")
 
 
 if __name__ == "__main__":

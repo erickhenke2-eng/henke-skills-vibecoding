@@ -439,6 +439,7 @@ class ChildSupervisor:
         started = time.monotonic()
         timed_out = False
         killed_tree = False
+        deadline = None if timeout_sec is None else started + timeout_sec
         try:
             if timeout_sec is None:
                 child._proc.wait()
@@ -456,8 +457,29 @@ class ChildSupervisor:
         duration_ms = int((time.monotonic() - started) * 1000)
         capture_incomplete = False
         if child._drains is not None:
-            for d in child._drains:
-                d.join(timeout=10.0)
+            if deadline is None:
+                for d in child._drains:
+                    d.join(timeout=10.0)
+            else:
+                # O deadline cobre a operação inteira: um descendente que
+                # segura o pipe não pode esticar o wait() além do timeout
+                # (PoC rodada 5: wait(0.2) bloqueou 21s nos joins de 10s).
+                for d in child._drains:
+                    d.join(timeout=max(0.0, deadline - time.monotonic()))
+                if any(d.is_alive() for d in child._drains) and not timed_out:
+                    # Drain preso = EOF nunca chega = alguém na árvore segura
+                    # o pipe. Mata o Job (KILL_ON_JOB_CLOSE) -> EOF -> drains
+                    # finalizam; resultado reporta timeout honestamente.
+                    timed_out = True
+                    self.terminate(child, reason="timeout")
+                    killed_tree = True
+                    try:
+                        child._proc.wait(timeout=5.0)
+                    except subprocess.TimeoutExpired:
+                        child._proc.kill()
+                        child._proc.wait()
+                    for d in child._drains:
+                        d.join(timeout=5.0)
             capture_incomplete = any(
                 d.error is not None or d.is_alive() for d in child._drains)
             out_text, out_hash, out_trunc = child._drains[0].finish()
