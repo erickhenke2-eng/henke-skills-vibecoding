@@ -297,6 +297,17 @@ def _scan_dir_files(dir_path: Path, repo_root: Path, out_entries: Dict[str, str]
             if Path(root).name == ".henke" and "cache" in dirs:
                 dirs.remove("cache")
 
+            # Estado operacional da própria suíte não altera o conteúdo
+            # auditável. Configurações de .henke continuam no digest.
+            if Path(root).resolve() == (repo_root / ".henke").resolve():
+                files = [f for f in files if f not in {
+                    "events.jsonl", "exec_log.jsonl", "LEDGER.json",
+                    "clean_log.jsonl", "report.html",
+                } and not f.endswith(".lock")]
+                dirs[:] = [d for d in dirs if d not in {
+                    "runs", "evidence", "sessions", "quarantine",
+                    "scan-manifests", "cache",
+                }]
             for fname in files:
                 p = Path(root) / fname
                 if p.suffix.lower() in _IGNORED_EXTS:

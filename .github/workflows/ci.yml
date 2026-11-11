@@ -46,6 +46,9 @@ jobs:
       - name: Executar Validador Estrito da Suíte
         run: python henke/validate_skills.py
 
+      - name: Provar regressões da banca 2 (Linux/Windows)
+        run: python -m unittest tests.test_adversarial_round2 -v
+
       - name: Executar Bateria Completa de Testes Unitários (sob coverage)
         shell: bash
         run: |
