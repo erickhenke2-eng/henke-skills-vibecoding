@@ -511,6 +511,10 @@ def verify_ledger(
 
 def render_gaps_markdown(ledger_path: Path) -> str:
     data = json.loads(ledger_path.read_text(encoding="utf-8"))
+    # banca-v18 (rev B-F15): JSON não-dict (lista, escalar) caía em
+    # AttributeError → traceback exit 1 em vez do diagnóstico padronizado.
+    if not isinstance(data, dict):
+        raise ValueError(f"ledger não é objeto JSON: {ledger_path}")
     ok, _errs, summary = verify_ledger(ledger_path)
     lines = [
         f"<!-- coverage_ledger outcome={summary.get('outcome', 'unknown')} "

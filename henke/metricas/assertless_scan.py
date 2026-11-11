@@ -111,7 +111,11 @@ IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 PYTEST_ASSERT = frozenset({"raises", "warns", "deprecated_call"})
 MOCK_OBS = frozenset({"called", "call_count", "call_args", "call_args_list",
                       "await_count", "await_args", "mock_calls"})
-BROAD_EXC = frozenset({"Exception", "BaseException"})
+# banca-v18 (rev C-N): AssertionError entra na rede de engolidores —
+# `except AssertionError: pass` captura exatamente a falha do assert, logo um
+# try cujo assert é a única "verificação" vira teste que não pode ir vermelho
+# (a mesma fome de falso-verde do `except Exception`, só que cirúrgica).
+BROAD_EXC = frozenset({"Exception", "BaseException", "AssertionError"})
 SELF_NAMES = frozenset({"self", "cls"})
 
 # [HENKE-PATCH] padrões léxicos para testes não-Python (corpo já mascarado).
@@ -191,7 +195,9 @@ def scan_polyglot(path: Path, helpers):
                 inner = body[b:e + 1] if e != -1 else ""
                 if not inner:
                     continue
-                if re.search(r"\b(throw|expect|assert|return|fail|rejects)\b", inner):
+                # banca-v18 (rev C-N): `return` NÃO é propagação — encerra o
+                # teste cedo com a falha engolida (`catch(e){ return; }`).
+                if re.search(r"\b(throw|expect|assert|fail|rejects)\b", inner):
                     continue
                 # isenção: catch(e){ x = e } com 'x' inspecionada fora do catch
                 # (expect(x), f(x) asserido, ou qualquer uso posterior)

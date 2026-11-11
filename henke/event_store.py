@@ -163,7 +163,29 @@ def verify(repo_root: Path | str) -> list[str]:
     prev = "0" * 64
     last_hash: str | None = None
     last_seq = 0
-    for i, ev in enumerate(_iter_events(path) or [], 1):
+    # banca-v18 (rev B-F13): _iter_events pulava linhas não-JSON/não-dict
+    # em silêncio — lixo injetado no meio do stream era tolerado (o
+    # exec_log flaga linha malformada; o event store não). verify lê as
+    # linhas cruas e reprova na primeira malformada.
+    _events: list[dict] = []
+    if path.is_file():
+        for _ln_no, _ln in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1):
+            _ln = _ln.strip()
+            if not _ln:
+                continue
+            try:
+                _obj = json.loads(_ln)
+            except json.JSONDecodeError:
+                errors.append(
+                    f"linha {_ln_no}: JSON malformado — conteúdo injetado "
+                    "no stream de eventos")
+                break
+            if not isinstance(_obj, dict):
+                errors.append(f"linha {_ln_no}: evento não-objeto no stream")
+                break
+            _events.append(_obj)
+    for i, ev in enumerate(_events, 1):
         if ev.get("schema") != SCHEMA_VERSION:
             errors.append(f"evento #{i}: schema {ev.get('schema')} != {SCHEMA_VERSION}")
         if ev.get("prev_hash") != prev:

@@ -18,6 +18,12 @@ Arquitetura:
     e sai com o código do filho. `-Es` = -E (ignora PYTHON*) + -s (pula user
     site: usercustomize/.pth de usuário). Filhos lançados com -I/-Es nascem
     limpos e passam direto.
+    banca-v18 (rev D-F2 — limite documentado): -Es NÃO bloqueia
+    sitecustomize.py/.pth do site-packages do SISTEMA/venv — só o site de
+    usuário. Um pacote hostil já instalado no prefixo executa no startup do
+    filho (-S completo quebraria imports legítimos como PyYAML). A fronteira
+    real continua sendo: não instalar pacotes do repo auditado no prefixo
+    do interpretador que roda os portões.
   - `-Es` (e não `-I`) preserva o diretório do script em sys.path — imports
     irmãos continuam funcionando sem depender de preâmbulos — e NUNCA
     introduz CWD (invocação por path de arquivo não coloca CWD em sys.path).
