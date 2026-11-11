@@ -219,6 +219,14 @@ def scan_polyglot(path: Path, helpers):
                         outside = body[:b] + body[e + 1:] if e != -1 else ""
                         if re.search(r"\b" + var + r"\b", outside):
                             exempt = True
+                    # banca-v19: catch(e){ return e } (ou return expr-com-e)
+                    # NÃO engole — o erro sai como valor de retorno para o
+                    # caller do teste inspecionar/asserir (error-codes.test.ts:
+                    # `return err` -> `caught` asserido como ZodError depois).
+                    # `return`/`return false`/`return null` seguem flagados:
+                    # descartam o erro de verdade.
+                    if re.search(r"\breturn\b[^;}\n]*\b" + re.escape(param) + r"\b", inner):
+                        exempt = True
                 if not exempt:
                     findings.append(("SWALLOWED", path, fn,
                                      "catch block that cannot propagate — the test cannot go red"))
@@ -849,17 +857,112 @@ def _dead_empty_iter(t, consts=None):
     return False
 
 
-def _dead_match_case(subject_v, case) -> bool:
-    """`match <const>` com `case <const diferente>` — braço inalcançável.
+# banca-v18 (residual 1): nomes builtin resolvíveis em `case Nome(...)` —
+# só vale se o nome NÃO foi rebindado no escopo (sombra de builtin → braço
+# vivo, conservador).
+_MATCH_BUILTIN_CLS = {
+    "str": str, "int": int, "float": float, "bool": bool,
+    "bytes": bytes, "bytearray": bytearray, "list": list, "tuple": tuple,
+    "dict": dict, "set": set, "frozenset": frozenset, "complex": complex,
+    "object": object, "type": type,
+}
+# Literais que NUNCA são sequência para match (PEP 634 exclui str/bytes/
+# bytearray explicitamente; números/dict/set/frozenset/None não são
+# collections.abc.Sequence).
+_MATCH_NONSEQ = (str, bytes, bytearray, dict, set, frozenset,
+                 int, float, complex, bool, type(None))
+# Literais que NUNCA são Mapping para match.
+_MATCH_NONMAP = (str, bytes, bytearray, tuple, list, set, frozenset,
+                 int, float, complex, bool, type(None))
 
-    Residual (banca-v18 rev C-N): padrões não-literais — guard (`case x if`),
-    capture, sequence/mapping/class e OR-patterns — seguem conservadores e o
-    braço conta como vivo."""
-    pat = case.pattern
-    return (subject_v is not _UNKNOWN
-            and isinstance(pat, ast.MatchValue)
-            and isinstance(pat.value, ast.Constant)
-            and pat.value.value != subject_v)
+
+def _pattern_dead(subject_v, pat, consts) -> bool:
+    """True quando `pat` provadamente NÃO casa o subject constante `subject_v`.
+
+    CONSERVADOR: qualquer incerteza retorna False (braço vivo) — um falso-
+    positivo de ramo morto apaga um assert real do scan, que é exatamente o
+    falso-verde que este scanner existe para impedir."""
+    if isinstance(pat, ast.MatchValue):
+        # `case <literal>` — comparação por `==` com o subject.
+        v = literal_value(pat.value,
+                          consts if consts is not None else _DEAD_SCOPE_CONSTS)
+        if v is _UNKNOWN:
+            return False
+        try:
+            return bool(v != subject_v)
+        except Exception:
+            return False
+    if isinstance(pat, ast.MatchSingleton):
+        # `case None/True/False` — comparação por `is`, não por `==`:
+        # `match 1: case True` não casa (1 is not True).
+        return subject_v is not pat.value
+    if isinstance(pat, ast.MatchAs):
+        if pat.pattern is None:
+            return False  # capture (`case x`) / wildcard (`case _`) casa sempre
+        return _pattern_dead(subject_v, pat.pattern, consts)
+    if isinstance(pat, ast.MatchStar):
+        return False  # só existe dentro de MatchSequence — casa sempre
+    if isinstance(pat, ast.MatchOr):
+        # `case a | b` é morto só se TODOS os braços são mortos.
+        return all(_pattern_dead(subject_v, p, consts) for p in pat.patterns)
+    if isinstance(pat, ast.MatchSequence):
+        nonstar = [p for p in pat.patterns
+                   if not isinstance(p, ast.MatchStar)]
+        if isinstance(subject_v, (tuple, list)):
+            if any(isinstance(p, ast.MatchStar) for p in pat.patterns):
+                return len(subject_v) < len(nonstar)
+            return len(subject_v) != len(nonstar)
+        if isinstance(subject_v, _MATCH_NONSEQ):
+            return True  # subject literal nunca é sequência de match
+        return False
+    if isinstance(pat, ast.MatchMapping):
+        if not isinstance(subject_v, dict):
+            return isinstance(subject_v, _MATCH_NONMAP)
+        # subject dict-literal: chave requerida ausente → braço morto
+        # (**rest só recolhe chaves extras, não satisfaz as requeridas).
+        for k in pat.keys:
+            kv = literal_value(k, consts if consts is not None
+                               else _DEAD_SCOPE_CONSTS)
+            if kv is _UNKNOWN:
+                continue  # chave não-literal (atributo) — conservador
+            try:
+                if kv not in subject_v:
+                    return True
+            except TypeError:
+                return False
+        return False
+    if isinstance(pat, ast.MatchClass):
+        cls = pat.cls
+        name = cls.id if isinstance(cls, ast.Name) else None
+        T = _MATCH_BUILTIN_CLS.get(name) if name else None
+        if T is None or (consts is not None and name in consts):
+            # classe desconhecida, atributo (`mod.C`) ou builtin sombreado
+            # por binding local/módulo → incerto → vivo.
+            return False
+        if T is object:
+            return False
+        # class pattern usa isinstance — a mesma regra do runtime
+        # (isinstance(True, int) é True: `match True: case int()` casa).
+        return not isinstance(subject_v, T)
+    return False  # pattern desconhecido/futuro → vivo
+
+
+def _dead_match_case(subject_v, case, consts=None) -> bool:
+    """`match <const>` cujo braço provadamente não casa — inalcançável.
+
+    banca-v18 (residual 1): além de `case <const diferente>`, dobra (a) a
+    guarda que dobra para falsy (`case x if 1 == 2` é morto para QUALQUER
+    subject) e (b) padrões estruturais trivialmente incompatíveis com o
+    subject constante — sequência, mapping, classe-builtin, OR e singleton.
+    `match (1,2): case [a,b]` NÃO dobra: tupla é sequência e casa em runtime
+    — falso-positivo de braço morto é pior que falso-negativo."""
+    if case.guard is not None:
+        gv = _fold_dead(case.guard, consts)
+        if gv is not _UNKNOWN and not bool(gv):
+            return True  # guarda sempre falsa → braço morto (qualquer subject)
+    if subject_v is _UNKNOWN:
+        return False
+    return _pattern_dead(subject_v, case.pattern, consts)
 
 
 def _terminating_stmt(s) -> bool:
@@ -959,11 +1062,13 @@ def _dead_assert_ids(stmts, consts=None):
                     _walk(s.body)
                 _walk(s.orelse)
             elif match_t is not None and isinstance(s, match_t):
-                # banca-v18 (rev C-N): braço `case <const diferente>` de
-                # `match <const>` é inalcançável — seus asserts são mortos.
+                # banca-v18 (rev C-N + residual 1): braço `case <const
+                # diferente>` — ou padrão estrutural que provadamente não
+                # casa o subject constante / guarda que dobra falsa — é
+                # inalcançável; seus asserts são mortos.
                 subject_v = _fold_dead(s.subject, _consts)
                 for c in s.cases:
-                    if _dead_match_case(subject_v, c):
+                    if _dead_match_case(subject_v, c, _consts):
                         _mark_dead(c.body)
                     else:
                         _walk(c.body)
@@ -980,6 +1085,51 @@ def _dead_assert_ids(stmts, consts=None):
 
     _walk(list(stmts))
     return dead
+
+
+# banca-v18 (residual 2): asserts unittest de contexto (`with X.assert...`)
+# que PRECISAM de callable posicional fora de `with` — o retorno é um
+# context manager; descartá-lo cria e joga fora o contexto sem executar nada.
+_CM_ASSERT_CALLABLE_MIN_ARGS = {
+    "assertRaises": 2,        # (exc, callable=None, *args)
+    "assertRaisesRegex": 3,   # (exc, regex, callable=None, *args)
+    "assertRaisesRegexp": 3,  # alias legado
+    "assertWarns": 2,         # (warning, callable=None, *args)
+    "assertWarnsRegex": 3,    # (warning, regex, callable=None, *args)
+    "assertWarnsRegexp": 3,   # alias legado
+}
+_CM_ONLY_ASSERTS = {"assertLogs", "assertNoLogs"}  # só existem como CM
+_CM_ASSERT_ALL = frozenset(_CM_ASSERT_CALLABLE_MIN_ARGS) | _CM_ONLY_ASSERTS
+
+
+def _testcase_bound_name(name, scope) -> bool:
+    """`nome` preso neste teste a uma instância TestCase — `case = MyTest()`
+    (classe com 'Test'/'Case' no nome do chamável) ou `case = self`/`cls`.
+
+    Exige TODOS os bindings qualificados: um único binding não-TestCase e o
+    `.assertRaises` sobre o nome pode ser método comum — aí contar seria o
+    falso-verde que motiva o check."""
+    values = scope.assigned.get(name)
+    if not values:
+        return False
+    for v in values:
+        if isinstance(v, ast.Name) and v.id in SELF_NAMES:
+            continue
+        if isinstance(v, ast.Call):
+            f = v.func
+            leaf = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+            if "Test" in leaf or "Case" in leaf:
+                continue
+        return False
+    return True
+
+
+def _cm_assert_base(expr, scope) -> bool:
+    """Base `X` de `X.assertRaises`/`assertWarns`/`assertLogs` resolve para um
+    TestCase: `self`/`cls`, ou nome preso a instância TestCase no mesmo teste."""
+    if not isinstance(expr, ast.Name):
+        return False
+    return expr.id in SELF_NAMES or _testcase_bound_name(expr.id, scope)
 
 
 # banca-v18 (rev C-N): fábricas cujo retorno é sempre um objeto-Mock truthy.
@@ -1085,6 +1235,18 @@ def classify(fn, helpers, b, module_consts, class_consts):
             # contexto de asserção.
             for _i in node.items:
                 _ce = _i.context_expr
+                # banca-v18 (residual 2): `cm = self.assertRaises(E); with cm:`
+                # — o CM hoistado num nome é o mesmo contexto de asserção.
+                if isinstance(_ce, ast.Name):
+                    _vs = scope.assigned.get(_ce.id) or []
+                    if _vs and all(
+                            isinstance(_v, ast.Call)
+                            and isinstance(_v.func, ast.Attribute)
+                            and _v.func.attr in _CM_ASSERT_ALL
+                            and _cm_assert_base(_v.func.value, scope)
+                            for _v in _vs):
+                        real += 1
+                    continue
                 _f = _ce.func if isinstance(_ce, ast.Call) else None
                 if _f is None:
                     continue
@@ -1100,8 +1262,11 @@ def classify(fn, helpers, b, module_consts, class_consts):
                 if ((_attr in PYTEST_ASSERT or _attr == "fail")
                         and _base in b.pytest_mods):
                     real += 1
-                elif (_attr in ("assertRaises", "assertWarns", "assertLogs")
-                        and _base in SELF_NAMES):
+                elif (_attr in _CM_ASSERT_ALL
+                        and _cm_assert_base(_f.value, scope)):
+                    # banca-v18 (residual 2): `with case.assertRaises(E)` —
+                    # `case` preso a `MyTest()`/`self` é contexto unittest
+                    # igual a `with self.assertRaises(E)`.
                     real += 1
             if not swallow and any(suppresses_broadly(i.context_expr, b) for i in node.items):
                 swallow = "suppress() of a broad exception — the test cannot go red"
@@ -1109,8 +1274,19 @@ def classify(fn, helpers, b, module_consts, class_consts):
             f = node.func
             if isinstance(f, ast.Attribute):
                 base = f.value.id if isinstance(f.value, ast.Name) else None
-                if UNITTEST_ASSERT.match(f.attr) and base in SELF_NAMES:
-                    if observes_only_mock(node.args + [k.value for k in node.keywords], scope):
+                _tc_base = base in SELF_NAMES or _testcase_bound_name(base, scope)
+                if UNITTEST_ASSERT.match(f.attr) and _tc_base:
+                    # banca-v18 (residual 2): bare `self.assertRaises(E)` /
+                    # `assertWarns(W)` / `assertLogs()` SEM callable posicional
+                    # — retorna context manager descartado (cria e joga fora
+                    # o contexto; nada executa, nada falha). Só é asserção na
+                    # posição `context_expr` de `with` ou com callable:
+                    # `self.assertRaises(E, f)` executa f esperando E.
+                    if (f.attr in _CM_ONLY_ASSERTS
+                            or (f.attr in _CM_ASSERT_CALLABLE_MIN_ARGS
+                                and len(node.args) < _CM_ASSERT_CALLABLE_MIN_ARGS[f.attr])):
+                        pass
+                    elif observes_only_mock(node.args + [k.value for k in node.keywords], scope):
                         mock += 1
                     elif (
                         f.attr in ("assertTrue", "assertFalse")

@@ -109,15 +109,26 @@ def _cmd_dossier(repo: Path, out_dir: Path) -> int:
     # falso-verde para o orquestrador que o consome.
     missing = [p for p in ("ledger.json", "metrics.tsv")
                if not (out_dir / p).is_file()]
+    # banca-v19 (rev A-3): hazards.txt sempre existe (o gate escreve até
+    # traceback) — `missing` passava com hazard_scan crashado. rcs eram
+    # só registrados, nunca verificados: hazard rc=2 (erro de scan;
+    # rc=1 = findings = ok), metrics/ledger rc≠0 → dossiê falso-verde.
+    gate_failures = []
+    if rc_metrics != 0:
+        gate_failures.append(f"metrics_rc={rc_metrics}")
+    if rc_hazard == 2:
+        gate_failures.append(f"hazard_rc={rc_hazard}")
+    if rc_ledger != 0:
+        gate_failures.append(f"ledger_rc={rc_ledger}")
     print(json.dumps({
         "dossier": str(out_dir), "repo": str(repo),
         "artifacts": sorted(p.name for p in out_dir.iterdir()),
         "metrics_rc": rc_metrics, "hazard_rc": rc_hazard,
         "ledger_rc": rc_ledger,
     }, indent=1))
-    if missing:
-        print(f"ERRO: artefatos do dossiê ausentes: {missing}",
-              file=sys.stderr)
+    if missing or gate_failures:
+        print(f"ERRO: dossiê incompleto — ausentes={missing}, "
+              f"portões falhos={gate_failures}", file=sys.stderr)
         return 2
     return 0
 

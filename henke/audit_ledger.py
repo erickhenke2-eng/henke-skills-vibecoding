@@ -109,11 +109,25 @@ def _npm_script_name(cmd: str) -> str | None:
     while toks and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", toks[0]):
         toks.pop(0)
     if (len(toks) >= 3 and toks[0].lower() in ("sh", "bash", "zsh", "dash",
-                                             "ksh")
-            and toks[1] == "-c"):
-        toks = toks[2].strip().split()
-        while toks and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", toks[0]):
-            toks.pop(0)
+                                             "ksh")):
+        # banca-v19 (rev FV-5): `toks[1] == "-c"` exato evadia flags
+        # empacotadas (`bash -lc`, `sh -ec`, `sh -xc` — forma canônica em
+        # CI) e flags antes do -c (`sh -e -c`). Anda os flags até o
+        # `-…c` e desmonta o payload a partir dali.
+        i = 1
+        while (i < len(toks) and toks[i].startswith("-")
+               and not re.fullmatch(r"-[a-z]*c", toks[i])):
+            i += 1
+        if (i + 1 < len(toks)
+                and re.fullmatch(r"-[a-z]*c", toks[i])):
+            # O payload pode ter sido fragmentado pelo split externo
+            # (`sh -c "npm test"` → ['"npm','test"']) — rejunta o rabo
+            # inteiro e tira as aspas de borda antes de re-tokenizar.
+            payload = " ".join(toks[i + 1:]).strip()
+            payload = payload.strip('"').strip("'")
+            toks = payload.split()
+            while toks and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", toks[0]):
+                toks.pop(0)
     # A5 (banca v16): wrappers escondiam o runner — `env npm test`,
     # `sudo npm install`, `nice -n5 npm t`, `timeout 10 npm run x`,
     # `cmd /c npm t` devolviam None e os hooks ficavam invisíveis.

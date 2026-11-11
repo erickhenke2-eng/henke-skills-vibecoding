@@ -30,9 +30,11 @@ Kinds: "exec" (espelho exec_log), "gate_result", "scan_result",
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -104,6 +106,101 @@ def _iter_events(path: Path):
                 yield obj
 
 
+# banca-v18 (residual 6, rev seguinte): mutex intra-processo cobrindo o
+# MESMO arquivo que _file_lock protege entre processos. Dois efeitos:
+#  1) serializa threads irmãs sem a loteria do O_EXCL (append/migrate já
+#     eram serializados pelo file lock — o mutex só ordena a fila);
+#  2) permite provar órfão same-pid: segurando o mutex, NENHUM irmão pode
+#     estar dentro/criando `<path>.lock`; se o arquivo existe com
+#     `pid=<o nosso>`, é órfão de release abortado (Windows: unlink
+#     transitório sob AV/indexer falha e o `finally` do _file_lock engole
+#     OSError) — caso contrário o próximo esperante via `pid` vivo do
+#     mesmo processo NUNCA seria "stale" e morreria de TimeoutError.
+# Sem o mutex, `pid==meu` poderia ser o lock VIVO de um irmão — remover
+# quebrava a exclusão mútua que o residual 6 conserta.
+_PROCESS_APPEND_LOCK = threading.Lock()
+
+
+def _reap_self_lock_orphan(path: Path) -> None:
+    """Remove `<path>.lock` se for órfão com o NOSSO pid (seguro apenas sob
+    `_PROCESS_APPEND_LOCK`): ninguém escreve nosso pid além de nós — um
+    irmão vivo estaria sob o mutex; um processo morto não segura nada."""
+    lock_path = Path(str(Path(path).resolve()) + ".lock")
+    try:
+        if lock_path.read_text(
+                encoding="utf-8", errors="replace").strip() == (
+                f"pid={os.getpid()}"):
+            lock_path.unlink()
+    except OSError:
+        pass
+
+
+@contextlib.contextmanager
+def _events_file_lock(path: Path, timeout: float):
+    """`_file_lock` do events.jsonl + mutex intra-processo + reapa de
+    órfão same-pid — a unidade de exclusão para append/migrate."""
+    from henke.run_state import _file_lock
+    with _PROCESS_APPEND_LOCK:
+        _reap_self_lock_orphan(path)
+        try:
+            with _file_lock(path, timeout=timeout):
+                yield
+        finally:
+            # Se o unlink do release falhou (OSError transitório engolido
+            # pelo _file_lock), o órfão same-pid wedgiava o próximo
+            # esperante por `timeout` inteiro — reapa enquanto o mutex
+            # ainda prova que nenhum irmão o segura.
+            _reap_self_lock_orphan(path)
+
+
+def _append_event_locked(repo: Path, path: Path, kind: str,
+                         payload: dict[str, Any]) -> dict:
+    """Núcleo do append — exige `_file_lock(path)` JÁ adquirido pelo chamador.
+
+    banca-v18 (residual 6): migrate() precisa do backfill inteiro sob UM
+    lock, e `_file_lock` (O_EXCL por arquivo) não é reentrante — readquirir
+    dentro do lock preso é TimeoutError. O núcleo compartilhado deixa
+    append_event e migrate executarem a mesma transação atômica (ambos
+    entram por `_events_file_lock`, que também segura o mutex do processo
+    e reapa órfão same-pid do release)."""
+    # BANCA-B4 (+revisão cega): append não pode estender cadeia corrompida.
+    # O gate anterior só verificava arquivo existente-não-vazio — deletar/
+    # zerar o log com âncora viva lavava a reescrita. Verifica SEMPRE que
+    # âncora existe ou o log tem conteúdo.
+    _has_tip = load_tip(repo) is not None
+    _has_log = path.is_file() and path.stat().st_size > 0
+    if _has_tip or _has_log:
+        _pre_errors = verify(repo)
+        if _pre_errors:
+            raise ValueError(
+                "events.jsonl falhou a verificação de integridade — "
+                f"append recusado: {_pre_errors[0]}")
+    prev_hash = "0" * 64
+    seq = 0
+    for ev in _iter_events(path):
+        prev_hash = str(ev.get("entry_hash", prev_hash))
+        seq = max(seq, int(ev.get("seq", 0)))
+    seq += 1
+    body = {
+        "schema": SCHEMA_VERSION,
+        "seq": seq,
+        "ts": _now_iso(),
+        "kind": kind,
+        "payload": payload,
+        "prev_hash": prev_hash,
+    }
+    entry_hash = hashlib.sha256(
+        json.dumps(body, sort_keys=True, ensure_ascii=False)
+        .encode("utf-8")).hexdigest()
+    body["entry_hash"] = entry_hash
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(body, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    _record_tip(repo, entry_hash)
+    return body
+
+
 def append_event(repo_root: Path | str, kind: str,
                  payload: dict[str, Any]) -> dict:
     """Append canônico: sequencia monotônica + cadeia de hashes, sob
@@ -115,44 +212,8 @@ def append_event(repo_root: Path | str, kind: str,
     path = events_path(repo)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    from henke.run_state import _file_lock
-    with _file_lock(path):
-        # BANCA-B4 (+revisão cega): append não pode estender cadeia corrompida.
-        # O gate anterior só verificava arquivo existente-não-vazio — deletar/
-        # zerar o log com âncora viva lavava a reescrita. Verifica SEMPRE que
-        # âncora existe ou o log tem conteúdo.
-        _has_tip = load_tip(repo) is not None
-        _has_log = path.is_file() and path.stat().st_size > 0
-        if _has_tip or _has_log:
-            _pre_errors = verify(repo)
-            if _pre_errors:
-                raise ValueError(
-                    "events.jsonl falhou a verificação de integridade — "
-                    f"append recusado: {_pre_errors[0]}")
-        prev_hash = "0" * 64
-        seq = 0
-        for ev in _iter_events(path):
-            prev_hash = str(ev.get("entry_hash", prev_hash))
-            seq = max(seq, int(ev.get("seq", 0)))
-        seq += 1
-        body = {
-            "schema": SCHEMA_VERSION,
-            "seq": seq,
-            "ts": _now_iso(),
-            "kind": kind,
-            "payload": payload,
-            "prev_hash": prev_hash,
-        }
-        entry_hash = hashlib.sha256(
-            json.dumps(body, sort_keys=True, ensure_ascii=False)
-            .encode("utf-8")).hexdigest()
-        body["entry_hash"] = entry_hash
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(body, ensure_ascii=False) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        _record_tip(repo, entry_hash)
-    return body
+    with _events_file_lock(path, timeout=10.0):
+        return _append_event_locked(repo, path, kind, payload)
 
 
 def verify(repo_root: Path | str) -> list[str]:
@@ -221,7 +282,15 @@ def verify(repo_root: Path | str) -> list[str]:
 
 def migrate(repo_root: Path | str) -> dict:
     """Backfill idempotente: importa exec_log.jsonl, gate_cache.json e
-    manifests como eventos. Marker 'migrate_marker' evita re-import."""
+    manifests como eventos. Marker 'migrate_marker' evita re-import.
+
+    banca-v18 (residual 6): a transação INTEIRA (check do marker + todos os
+    appends + marker final) roda sob UM `_file_lock` — o mesmo lock do
+    append. Antes, cada append pegava o lock individualmente: dois migrates
+    concorrentes liam `already=False` e duplicavam a importação, e sob
+    contenção morriam com TimeoutError deixando migração PARCIAL sem marker
+    (a próxima rodada re-importava tudo de novo). Um writer externo também
+    não pode intercalar no meio do backfill."""
     try:
         from henke.state_paths import state_dir
     except ImportError:
@@ -229,55 +298,63 @@ def migrate(repo_root: Path | str) -> dict:
     repo = Path(repo_root).resolve()
     sd = state_dir(repo)
     legacy_sd = repo / ".henke"
-    already = any(ev.get("kind") == "migrate_marker"
-                  for ev in (_iter_events(events_path(repo)) or []))
-    stats = {"exec": 0, "gate_result": 0, "scan_result": 0,
-             "skipped": already}
-    if already:
-        return stats
+    path = events_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # timeout=60: um backfill grande legítimo pode segurar o lock além dos
+    # 10s default — quem espera tem TimeoutError honesto, nunca corrupção.
+    # `_events_file_lock` adiciona o mutex intra-processo (serializa irmãos
+    # sem loteria O_EXCL) e a reapa de órfão same-pid do release.
+    with _events_file_lock(path, timeout=60.0):
+        already = any(ev.get("kind") == "migrate_marker"
+                      for ev in (_iter_events(path) or []))
+        stats = {"exec": 0, "gate_result": 0, "scan_result": 0,
+                 "skipped": already}
+        if already:
+            return stats
 
-    exec_log = sd / "exec_log.jsonl" if (sd / "exec_log.jsonl").is_file() else legacy_sd / "exec_log.jsonl"
-    for ln_path, kind in ((exec_log, "exec"),):
-        for obj in _iter_events(ln_path) or []:
-            append_event(repo, kind, {"origin": "exec_log", "entry": obj})
-            stats[kind] += 1
+        exec_log = sd / "exec_log.jsonl" if (sd / "exec_log.jsonl").is_file() else legacy_sd / "exec_log.jsonl"
+        for ln_path, kind in ((exec_log, "exec"),):
+            for obj in _iter_events(ln_path) or []:
+                _append_event_locked(repo, path, kind,
+                                     {"origin": "exec_log", "entry": obj})
+                stats[kind] += 1
 
-    gate_index = (sd / "cache" / "gate_cache.json"
-                  if (sd / "cache" / "gate_cache.json").is_file()
-                  else legacy_sd / "cache" / "gate_cache.json")
-    if gate_index.is_file():
-        try:
-            idx = json.loads(gate_index.read_text(encoding="utf-8"))
-            entries = idx.get("entries", idx) if isinstance(idx, dict) else idx
-            if isinstance(entries, dict):
-                iterable = entries.values()
-            elif isinstance(entries, list):
-                iterable = entries
-            else:
-                iterable = []
-            for entry in iterable:
-                if isinstance(entry, dict):
-                    append_event(repo, "gate_result",
-                                 {"origin": "gate_cache", "entry": entry})
-                    stats["gate_result"] += 1
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    scans_dir = (sd / "cache" / "scans"
-                 if (sd / "cache" / "scans").is_dir()
-                 else legacy_sd / "cache" / "scans")
-    if scans_dir.is_dir():
-        for mf in sorted(scans_dir.glob("*.json")):
+        gate_index = (sd / "cache" / "gate_cache.json"
+                      if (sd / "cache" / "gate_cache.json").is_file()
+                      else legacy_sd / "cache" / "gate_cache.json")
+        if gate_index.is_file():
             try:
-                obj = json.loads(mf.read_text(encoding="utf-8"))
+                idx = json.loads(gate_index.read_text(encoding="utf-8"))
+                entries = idx.get("entries", idx) if isinstance(idx, dict) else idx
+                if isinstance(entries, dict):
+                    iterable = entries.values()
+                elif isinstance(entries, list):
+                    iterable = entries
+                else:
+                    iterable = []
+                for entry in iterable:
+                    if isinstance(entry, dict):
+                        _append_event_locked(repo, path, "gate_result",
+                                             {"origin": "gate_cache", "entry": entry})
+                        stats["gate_result"] += 1
             except (OSError, json.JSONDecodeError):
-                continue
-            append_event(repo, "scan_result",
-                         {"origin": f"scan_manifest:{mf.name}", "entry": obj})
-            stats["scan_result"] += 1
+                pass
 
-    append_event(repo, "migrate_marker",
-                 {"counts": {k: v for k, v in stats.items() if k != "skipped"}})
+        scans_dir = (sd / "cache" / "scans"
+                     if (sd / "cache" / "scans").is_dir()
+                     else legacy_sd / "cache" / "scans")
+        if scans_dir.is_dir():
+            for mf in sorted(scans_dir.glob("*.json")):
+                try:
+                    obj = json.loads(mf.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                _append_event_locked(repo, path, "scan_result",
+                                     {"origin": f"scan_manifest:{mf.name}", "entry": obj})
+                stats["scan_result"] += 1
+
+        _append_event_locked(repo, path, "migrate_marker",
+                             {"counts": {k: v for k, v in stats.items() if k != "skipped"}})
     return stats
 
 
