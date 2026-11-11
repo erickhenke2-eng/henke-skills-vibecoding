@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from henke.gate_cache import compute_cache_key
-from henke.spec_drift import check_spec_drift, get_touched_files
+from henke.spec_drift import check_spec_drift, compute_spec_hash, get_touched_files
 
 spec = importlib.util.spec_from_file_location(
     "henke_installer_hardening", ROOT / "henke" / "install_skills.py")
@@ -94,7 +94,9 @@ class TestIndexSemantics(unittest.TestCase):
             (repo / "src" / "ok.py").write_text("ok = True\n", encoding="utf-8")
             _git(repo, "add", "src/ok.py", "docs/designs/feature.md")
             (repo / "base.py").write_text("x = 99\n", encoding="utf-8")
-            expected = hashlib.sha256(spec_path.read_bytes()).hexdigest()
+            # compute_spec_hash normaliza CRLF->LF como o verificador —
+            # sha256(raw_bytes) diverge no Windows (write_text grava CRLF).
+            expected = compute_spec_hash(spec_path)
             ok, errors = check_spec_drift(
                 spec_path, expected_hash=expected, against=head,
                 git_root=repo, staged_only=True)
