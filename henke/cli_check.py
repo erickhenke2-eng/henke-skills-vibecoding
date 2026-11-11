@@ -368,24 +368,41 @@ def _cmd_check(
                         lt_res = subprocess.run(
                             ["git", "ls-tree", "-rz", "--name-only", tree],
                             cwd=str(repo_root), capture_output=True,
-                            text=True, env=_wt_env)
-                        listed = (set(p for p in lt_res.stdout.split("\0") if p)
-                                  if lt_res.returncode == 0 else set())
+                            env=_wt_env)
+                        if lt_res.returncode != 0:
+                            print("ERRO: Falha ao extrair index Git para "
+                                  f"--staged: {lt_res.stderr[:200]!r}",
+                                  file=sys.stderr)
+                            return 2
+                        try:
+                            # Paths do index são bytes UTF-8 por convenção;
+                            # decode explícito — byte inválido = índice
+                            # não-verificável (fail-closed, não mojibake).
+                            lt_text = lt_res.stdout.decode("utf-8")
+                        except UnicodeDecodeError as exc:
+                            print("ERRO: index Git com path não-UTF-8 — "
+                                  f"staged não verificável: {exc}",
+                                  file=sys.stderr)
+                            return 2
+                        listed = set(p for p in lt_text.split("\0") if p)
                         # Delta-F17: colisão de case no índice (`A.py`+`a.py`)
                         # materializa UM arquivo no FS case-insensitive — o
                         # blob do outro nunca é escaneado (falso-verde). Também
                         # cobre arquivo que vira prefixo-dir de outro por case
-                        # (`A.py` vs `a.py/x`). Fail-closed: snapshot ambíguo
-                        # não é verificável.
+                        # (`A.py` vs `a.py/x`). fold_key dobra ainda as formas
+                        # que o FS apaga: trailing dot/space (Windows) e
+                        # NFD→NFC (APFS). Fail-closed: snapshot ambíguo não é
+                        # verificável.
+                        from henke.metricas.ratchet import fold_key as _fk
                         _by_fold: dict[str, list[str]] = {}
                         for _p in listed:
-                            _by_fold.setdefault(_p.casefold(), []).append(_p)
+                            _by_fold.setdefault(_fk(_p), []).append(_p)
                         _collide = sorted(
                             _vs[0] for _vs in _by_fold.values() if len(_vs) > 1)
                         if not _collide:
                             for _p in listed:
                                 _anc = ""
-                                for _part in _p.casefold().split("/")[:-1]:
+                                for _part in _fk(_p).split("/")[:-1]:
                                     _anc = (f"{_anc}/{_part}" if _anc
                                             else _part)
                                     if _anc in _by_fold:

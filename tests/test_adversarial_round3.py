@@ -23,7 +23,9 @@ class TestResultPolarity(unittest.TestCase):
     def test_negative_verdicts_rejected(self):
         for res in ("2 failed", "passed 2 failed", "ok ❌", "passou ✗",
                     "ok — 1 reprovado", "violated", "falha parcial",
-                    "error: none found"):
+                    "error: none found", "aprovado com erro conhecido",
+                    "resultado inconclusivo", "execução pendente",
+                    "cobertura parcial", "test skipped"):
             with self.subTest(res=res):
                 self.assertTrue(cl._RES_NEG.search(res.lower()),
                                 f"falha não detectada em {res!r}")
@@ -90,6 +92,25 @@ class TestStagedCaseCollision(unittest.TestCase):
             self.assertEqual(rc, 2,
                              "índice com colisão de case passou como staged válido")
 
+    def test_unicode_nfd_collision_fails_closed(self):
+        # `évil.py` (NFC) e `e\u0301vil.py` (NFD) materializam o mesmo arquivo
+        # em FS que normaliza unicode (APFS) — mesmo vetor da colisão de case.
+        from henke.cli_check import _cmd_check
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            self._git(repo, "init", "-q")
+            evil = self._git(repo, "hash-object", "-w", "--stdin",
+                             input="import pickle\nvalue = pickle.loads(payload)\n")
+            clean = self._git(repo, "hash-object", "-w", "--stdin",
+                              input="value = 1\n")
+            self._git(repo, "update-index", "--add", "--cacheinfo",
+                      f"100644,{evil},évil.py")
+            self._git(repo, "update-index", "--add", "--cacheinfo",
+                      f"100644,{clean},évil.py")
+            rc = _cmd_check(repo, staged=True, as_json=True)
+            self.assertEqual(rc, 2,
+                             "índice com colisão NFC/NFD passou como staged válido")
+
 
 class TestPipelinePerRunArtifact(unittest.TestCase):
     """Dois runs concorrentes dividiam `ratchet-current.tsv`: o portão de A
@@ -131,8 +152,8 @@ class TestPipelinePerRunArtifact(unittest.TestCase):
                 t.join(30)
             self.assertFalse(t.is_alive())
 
-            self.assertEqual(results.get("second"), 0)
-            self.assertNotEqual(results.get("first"), 0,
+            self.assertEqual(results["second"], 0)
+            self.assertNotEqual(results["first"], 0,
                                 "run com regressão passou lendo evidência alheia")
             self.assertNotEqual(gate_argv["first"][-1], gate_argv["MainThread"][-1],
                                 "runs concorrentes devem usar artefatos distintos")
