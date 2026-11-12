@@ -6,11 +6,17 @@
    "10 passed" via stdin recebia credit_eligible=True.
 2. parse_test_runner_output casava o PRIMEIRO 'N passed' (pytest/jest/
    canário): uma linha plantada antes do sumário real inflava discovered.
+3. `npm --prefix/-C/--cwd/--dir <alvo> <script>` expandia o lifecycle do
+   package.json da RAIZ — o pretest hostil do package.json do alvo ficava
+   invisível à denylist.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 from henke import audit_ledger
@@ -74,6 +80,79 @@ class TestLastSummaryMatch(unittest.TestCase):
         self.assertEqual((d, p), (42, 42))
         d, p = parse_test_runner_output("Tests: 6 passed, 6 total", "")
         self.assertEqual((d, p), (6, 6))
+
+
+class TestNpmDirRedirect(unittest.TestCase):
+    """A3: --prefix/-C/--cwd/--dir redirecionam o lifecycle para o
+    package.json do ALVO — o da raiz não é autoridade para esses hooks."""
+
+    def _mkrepo(self, td: str) -> tuple[Path, dict]:
+        root = Path(td)
+        (root / "package.json").write_text(
+            json.dumps({"scripts": {"test": "echo ok"}}), encoding="utf-8")
+        (root / "sub").mkdir()
+        (root / "sub" / "package.json").write_text(json.dumps({
+            "name": "sub", "scripts": {
+                "pretest": "rm -rf /tmp/x", "test": "echo ok"}}),
+            encoding="utf-8")
+        pkg_root = json.loads((root / "package.json").read_text())
+        return root, pkg_root
+
+    def test_prefix_target_package_audited(self):
+        with tempfile.TemporaryDirectory() as td:
+            root, pkg_root = self._mkrepo(td)
+            for flag in ("--prefix sub", "--prefix=sub", "-C sub",
+                         "--cwd sub"):
+                cmd = f"npm {flag} test"
+                ledger = [{"cmd": cmd, "exit": 0, "testes_descobertos": 5,
+                           "stdout_sha256": "a" * 64}]
+                ok, errors, _ = audit_ledger.audit_ledger_content(
+                    ledger, pkg=pkg_root, pkg_dir=root)
+                self.assertFalse(ok, f"{cmd!r} passou limpo")
+                self.assertTrue(
+                    any("denylist" in e for e in errors),
+                    f"{cmd!r}: {errors}")
+
+    def test_unresolvable_prefix_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root, pkg_root = self._mkrepo(td)
+            ledger = [{"cmd": "npm --prefix missing test", "exit": 0,
+                       "testes_descobertos": 5, "stdout_sha256": "a" * 64}]
+            ok, errors, _ = audit_ledger.audit_ledger_content(
+                ledger, pkg=pkg_root, pkg_dir=root)
+            self.assertFalse(ok)
+            self.assertTrue(any("lifecycle" in e for e in errors), errors)
+
+    def test_workspace_name_resolves_hooks(self):
+        with tempfile.TemporaryDirectory() as td:
+            root, pkg_root = self._mkrepo(td)
+            pkg_root["workspaces"] = ["sub"]
+            ledger = [{"cmd": "npm -w sub test", "exit": 0,
+                       "testes_descobertos": 5, "stdout_sha256": "a" * 64}]
+            ok, errors, _ = audit_ledger.audit_ledger_content(
+                ledger, pkg=pkg_root, pkg_dir=root)
+            self.assertFalse(ok, "npm -w sub test passou limpo")
+            self.assertTrue(any("denylist" in e for e in errors), errors)
+
+    def test_pnpm_dash_w_boolean_tolerated(self):
+        # pnpm '-w' é booleano (workspace-ROOT), não leva nome — não pode
+        # falso-flaggear `pnpm -w test`.
+        with tempfile.TemporaryDirectory() as td:
+            root, pkg_root = self._mkrepo(td)
+            ledger = [{"cmd": "pnpm -w test", "exit": 0,
+                       "testes_descobertos": 5, "stdout_sha256": "a" * 64}]
+            ok, errors, _ = audit_ledger.audit_ledger_content(
+                ledger, pkg=pkg_root, pkg_dir=root)
+            self.assertTrue(ok, errors)
+
+    def test_no_flag_root_pkg_unchanged(self):
+        with tempfile.TemporaryDirectory() as td:
+            root, pkg_root = self._mkrepo(td)
+            ledger = [{"cmd": "npm test", "exit": 0,
+                       "testes_descobertos": 5, "stdout_sha256": "a" * 64}]
+            ok, errors, _ = audit_ledger.audit_ledger_content(
+                ledger, pkg=pkg_root, pkg_dir=root)
+            self.assertTrue(ok, errors)
 
 
 if __name__ == "__main__":

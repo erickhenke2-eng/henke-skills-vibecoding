@@ -6,6 +6,7 @@ de scripts efetivos, valida evidência criptográfica (`exec_log.jsonl`) e
 barra vitória por tautologia (0 testes descobertos).
 """
 import argparse
+import glob
 import hashlib
 import json
 import os
@@ -99,9 +100,10 @@ _NPM_FLAGS_TAKING_ARG = {
 }
 
 
-def _npm_script_name(cmd: str) -> str | None:
-    """Extrai o nome do script npm via tokenizer — pula runner, flags e os
-    argumentos das flags que tomam valor separado."""
+def _npm_preamble(cmd: str) -> tuple[str, list[str]] | None:
+    """Desmonta prefixos VAR=, `sh -c`, wrappers e `cmd /c`; devolve
+    (runner, args) com args = tokens APÓS o executável npm-family.
+    None quando o comando principal não é npm-family."""
     toks = cmd.strip().split()
     # banca-v18 (rev B-F9): `VAR=1 npm test` — assignments POSIX no início
     # do comando não são wrappers e escondiam o runner; e `sh -c "npm t"`
@@ -162,7 +164,17 @@ def _npm_script_name(cmd: str) -> str | None:
             r"(?:npm|pnpm|yarn|bun)(?:\.(?:cmd|exe|bat|com|ps1))?",
             toks[0], re.IGNORECASE):
         return None
-    toks = toks[1:]
+    runner = re.sub(r"\.(?:cmd|exe|bat|com|ps1)$", "", toks[0].lower())
+    return runner, toks[1:]
+
+
+def _npm_script_name(cmd: str) -> str | None:
+    """Extrai o nome do script npm via tokenizer — pula runner, flags e os
+    argumentos das flags que tomam valor separado."""
+    pre = _npm_preamble(cmd)
+    if pre is None:
+        return None
+    _runner, toks = pre
     def _skip_flags(t: list) -> None:
         while t and t[0].startswith("-"):
             flag = t.pop(0)
@@ -185,6 +197,100 @@ def _npm_script_name(cmd: str) -> str | None:
     if script is not None:
         script = _ALIAS.get(script.lower(), script)
     return script
+
+
+# Flags que redirecionam o lifecycle para OUTRO package.json — `npm
+# --prefix sub test`/`pnpm -C sub t`/`yarn --cwd sub test` rodam os hooks de
+# sub/package.json; expandir os da RAIZ auditava o arquivo errado e deixava
+# o pretest hostil do sub invisível à denylist.
+_NPM_DIR_FLAGS = {"--prefix", "-C", "--cwd", "--dir"}
+_NPM_WS_FLAGS = {"-w", "--workspace"}
+
+
+def _npm_dir_redirect(cmd: str) -> tuple[str | None, str | None]:
+    """(dir_flag_arg, workspace_name) de um comando npm-family — indireções
+    que mudam o package.json cujos hooks rodam. Para em '--': o rabo é argv
+    do script, não flag do runner."""
+    pre = _npm_preamble(cmd)
+    if pre is None:
+        return None, None
+    runner, toks = pre
+    dir_arg: str | None = None
+    ws: str | None = None
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t == "--":
+            break
+        if t.startswith("--") and "=" in t:
+            k, _, v = t.partition("=")
+            if k in _NPM_DIR_FLAGS:
+                dir_arg = v
+            elif k in _NPM_WS_FLAGS:
+                ws = v
+            i += 1
+            continue
+        if t in _NPM_DIR_FLAGS:
+            if i + 1 < len(toks):
+                dir_arg = toks[i + 1]
+            i += 2
+            continue
+        if t in _NPM_WS_FLAGS:
+            # pnpm/bun: '-w' é booleano (workspace-ROOT, sem argumento) —
+            # tratá-lo como nome deslocaria o scan e falso-flaggearia
+            # `pnpm -w test`. npm/yarn: '-w <nome>' leva workspace.
+            if runner in ("npm", "yarn") and i + 1 < len(toks):
+                ws = toks[i + 1]
+                i += 2
+                continue
+            i += 1
+            continue
+        i += 1
+    return dir_arg, ws
+
+
+def _resolve_lifecycle_pkg(cmd: str, pkg: dict | None,
+                           pkg_dir: Path | None) -> tuple[dict | None, str | None]:
+    """Package.json cujos hooks REALMENTE rodam para `cmd`. Com indireção
+    (--prefix/-C/--cwd/--dir/-w) resolve o package.json do ALVO. Indireção
+    com package.json ilegível vira motivo de erro (fail-closed); '-w' sem
+    workspace resolvível é tolerado (pnpm '-w' é booleano e o npm reprova
+    na própria execução um workspace inexistente)."""
+    dir_arg, ws = _npm_dir_redirect(cmd)
+    if dir_arg is None and ws is None:
+        return pkg, None
+    if pkg_dir is None:
+        return pkg, ("indireção de lifecycle (--prefix/-C/--cwd/--dir/-w) "
+                     "sem package.json-base para resolver")
+    if dir_arg is not None:
+        cand = Path(dir_arg)
+        if not cand.is_absolute():
+            cand = Path(pkg_dir) / cand
+        try:
+            data = json.loads((cand / "package.json").read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("package.json não é objeto")
+            return data, None
+        except (OSError, ValueError):
+            return pkg, (f"lifecycle não auditável: '{dir_arg}' não resolve "
+                         "um package.json legível")
+    # '-w <nome>': o workspace mora nos globs 'workspaces' do package.json raiz.
+    pats = (pkg or {}).get("workspaces")
+    if isinstance(pats, dict):
+        pats = pats.get("packages")
+    if isinstance(pats, list):
+        for pat in pats:
+            for d in glob.glob(str(Path(pkg_dir) / str(pat))):
+                try:
+                    data = json.loads(
+                        (Path(d) / "package.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(data, dict) and data.get("name") == ws:
+                    return data, None
+    return pkg, None
+
+
 # M8 (banca v13): shapes de teste fora do regex declaravam testes sem nenhum
 # registro exigido — cobre `npm run test`, runners via npx/deno/dotnet/ctest.
 _TEST_CMD_RE = re.compile(
@@ -639,7 +745,8 @@ def verify_exec_log(entries: list[dict], exec_log_path: Path) -> list[str]:
 
 def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False,
                          pkg: dict | None = None, exec_log_path: Path | None = None,
-                         require_exec_log: bool = False) -> tuple[bool, list[str], int]:
+                         require_exec_log: bool = False,
+                         pkg_dir: Path | None = None) -> tuple[bool, list[str], int]:
     errors = []
     total_tests_discovered = 0
 
@@ -680,8 +787,12 @@ def audit_ledger_content(ledger_data: list[dict], allow_zero_tests: bool = False
             strings_to_check.append(str(entry["executável_resolvido"]).strip())
         # Anti-TOCTOU: expande o grafo de hooks npm — corpos de pre*/post* entram
         # na denylist com o nome do hook (TOCTOU escondido em lifecycle).
-        for hook, body in resolve_npm_lifecycle(normalized_cmd, pkg):
-            strings_to_check.append(f"{hook}: {body}")
+        _lc_pkg, _lc_unres = _resolve_lifecycle_pkg(normalized_cmd, pkg, pkg_dir)
+        if _lc_unres:
+            errors.append(f"Entrada #{i}: {_lc_unres}.")
+        else:
+            for hook, body in resolve_npm_lifecycle(normalized_cmd, _lc_pkg):
+                strings_to_check.append(f"{hook}: {body}")
 
         # 1. Checagem contra padrões destrutivos (Heurística Denylist)
         for s in strings_to_check:
@@ -831,6 +942,7 @@ def main():
         pkg=pkg_data,
         exec_log_path=exec_log_p,
         require_exec_log=args.require_exec_log,
+        pkg_dir=Path(pkg_path).resolve().parent if pkg_path else None,
     )
     if not ok:
         print(f"FALHA NA AUDITORIA DO LEDGER ({len(errors)} violações):", file=sys.stderr)
