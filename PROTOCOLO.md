@@ -1,4 +1,4 @@
-# Protocolo Henke de Verificação, Arquitetura & Custódia (v4.1 — 58 Skills)
+# Protocolo Henke de Verificação, Arquitetura & Custódia (v5.0 — 58 Skills)
 
 > **Síntese Canônica: Suíte Henke + Google Elephant-Goldfish Model (EGM)**
 > Upstream de referência: `github.com/google/elephant-goldfish-model` — registrar o SHA do commit consultado aqui: `f0ba151b252c9abf1318d9fe857a43265d06de89`. Sem pin, a "síntese" apodrece sem possibilidade de diff.
