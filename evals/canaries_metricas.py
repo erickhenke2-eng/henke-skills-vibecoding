@@ -426,14 +426,16 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
             "validation_plan": "inspecionar config Cloudflare",
         }]
         led_file.write_text(json.dumps(led_data), encoding="utf-8")
-        code, out = run(MET / "coverage_ledger.py", "verify", led_file)
+        # banca-v20 (F2): self-attested exige opt-in explícito — sem
+        # --allow-self-attested o verify agora reprova MISSING-CRITIC.
+        code, out = run(MET / "coverage_ledger.py", "verify", led_file, "--allow-self-attested")
         code_g, out_g = run(MET / "coverage_ledger.py", "render-gaps", led_file)
         expect("Canário M39: coverage_ledger aprova 100% coberto + needs_validation sem severity e renderiza gaps",
                code == 0 and code_g == 0 and "WAF externo fora do repo" in out_g and '"unenforced_assumptions": 2' in out)
 
         # Modifica a.ts no disco -> deve reprovar como STALE-HASH
         (led_proj / "src" / "a.ts").write_text("export function a(x: number) { return x + 999; }\n", encoding="utf-8")
-        code, out = run(MET / "coverage_ledger.py", "verify", led_file)
+        code, out = run(MET / "coverage_ledger.py", "verify", led_file, "--allow-self-attested")
         expect("Canário M40: coverage_ledger detecta mutação pós-auditoria (STALE-HASH)",
                code == 1 and "STALE-HASH" in out)
 
@@ -1289,6 +1291,17 @@ def run_all_metric_canaries() -> tuple[int, int, list[str]]:
                not ok84 and any("EVIDENCE-UNMANIFESTED" in e or "EVIDENCE-OUTSIDE-SCOPE" in e
                                 or "ANCHOR-SIDECAR-MISSING" in e for e in errs84) and c84 == 2,
                f"verify={errs84} cli={c84}:{o84[-120:]}")
+
+        # M85: banca-v20 (F2) — ledger 100% coberto por auto-atestação sem
+        # critic_pass morre por default; só aprova com --allow-self-attested.
+        (led_proj / "src" / "a.ts").write_text(
+            "export function a(x: number) { return x + 1; }\n", encoding="utf-8")
+        c85, o85 = run(MET / "coverage_ledger.py", "verify", led_file)
+        c85b, _ = run(MET / "coverage_ledger.py", "verify", led_file,
+                      "--allow-self-attested")
+        expect("Canário M85: coverage_ledger reprova forja self-attested sem --allow-self-attested",
+               c85 == 1 and "MISSING-CRITIC" in o85 and c85b == 0,
+               f"forja={c85}:{o85[-120:]} optout={c85b}")
 
     return passed, total, reports
 

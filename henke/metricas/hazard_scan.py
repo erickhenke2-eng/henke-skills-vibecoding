@@ -194,6 +194,11 @@ _SQL_CONCAT_RE = re.compile(
     # `+ (var)` — `(` que não abre literal é suspeita.
     r"""(?ix)['"](?:\s*(?:""" + _SQL_KW_CRUD + r""")|[^'"]*?\b(?:""" + _SQL_KW_WIDE
     + r"""))[^'"]*['"]\s*\+\s*(?:[A-Za-z_$]|\((?!\s*['"]))"""
+    # banca-v20 (K2): literal SQL + literal de continuação + var —
+    # `"SELECT * FROM users" + " WHERE id = " + uid` evadia por partir o
+    # concat em dois literais.
+    r"""|['"](?:\s*(?:""" + _SQL_KW_CRUD + r""")|[^'"]*?\b(?:""" + _SQL_KW_WIDE
+    + r"""))[^'"]*['"]\s*\+\s*['"][^'"]*['"]\s*\+\s*(?:[A-Za-z_$]|\((?!\s*['"]))"""
 )
 _SQL_SPRINTF_RE = re.compile(
     r"""(?ix)\bfmt\.Sprintf\s*\(\s*['"`][^'"`]*\b(?:""" + _SQL_KW + r""")[^'"`]*%[svq]"""
@@ -341,7 +346,7 @@ _SSRF_SINK_RE = re.compile(
     r"""\b(?:fetch|axios\.(?:get|post|request)|got|requests\.(?:get|post|request)|httpx\.(?:get|post)|urlopen)\s*\(\s*(?:[+]|[A-Za-z_$][\w$.]*)"""
 )
 _SSRF_SOURCE_RE = re.compile(
-    r"\b(?:req|request)\.(?:query|params|body|headers)\b|\b(?:targetUrl|webhookUrl|callbackUrl|redirectUrl|userUrl|externalUrl|endpointUrl)\b"
+    r"\b(?:req|request)\.(?:query|params|body|headers|args|GET|form|values|data|json|cookies)\b|\b(?:targetUrl|webhookUrl|callbackUrl|redirectUrl|userUrl|externalUrl|endpointUrl)\b"
 )
 _SSRF_SAFE_RE = re.compile(
     # Decoy-token: `let whitelist;`/`let session;` não isentam (A8) —

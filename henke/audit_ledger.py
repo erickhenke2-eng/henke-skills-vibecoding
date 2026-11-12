@@ -321,8 +321,12 @@ def is_test_cmd(full_cmd: str) -> bool:
     toks = full_cmd.strip().split()
     if toks and toks[0].lower() in ("ava", "tape"):
         return True
+    # banca-v20 (F2b): `python tests/forged_runner.py` ganhava crédito de
+    # teste só por morar em tests/ — exige basename de arquivo-teste ou
+    # runner real via -m (pytest/unittest).
     return bool(re.search(
-        r"\bpython[\d.]*\s+(?:tests?[\\/]|test_\w+\.py|\w+_test\.py)",
+        r"\bpython[\d.]*\s+(?:-m\s+(?:pytest|unittest)\b|"
+        r"tests?[\\/][^\s]*test[^\s]*\.py|test_\w+\.py|\w+_test\.py)",
         full_cmd, re.IGNORECASE))
 
 

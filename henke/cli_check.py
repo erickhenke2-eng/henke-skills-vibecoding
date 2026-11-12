@@ -95,12 +95,32 @@ def _cmd_gate(gate_name: str, extra_args: list[str], repo_root: Path = Path(".")
     return res.returncode
 
 
-def _format_manifest_output(scanner_id: str, res) -> str:
+def _format_manifest_output(scanner_id: str, res, repo_root: Path) -> str:
     lines = []
     for f in res.findings:
         loc = f.get("location", "?")
         scope = f.get("scope", "")
         lines.append(f"{f.get('rule','?'):<26} {loc}  [{scope}]  {f.get('message','')}")
+    for r in res.reasons:
+        lines.append(f"note: {r}")
+    if scanner_id == "hazard":
+        # banca-v20 (F3): inventário PT-13 — supressão nunca é invisível no
+        # agregado. Standalone imprime SUPPRESSED; o check passava a mostrar
+        # só "0 finding(s)". Reconta por arquivo escaneado nesta rodada.
+        try:
+            import henke.metricas.hazard_scan as _hz
+            supp_log: list = []
+            for rel in res.scanned_files:
+                p = Path(repo_root) / rel
+                try:
+                    raw = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                _hz._extract_suppressions(raw, rel, p.suffix, supp_log)
+            for rule, path, ln, motivo in supp_log:
+                lines.append(f"SUPPRESSED {rule} {path}:{ln} — {motivo}")
+        except Exception:
+            pass
     lines.append(
         f"{len(res.scanned_files)} file(s) scanned this round, "
         f"{len(res.reused_files)} reused, {len(res.findings)} finding(s)"
@@ -571,7 +591,7 @@ def _cmd_check(
                     "gate": name,
                     "exit_code": res.exit_code,
                     "passed": passed,
-                    "output": _format_manifest_output(scanner_id, res),
+                    "output": _format_manifest_output(scanner_id, res, repo_root),
                     "cached": False,
                     "manifest": {
                         "full_scan": res.full_scan,
@@ -673,6 +693,11 @@ def _cmd_check(
                 if item["output"]:
                     for ln in item["output"].splitlines():
                         print(f"  {ln}")
+            # banca-v20 (F4): `henke check` não executa suíte de testes — o
+            # verde aqui cobre só os portões estáticos; suíte prova-se via
+            # `henke exec`. Sem a nota, verde era lido como "testes passam".
+            print("[N/A] test_execution — fora do escopo deste comando; "
+                  "prove a suíte via `henke exec`")
 
         if not staged:
             enforce_ram_limit(500.0, repo_root=repo_root)

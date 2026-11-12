@@ -480,6 +480,12 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
                 depth_truncated = True
                 reasons.append(f"max_depth_truncated:{entry.relative_path}")
                 continue
+            # banca-v20 (F5): reparse points (junction/symlink) pulavam em
+            # silêncio — divergência do standalone (os.walk segue) invisível.
+            # Todo skipped vira reason: a fronteira da varredura é declarada.
+            if entry.kind == "skipped":
+                reasons.append(f"skipped:{entry.reason}:{entry.relative_path}")
+                continue
             if entry.kind != "file" or not _eligible(spec, entry.relative_path, mod):
                 continue
             try:

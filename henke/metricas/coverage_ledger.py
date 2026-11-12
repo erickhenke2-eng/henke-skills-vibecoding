@@ -257,7 +257,7 @@ def verify_ledger(
     ledger_path: Path,
     root_override: Path | None = None,
     min_pct: float = 90.0,
-    require_critic: bool = False,
+    require_critic: bool = True,
     max_out_of_scope_pct: float = 20.0,
     max_oos_per_dir_pct: float = 20.0,
     min_dir_units: int = 3,
@@ -642,7 +642,13 @@ def main() -> None:
     p_ver.add_argument("--max-out-of-scope-pct", type=float, default=20.0, help="Teto máximo permitido de unidades fora de escopo (padrão 20.0%%)")
     p_ver.add_argument("--max-out-of-scope-per-dir-pct", dest="max_oos_per_dir_pct", type=float, default=20.0, help="Teto de out_of_scope por diretório-pai (padrão 20.0%%, dirs com >=3 unidades)")
     p_ver.add_argument("--against", type=str, default=None, help="Ref git base: arquivo criado na PR marcado out_of_scope -> NEW-FILE-OUT-OF-SCOPE")
-    p_ver.add_argument("--require-critic", action="store_true")
+    # banca-v20 (F2): crítica é o default — ledger 100% auto-declarado sem
+    # revisão independente era o falso-verde que o portão deveria caçar.
+    p_ver.add_argument("--require-critic", dest="require_critic",
+                       action="store_true", default=True)
+    p_ver.add_argument("--allow-self-attested", dest="require_critic",
+                       action="store_false",
+                       help="Opt-out: verifica sem exigir passe de crítica")
 
     p_ren = sub.add_parser("render-gaps", help="Gera a seção Markdown 'O que NÃO foi verificado'")
     p_ren.add_argument("ledger", help="Caminho do arquivo ledger.json")

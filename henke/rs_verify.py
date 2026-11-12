@@ -15,6 +15,9 @@ from henke.rs_custody import (
 from henke.rs_io import _repo_root_for_run, _safe_run_id
 
 
+_NA_CAPABLE_GATES = frozenset({"a11y_scan", "mutant_hunt"})
+
+
 def derive_run_outcome(run_data: dict, repo_root: Path | None = None) -> tuple[str, list[str]]:
     """Deriva mecanicamente ('verified' | 'failed' | 'blocked', reasons) a partir de run_data."""
     if not isinstance(run_data, dict):
@@ -196,12 +199,14 @@ def derive_run_outcome(run_data: dict, repo_root: Path | None = None) -> tuple[s
             # Normaliza por stem dos DOIS lados: 'hazard', 'hazard_scan.py' e
             # 'henke/metricas/hazard_scan.py' devem casar o mesmo portão.
             req_stem = Path(str(req)).stem
-            # exit 3 (n/a) conta como veredito produzido: o portão obrigatório
-            # rodou e concluiu honestamente "nada a verificar" neste contexto.
+            # banca-v20 (F6): exit 3 (n/a) só vale veredito para portões que
+            # PODEM ser n/a por spec (a11y_scan, mutant_hunt) — para os demais,
+            # obrigatório exige exit 0, alinhando com o fallback EXECUTAR.
+            want = (0, 3) if req_stem in _NA_CAPABLE_GATES else (0,)
             found = any(
                 (g_name == req or Path(g_name).stem == req_stem)
                 and isinstance(g_info, dict)
-                and g_info.get("exit_code") in (0, 3)
+                and g_info.get("exit_code") in want
                 for g_name, g_info in coverage_gates.items()
             )
             if not found:
