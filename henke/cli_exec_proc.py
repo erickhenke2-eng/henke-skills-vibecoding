@@ -63,10 +63,13 @@ def parse_test_runner_output(stdout: str, stderr: str) -> tuple[int, int]:
         return discovered, passed
 
     # 2. Jest / Vitest ("Tests: 1 failed, 4 passed, 5 total" ou "Tests: 5 passed")
-    m_jv = _JEST_VITEST_RE.search(combined)
+    # ÚLTIMO match (mesma regra do unittest acima): o sumário real fecha a
+    # saída — primeiro-match casava um "Tests: 999 passed" plantado no início
+    # e inflava discovered/passed.
+    m_jv = list(_JEST_VITEST_RE.finditer(combined))
     if m_jv:
-        failed = int(m_jv.group(1) or 0)
-        passed = int(m_jv.group(3) or 0)
+        failed = int(m_jv[-1].group(1) or 0)
+        passed = int(m_jv[-1].group(3) or 0)
         return passed + failed, passed
 
     # 3. Cargo test ("test result: ok. 12 passed; 0 failed")
@@ -76,17 +79,20 @@ def parse_test_runner_output(stdout: str, stderr: str) -> tuple[int, int]:
         failed = sum(int(m.group(2)) for m in m_cargo)
         return passed + failed, passed
 
-    # 4. Canários Henke ("5/5 canários aprovados")
-    m_can = _CANARY_RE.search(combined)
+    # 4. Canários Henke ("5/5 canários aprovados") — ÚLTIMO match: um
+    # "N/M canários" plantado antes do placar real não pode inflar o total.
+    m_can = list(_CANARY_RE.finditer(combined))
     if m_can:
-        passed = int(m_can.group(1))
-        total = int(m_can.group(2))
+        passed = int(m_can[-1].group(1))
+        total = int(m_can[-1].group(2))
         return total, passed
 
-    # 5. Pytest ("12 passed, 1 failed")
-    m_py = _PYTEST_RE.search(combined)
+    # 5. Pytest ("12 passed, 1 failed") — ÚLTIMO 'N passed': o sumário do
+    # pytest é a última ocorrência na saída; primeiro-match inflava com
+    # linha plantada antes dele.
+    m_py = list(_PYTEST_RE.finditer(combined))
     if m_py:
-        passed = int(m_py.group(1))
+        passed = int(m_py[-1].group(1))
         failed = sum(int(m.group(1)) for m in _PYTEST_FAIL_RE.finditer(combined))
         return passed + failed, passed
 
