@@ -279,6 +279,14 @@ def _strip_interp_argv(full_cmd: str) -> str:
         keep_until = j  # tokens toks[i:keep_until] permanecem visíveis
         while j < len(toks):
             f = toks[j]
+            if f == "-":
+                # `python -` (idem py/node/ruby/perl/php): o programa vem do
+                # STDIN — o que segue é sys.argv do script, nunca runner.
+                # Sem isto, `python - -m pytest` deixava '-m pytest' visível
+                # e mintava crédito para um programa arbitrário do stdin.
+                j += 1
+                keep_until = j
+                break
             if f in _EVAL_FLAG.get(kind, set()):
                 j += 2  # flag eval + payload: some tudo (flag, código, argv)
                 keep_until = i + 1
