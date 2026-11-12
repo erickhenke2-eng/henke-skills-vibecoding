@@ -1343,7 +1343,7 @@ _SKIP_DECO_NAMES = frozenset({"skip", "xfail", "expectedFailure"})
 _SKIPCOND_DECO_NAMES = frozenset({"skipif", "skipIf", "skipUnless"})
 
 
-def _deco_is_skip(d) -> bool:
+def _deco_is_skip(d, consts=None) -> bool:
     """True quando o decorator é um skip/xfail/expectedFailure — por nome
     (`@skip`, `@expectedFailure`) ou por atributo (`@unittest.skip`,
     `@pytest.mark.skip`, `@pytest.mark.xfail`).
@@ -1368,7 +1368,7 @@ def _deco_is_skip(d) -> bool:
         if not isinstance(d, ast.Call) or not d.args:
             # `@skipif` sem condição visível → trata como skip incondicional.
             return last != "skipUnless"
-        cond = _fold_dead(d.args[0])
+        cond = _fold_dead(d.args[0], consts)
         if cond is _UNKNOWN:
             return False  # condicional dinâmico — pode rodar → conta como teste
         return bool(cond) if last != "skipUnless" else not bool(cond)
@@ -1386,11 +1386,69 @@ def _pytest_mark_name(d) -> str:
     return parts[0] if parts else ""
 
 
-def _module_collection_skip(tree) -> bool:
+def _module_name_nodes(tree):
+    """`NAME = <node>` de escopo de módulo — resolve `pytestmark = MARKS` e
+    `parametrize("x", ARGS)` que apontam para um literal indireto (banca-v20r2)."""
+    nodes = {}
+    for st in tree.body:
+        if isinstance(st, ast.Assign):
+            for t in st.targets:
+                if isinstance(t, ast.Name):
+                    nodes[t.id] = st.value
+        elif isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name) \
+                and st.value is not None:
+            nodes[st.target.id] = st.value
+    return nodes
+
+
+def _pytestmark_values(st, name_nodes):
+    """Valores (AST) de uma atribuição a `pytestmark` — Assign direto,
+    AnnAssign (`pytestmark: list = ...`) e `globals()["pytestmark"] = ...`."""
+    val = None
+    if isinstance(st, ast.Assign):
+        hit = False
+        for t in st.targets:
+            if isinstance(t, ast.Name) and t.id == "pytestmark":
+                hit = True
+            elif isinstance(t, ast.Subscript) and isinstance(t.value, ast.Call) \
+                    and isinstance(t.value.func, ast.Name) and t.value.func.id == "globals" \
+                    and isinstance(t.slice, ast.Constant) and t.slice.value == "pytestmark":
+                hit = True
+        if hit:
+            val = st.value
+    elif isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name) \
+            and st.target.id == "pytestmark" and st.value is not None:
+        val = st.value
+    if val is None:
+        return []
+    if isinstance(val, ast.Name):
+        val = name_nodes.get(val.id, val)
+    return val.elts if isinstance(val, (ast.List, ast.Tuple)) else [val]
+
+
+def _skip_pytestmark_present(stmts, consts, name_nodes):
+    """True quando `pytestmark = <skip/xfail/skipif-const>` aparece nas stmts."""
+    for st in stmts:
+        for m in _pytestmark_values(st, name_nodes):
+            name = _pytest_mark_name(m)
+            if name in ("skip", "xfail"):
+                return True
+            if name in ("skipif", "skipIf"):
+                if not isinstance(m, ast.Call) or not m.args:
+                    return True
+                c = _fold_dead(m.args[0], consts)
+                if c is not _UNKNOWN and bool(c):
+                    return True
+    return False
+
+
+def _module_collection_skip(tree, consts=None, name_nodes=None) -> bool:
     """Skip de COLEÇÃO (banca v20 F1): `pytestmark = pytest.mark.skip*` ou
     `pytest.skip(..., allow_module_level=True)` em qualquer ponto do escopo do
     módulo — o pytest nunca executa nenhuma função do arquivo, mas o scanner
     as contava como auditadas (verde sobre zero asserções executadas)."""
+    name_nodes = name_nodes or _module_name_nodes(tree)
+
     def _walk(stmts):
         for st in stmts:
             if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -1400,43 +1458,64 @@ def _module_collection_skip(tree) -> bool:
                 if isinstance(ch, ast.stmt):
                     yield from _walk([ch])
     for st in _walk(tree.body):
-        if isinstance(st, ast.Assign):
-            for t in st.targets:
-                if isinstance(t, ast.Name) and t.id == "pytestmark":
-                    marks = st.value.elts if isinstance(st.value, (ast.List, ast.Tuple)) else [st.value]
-                    for m in marks:
-                        name = _pytest_mark_name(m)
-                        if name in ("skip", "xfail"):
-                            return True
-                        if name in ("skipif", "skipIf"):
-                            if not isinstance(m, ast.Call) or not m.args:
-                                return True
-                            c = _fold_dead(m.args[0])
-                            if c is not _UNKNOWN and bool(c):
-                                return True
-        elif isinstance(st, ast.Expr) and isinstance(st.value, ast.Call):
+        if _skip_pytestmark_present([st], consts, name_nodes):
+            return True
+        if isinstance(st, ast.Expr) and isinstance(st.value, ast.Call):
             if _pytest_mark_name(st.value) == "skip":
                 for kw in st.value.keywords:
                     if kw.arg == "allow_module_level":
-                        c = _fold_dead(kw.value)
+                        c = _fold_dead(kw.value, consts)
                         if c is not _UNKNOWN and bool(c):
                             return True
+                # banca-v20r2: `pytest.skip("m", True)` — allow_module_level
+                # é o 2º posicional na assinatura real do pytest, não keyword-only.
+                if len(st.value.args) >= 2:
+                    c = _fold_dead(st.value.args[1], consts)
+                    if c is not _UNKNOWN and bool(c):
+                        return True
     return False
 
 
-def _parametrize_empty(fn) -> bool:
+def _class_collection_skips(tree, consts, name_nodes):
+    """Funções de teste dentro de classe com `pytestmark = <skip>` — pytest
+    aplica o mark da classe a todos os métodos (banca-v20r2 V1)."""
+    skipped = []
+
+    def _walk(node):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, ast.ClassDef):
+                if _skip_pytestmark_present(ch.body, consts, name_nodes):
+                    for sub in ast.walk(ch):
+                        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            skipped.append(sub)
+                else:
+                    _walk(ch)
+            elif not isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                _walk(ch)
+    _walk(tree)
+    return skipped
+
+
+def _parametrize_empty(fn, consts=None, name_nodes=None) -> bool:
     """`@pytest.mark.parametrize(nomes, [])` — coleção gera zero casos:
-    pytest reporta skipped e nenhuma asserção executa (banca v20 F1)."""
+    pytest reporta skipped e nenhuma asserção executa (banca v20 F1).
+    banca-v20r2: kwargs `argvalues=` e nome indireto `parametrize("x", ARGS)`
+    com `ARGS = []` também geram zero casos."""
     for d in fn.decorator_list:
-        if _pytest_mark_name(d) == "parametrize" and isinstance(d, ast.Call) \
-                and len(d.args) >= 2:
-            v = d.args[1]
-            if isinstance(v, (ast.List, ast.Tuple)) and not v.elts:
-                return True
+        if _pytest_mark_name(d) != "parametrize" or not isinstance(d, ast.Call):
+            continue
+        v = d.args[1] if len(d.args) >= 2 else None
+        for kw in d.keywords:
+            if kw.arg == "argvalues":
+                v = kw.value
+        if isinstance(v, ast.Name) and name_nodes:
+            v = name_nodes.get(v.id, v)
+        if isinstance(v, (ast.List, ast.Tuple)) and not v.elts:
+            return True
     return False
 
 
-def test_functions(node, by_class, class_consts=None):
+def test_functions(node, by_class, class_consts=None, module_consts=None):
     """Every (test function, enclosing class constants) reachable at module scope.
 
     pytest collects a `def` que uma guarda de versão, um `try/except
@@ -1455,14 +1534,14 @@ def test_functions(node, by_class, class_consts=None):
     for child in _live_stmt_children(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if (TEST_FUNC.match(child.name)
-                    and not any(_deco_is_skip(d) for d in child.decorator_list)):
+                    and not any(_deco_is_skip(d, module_consts) for d in child.decorator_list)):
                 yield child, class_consts
         elif isinstance(child, ast.ClassDef):
             # classe inteira marcada como skip → nenhum método roda.
-            if not any(_deco_is_skip(d) for d in child.decorator_list):
-                yield from test_functions(child, by_class, by_class.get(child.name, {}))
+            if not any(_deco_is_skip(d, module_consts) for d in child.decorator_list):
+                yield from test_functions(child, by_class, by_class.get(child.name, {}), module_consts)
         elif not isinstance(child, ast.Lambda):
-            yield from test_functions(child, by_class, class_consts)
+            yield from test_functions(child, by_class, class_consts, module_consts)
 
 
 def file_key(p):
@@ -1640,11 +1719,14 @@ def scan_test_file(path: Path, helpers):
         return None
     b = bindings(tree)
     module_consts = constant_bindings(tree.body)
+    name_nodes = _module_name_nodes(tree)
     scanned, findings = 0, []
-    mod_skip = _module_collection_skip(tree)
-    for fn, class_consts in test_functions(tree, class_constants(tree)):
+    mod_skip = _module_collection_skip(tree, module_consts, name_nodes)
+    skipped_fns = set() if mod_skip else {
+        id(fx) for fx in _class_collection_skips(tree, module_consts, name_nodes)}
+    for fn, class_consts in test_functions(tree, class_constants(tree), module_consts=module_consts):
         scanned += 1
-        if mod_skip or _parametrize_empty(fn):
+        if mod_skip or id(fn) in skipped_fns or _parametrize_empty(fn, module_consts, name_nodes):
             findings.append(("COLLECTION-SKIP", f, fn,
                              "pytest never executes it — collection-level skip"))
             continue

@@ -575,6 +575,21 @@ def verify_ledger(
                 "rationale>=20 chars) não-placeholder")
     has_critic = (len(critic_passes) > 0
                   and all(_critic_entry_valid(cp) for cp in critic_passes))
+    # banca-v20r2 (V2): o crítico não pode ser o próprio autor dos checks —
+    # `{"agent": "self"}` do mesmo agent_id que assinou as units mintava
+    # "independência" por forma JSON. (Fronteira documentada: renome ainda é
+    # atestável — independência real exige evidência externa ao ledger.)
+    if has_critic and (profile == "deep" or require_critic):
+        check_agents = {str(c.get("agent_id", "")) for u in units
+                        for c in (u.get("checks") or []) if isinstance(c, dict)}
+        for cp in critic_passes:
+            cagents = _critic_field_values(cp, _CRITIC_AGENT_FIELDS)
+            if any(v in check_agents for v in cagents):
+                errors.append(
+                    "CRITIC-NOT-INDEPENDENT: agente do crítico coincide com o "
+                    "autor dos checks — a regra dos dois agentes exige "
+                    "identidade distinta")
+                break
     outcome = "verified" if not errors else "failed"
     if not errors and (profile == "deep" or require_critic) and not has_critic:
         outcome = "partial"

@@ -326,7 +326,8 @@ def is_test_cmd(full_cmd: str) -> bool:
     # runner real via -m (pytest/unittest).
     return bool(re.search(
         r"\bpython[\d.]*\s+(?:-m\s+(?:pytest|unittest)\b|"
-        r"tests?[\\/][^\s]*test[^\s]*\.py|test_\w+\.py|\w+_test\.py)",
+        r"tests?[\\/](?:[^\s\\/]*[\\/])*(?:test_\w*|\w+_test)\.py|"
+        r"test_\w+\.py|\w+_test\.py)",
         full_cmd, re.IGNORECASE))
 
 

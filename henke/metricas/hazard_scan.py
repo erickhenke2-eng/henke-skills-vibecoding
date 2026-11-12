@@ -203,6 +203,28 @@ _SQL_CONCAT_RE = re.compile(
 _SQL_SPRINTF_RE = re.compile(
     r"""(?ix)\bfmt\.Sprintf\s*\(\s*['"`][^'"`]*\b(?:""" + _SQL_KW + r""")[^'"`]*%[svq]"""
 )
+_SQL_JOIN_RE = re.compile(
+    # "".join(["SELECT ...", var]) — lista com literal SQL + elemento nome.
+    r"""(?is)\.join\s*\(\s*\[[^\]]*['"][^'"]*\b(?:""" + _SQL_KW
+    + r""")\b[^'"]*['"][^\]]*?,\s*[\w(]"""
+)
+
+
+def _merge_string_lits(src: str) -> str:
+    """banca-v20r2 (V9): funde `"a" + "b"` → `"ab"` e desembrulha `("a")` →
+    `"a"` para as regexes SQL enxergarem concat partido em N literais.
+    Newlines consumidas pelo `+` são reemitidas — `line:` segue correto."""
+    def _m(m):
+        if m.group(1) != m.group(3):
+            return m.group(0)
+        merged = m.group(1) + m.group(2) + m.group(4) + m.group(1)
+        return merged + "\n" * m.group(0).count("\n")
+    prev = None
+    while prev != src:
+        prev = src
+        src = re.sub(r"(['\"])([^'\"]*)\1\s*\+\s*(['\"])([^'\"]*)\3", _m, src)
+        src = re.sub(r"\(\s*((['\"])[^'\"]*\2)\s*\)", r"\1", src)
+    return src
 
 # Regras de Pass 1 (código mascarado)
 _PY_SHELL_RE = re.compile(
@@ -346,13 +368,23 @@ _SSRF_SINK_RE = re.compile(
     r"""\b(?:fetch|axios\.(?:get|post|request)|got|requests\.(?:get|post|request)|httpx\.(?:get|post)|urlopen)\s*\(\s*(?:[+]|[A-Za-z_$][\w$.]*)"""
 )
 _SSRF_SOURCE_RE = re.compile(
-    r"\b(?:req|request)\.(?:query|params|body|headers|args|GET|form|values|data|json|cookies)\b|\b(?:targetUrl|webhookUrl|callbackUrl|redirectUrl|userUrl|externalUrl|endpointUrl)\b"
+    # banca-v20r2 (V8): fontes por framework — Flask (args/form/values/files/
+    # get_json/view_args/data/json/cookies), Django (GET/POST/META/body),
+    # Starlette/DRF (query_params/path_params), aiohttp (match_info).
+    r"\b(?:req|request)\.(?:query|params|body|headers|args|GET|POST|form|values|"
+    r"data|json|cookies|files|META|view_args|query_params|path_params|"
+    r"match_info|get_json|get_data|content|text)\b"
+    r"|\b(?:targetUrl|webhookUrl|callbackUrl|redirectUrl|userUrl|externalUrl|endpointUrl)\b"
 )
 _SSRF_SAFE_RE = re.compile(
     # Decoy-token: `let whitelist;`/`let session;` não isentam (A8) —
     # validadores contam por CHAMADA ou uso concreto.
+    # banca-v20r2 (N1): `allowedHosts = None`, `x = h.hostname` ou
+    # `t = ipaddress.ip_address` no corpo silenciavam TODOS os SSRF da função
+    # — bare-words viraram uso concreto (membership/compare/call).
     r"\b(?:new\s+URL|urlparse|urlsplit|allowlist|whitelist|isPrivateIP)\s*\("
-    r"|\ballowedHosts\b|\bipaddress\.|\.hostname\b"
+    r"|\bin\s+\w*[Aa]llow\w*\b|\ballowedHosts\s*[\[(.]"
+    r"|\bipaddress\.\w+\s*\(|\.hostname\s*(?:==|!=|\bin\b|\bis\b|[),\]])"
 )
 
 _IDOR_SINK_RE = re.compile(
@@ -1107,10 +1139,27 @@ def scan_file(path: Path, extra_exts: set | None = None,
         return 1, findings, False
 
     sql_pats = (_SQL_INTERP_PY_RE, _SQL_CONCAT_RE) if is_python else (_SQL_INTERP_JS_RE, _SQL_CONCAT_RE, _SQL_SPRINTF_RE)
+    # banca-v20r2 (V9): normaliza concat literal-literal e literal parentizado
+    # ANTES das regexes — `"SELECT" + " * FROM u"`, `("...")+var` e cadeias de
+    # N literais viram 1 literal. Preserva a contagem de linhas do original.
+    sql_src = _merge_string_lits(no_comments)
     for sp in sql_pats:
-        for m in sp.finditer(no_comments):
-            lineno = no_comments.count("\n", 0, m.start()) + 1
+        for m in sp.finditer(sql_src):
+            lineno = sql_src.count("\n", 0, m.start()) + 1
             add("SQL-CONCAT", lineno, f"line:{lineno}", "SQL query built via string interpolation/concatenation")
+    # var-first: nome atrelado a literal SQL reutilizado em concat —
+    # `q = "SELECT..."; execute(q + " WHERE " + uid)`.
+    _sql_names = {m.group(1) for m in re.finditer(
+        r"""(?im)\b(\w+)\s*=\s*['"][^'"]*\b(?:""" + _SQL_KW + r""")\b""", sql_src)}
+    if _sql_names:
+        _sql_var_re = re.compile(r"\b(?:" + "|".join(map(re.escape, _sql_names)) + r")\s*\+")
+        for m in _sql_var_re.finditer(sql_src):
+            lineno = sql_src.count("\n", 0, m.start()) + 1
+            add("SQL-CONCAT", lineno, f"line:{lineno}", "SQL query built via string interpolation/concatenation")
+    # "".join(["SELECT ...", var]) — join concatena os elementos da lista.
+    for m in _SQL_JOIN_RE.finditer(sql_src):
+        lineno = sql_src.count("\n", 0, m.start()) + 1
+        add("SQL-CONCAT", lineno, f"line:{lineno}", "SQL query built via string interpolation/concatenation")
 
     if legacy_file_scope:
         if not _IMDS_SAFE_RE.search(no_comments):

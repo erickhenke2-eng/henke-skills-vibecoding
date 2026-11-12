@@ -110,7 +110,9 @@ def _format_manifest_output(scanner_id: str, res, repo_root: Path) -> str:
         try:
             import henke.metricas.hazard_scan as _hz
             supp_log: list = []
-            for rel in res.scanned_files:
+            # banca-v20r2 (V4): reutilizados pelo manifesto carregam as mesmas
+            # supressões — inventário por rodada cobre scanned + reused.
+            for rel in list(res.scanned_files) + list(res.reused_files):
                 p = Path(repo_root) / rel
                 try:
                     raw = p.read_text(encoding="utf-8", errors="replace")
@@ -119,8 +121,8 @@ def _format_manifest_output(scanner_id: str, res, repo_root: Path) -> str:
                 _hz._extract_suppressions(raw, rel, p.suffix, supp_log)
             for rule, path, ln, motivo in supp_log:
                 lines.append(f"SUPPRESSED {rule} {path}:{ln} — {motivo}")
-        except Exception:
-            pass
+        except Exception as exc:
+            lines.append(f"note: suppression_scan_error:{type(exc).__name__}")
     lines.append(
         f"{len(res.scanned_files)} file(s) scanned this round, "
         f"{len(res.reused_files)} reused, {len(res.findings)} finding(s)"

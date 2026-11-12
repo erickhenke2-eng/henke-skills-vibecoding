@@ -66,6 +66,60 @@ class TestF1CollectionSkips(unittest.TestCase):
         self.assertEqual(n, 1)
         self.assertEqual(finds, [])
 
+    # --- banca-v20r2 (re-auditoria SWE-2): bypasses adjacentes do F1 ---
+
+    def test_skipif_const_de_modulo(self):
+        n, finds = self._scan(
+            "def compute():\n    return 5\nimport pytest\nCOND = True\n"
+            "pytestmark = pytest.mark.skipif(COND)\n"
+            "def test_d():\n    r = compute()\n    assert r == 5\n")
+        self.assertTrue(any(f[0] == "COLLECTION-SKIP" for f in finds))
+
+    def test_pytestmark_via_variavel(self):
+        n, finds = self._scan(
+            "def compute():\n    return 5\nimport pytest\n"
+            "MARKS = [pytest.mark.skipif(True)]\npytestmark = MARKS\n"
+            "def test_e():\n    r = compute()\n    assert r == 5\n")
+        self.assertTrue(any(f[0] == "COLLECTION-SKIP" for f in finds))
+
+    def test_pytest_skip_posicional(self):
+        n, finds = self._scan(
+            "def compute():\n    return 5\nimport pytest\n"
+            "pytest.skip('m', True)\n"
+            "def test_f():\n    r = compute()\n    assert r == 5\n")
+        self.assertTrue(any(f[0] == "COLLECTION-SKIP" for f in finds))
+
+    def test_pytestmark_escopo_classe(self):
+        n, finds = self._scan(
+            "def compute():\n    return 5\nimport pytest\n"
+            "class T:\n    pytestmark = pytest.mark.skip(reason='x')\n"
+            "    def test_n(self):\n        r = compute()\n        assert r == 5\n")
+        self.assertTrue(any(f[0] == "COLLECTION-SKIP" for f in finds))
+
+    def test_parametrize_kwargs_e_nomeado(self):
+        n, finds = self._scan(
+            "def compute():\n    return 5\nimport pytest\n"
+            "@pytest.mark.parametrize(argnames='x', argvalues=[])\n"
+            "def test_q(x):\n    r = compute()\n    assert r == 5\n")
+        self.assertTrue(any(f[0] == "COLLECTION-SKIP" for f in finds))
+        n, finds = self._scan(
+            "def compute():\n    return 5\nimport pytest\nARGS = []\n"
+            "@pytest.mark.parametrize('x', ARGS)\n"
+            "def test_r(x):\n    r = compute()\n    assert r == 5\n")
+        self.assertTrue(any(f[0] == "COLLECTION-SKIP" for f in finds))
+
+    def test_globals_e_annassign_pytestmark(self):
+        n, finds = self._scan(
+            "def compute():\n    return 5\nimport pytest\n"
+            "globals()['pytestmark'] = pytest.mark.skip(reason='x')\n"
+            "def test_s():\n    r = compute()\n    assert r == 5\n")
+        self.assertTrue(any(f[0] == "COLLECTION-SKIP" for f in finds))
+        n, finds = self._scan(
+            "def compute():\n    return 5\nimport pytest\n"
+            "pytestmark: list = [pytest.mark.skip(reason='x')]\n"
+            "def test_t():\n    r = compute()\n    assert r == 5\n")
+        self.assertTrue(any(f[0] == "COLLECTION-SKIP" for f in finds))
+
 
 class TestF2CoverageForgery(unittest.TestCase):
     """F2: ledger 100% 'covered' por auto-atestação reprova sem opt-in."""
@@ -91,6 +145,28 @@ class TestF2CoverageForgery(unittest.TestCase):
                              "--allow-self-attested")
             self.assertEqual(code, 0, out)
 
+    def test_self_critic_nao_e_independente(self):
+        # banca-v20r2 (V2): {"agent":"self"} igual ao autor dos checks mintava
+        # a "independência" — forma JSON não é vínculo dos dois agentes.
+        with tempfile.TemporaryDirectory() as td:
+            proj = Path(td) / "p"
+            (proj / "src").mkdir(parents=True)
+            (proj / "src" / "a.ts").write_text("export const a = 1;\n", encoding="utf-8")
+            led = Path(td) / "l.json"
+            self.assertEqual(_run(MET / "coverage_ledger.py", "init",
+                                  "--root", str(proj), "--out", str(led))[0], 0)
+            d = json.loads(led.read_text(encoding="utf-8"))
+            for u in d["units"]:
+                u["status"] = "covered"
+                u["checks"] = [{"agent_id": "self", "method": "source",
+                                "invariant": "x", "result": "pass"}]
+            d["critic_passes"] = [{"agent": "self", "round": 1,
+                                   "scope": "all units"}]
+            led.write_text(json.dumps(d), encoding="utf-8")
+            code, out = _run(MET / "coverage_ledger.py", "verify", str(led))
+            self.assertEqual(code, 1, out)
+            self.assertIn("CRITIC-NOT-INDEPENDENT", out)
+
 
 class TestF2bForgedRunner(unittest.TestCase):
     """F2b: 'python tests/<qualquer>.py' não minta evidência de teste."""
@@ -98,6 +174,12 @@ class TestF2bForgedRunner(unittest.TestCase):
     def test_forged_runner_rejected(self):
         self.assertFalse(is_test_cmd("python tests/forged_runner.py"))
         self.assertFalse(is_test_cmd("python tests/helper.py"))
+
+    def test_substring_nao_minta(self):
+        # banca-v20r2: 'test' como substring (conTEST/laTEST/atTEST) mintava.
+        for cmd in ("python tests/contest_runner.py", "python tests/latest.py",
+                    "python tests/attest_x.py", "python tests/detest.py"):
+            self.assertFalse(is_test_cmd(cmd), cmd)
 
     def test_real_test_files_and_frameworks_ok(self):
         self.assertTrue(is_test_cmd("python tests/test_foo.py"))
@@ -135,6 +217,21 @@ class TestKiroRegexGaps(unittest.TestCase):
         self.assertRegex('request.args["url"]', hazard_scan._SSRF_SOURCE_RE)
         self.assertRegex('request.GET.get("u")', hazard_scan._SSRF_SOURCE_RE)
 
+    def test_ssrf_fontes_multiframework(self):
+        # banca-v20r2 (V8/N1): POST/get_json/query_params/view_args/META/
+        # match_info evadiam; decoys silenciavam a função inteira.
+        for src in ('request.POST["u"]', 'request.get_json()["url"]',
+                    'request.query_params["u"]', 'request.match_info["u"]',
+                    'request.view_args["u"]', 'request.META["HTTP_X"]'):
+            self.assertRegex(src, hazard_scan._SSRF_SOURCE_RE, src)
+        for decoy in ('allowedHosts = None', 'x = h.hostname',
+                      't = ipaddress.ip_address'):
+            self.assertIsNone(hazard_scan._SSRF_SAFE_RE.search(decoy), decoy)
+        for real in ('if u.hostname in allowedHosts:',
+                     'if parsed.hostname == "x":',
+                     'ipaddress.ip_address(h)'):
+            self.assertRegex(real, hazard_scan._SSRF_SAFE_RE, real)
+
     def test_sqli_split_literal(self):
         self.assertRegex(
             'execute("SELECT * FROM users" + " WHERE id = " + uid)',  # hazard-ok: SQL-CONCAT — PoC de regex em fixture, nunca executado
@@ -143,6 +240,27 @@ class TestKiroRegexGaps(unittest.TestCase):
         self.assertIsNone(
             hazard_scan._SQL_CONCAT_RE.search(
                 'execute("SELECT * FROM users WHERE id = %s", (uid,))'))
+
+    def test_sqli_formas_adjacentes(self):
+        # banca-v20r2 (V9): literal parentizado, N literais, CRUD partido,
+        # join — todos evadiam a regex literal.
+        evade = [
+            'execute(("SELECT * FROM users WHERE id = ") + uid)',  # hazard-ok: SQL-CONCAT — PoC de regex em fixture, nunca executado
+            'execute("SELECT * FROM u" + " WHERE a=" + " AND b=" + uid)',  # hazard-ok: SQL-CONCAT — PoC de regex em fixture, nunca executado
+            'execute("SELECT" + " * FROM users" + " WHERE id=" + uid)',  # hazard-ok: SQL-CONCAT — PoC de regex em fixture, nunca executado
+            'execute("".join(["SELECT * FROM users WHERE id = ", uid]))',  # hazard-ok: SQL-CONCAT — PoC de regex em fixture, nunca executado
+        ]
+        for s in evade:
+            merged = hazard_scan._merge_string_lits(s)
+            hit = hazard_scan._SQL_CONCAT_RE.search(merged) or \
+                hazard_scan._SQL_JOIN_RE.search(merged)
+            self.assertIsNotNone(hit, s)
+        # var-first: nome atrelado a literal SQL reutilizado em concat
+        src = 'q = "SELECT * FROM users"\nexecute(q + " WHERE id=" + uid)'  # hazard-ok: SQL-CONCAT — PoC de regex em fixture, nunca executado
+        names = {m.group(1) for m in __import__("re").finditer(
+            r"\b(\w+)\s*=\s*['\"][^'\"]*\b(?:" + hazard_scan._SQL_KW + r")\b",
+            hazard_scan._merge_string_lits(src))}
+        self.assertIn("q", names)
 
 
 class TestF5SkippedDeclared(unittest.TestCase):
