@@ -682,6 +682,10 @@ def _cmd_check(
                 "passed": overall_ok,
                 "staged": staged,
                 "gates": results,
+                # banca-v20r2 (N3): consumidor JSON lia "passed":true como
+                # "suíte verificada" — mesmo marcador n/a do modo texto.
+                "test_execution": {"na": True,
+                    "note": "fora do escopo deste comando; prove a suíte via `henke exec`"},
             }, ensure_ascii=False, indent=2))
         else:
             for item in results:

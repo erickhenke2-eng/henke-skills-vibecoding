@@ -1620,7 +1620,7 @@ def collect(paths, allow_roots=()):
             found, walked = [], set()
             for root, dirs, names in os.walk(p, followlinks=True, onerror=halt_on_walk_error):
                 # [HENKE-PATCH] poda de diretórios mortos (node_modules, target, dist...)
-                dirs[:] = [d for d in dirs if d not in _pg.PRUNE_DIRS]
+                dirs[:] = [d for d in dirs if d not in _pg.MANIFEST_PRUNE]
                 try:
                     real = os.path.realpath(root)
                 except OSError:

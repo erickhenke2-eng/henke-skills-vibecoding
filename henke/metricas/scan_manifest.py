@@ -37,6 +37,7 @@ from typing import Literal
 
 from henke.state_paths import cache_root, sanitized_child_env
 import henke.winpath as winpath
+import henke.metricas.polyglot as _pg
 
 _SCHEMA_VERSION = 1
 _GRAPH_VERSION = 1
@@ -461,12 +462,9 @@ def run_incremental_scan(repo_root: Path, spec: ScannerSpec, *,
         files_now: dict[str, dict] = {}
         unstable = False
         depth_truncated = False
-        for entry in winpath.iter_tree(repo, prune_names=frozenset({
-            ".git", ".hg", "node_modules", "dist", "build", "out", "target",
-            "vendor", ".venv", "venv", "coverage", ".next", ".nuxt",
-            ".svelte-kit", ".turbo", "__pycache__", ".pytest_cache",
-            ".mypy_cache", ".ruff_cache", ".henke",
-        })):
+        # banca-v20r2 (N4): a poda vem da fonte única _pg.MANIFEST_PRUNE —
+        # standalone (os.walk) e manifesto (iter_tree) enxergam a mesma árvore.
+        for entry in winpath.iter_tree(repo, prune_names=_pg.MANIFEST_PRUNE):
             if entry.kind == "error":
                 unstable = True
                 reasons.append(f"tree_error:{entry.relative_path}:{entry.reason}")

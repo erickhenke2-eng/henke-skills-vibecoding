@@ -55,6 +55,11 @@ _DOT_PRUNE = {
     ".pnpm-store", ".cache", ".agents", ".claude", ".cursor",
 }
 
+# banca-v20r2 (N4): fonte única de poda — manifesto (winpath.iter_tree),
+# assertless standalone (os.walk) e iter_source_files devem ver a MESMA
+# árvore. Sets divergentes escondiam testes em `.pytest_cache/` etc.
+MANIFEST_PRUNE = frozenset(PRUNE_DIRS | _DOT_PRUNE)
+
 
 def _is_reparse_dir(p: Path) -> bool:
     """Junction/symlink/reparse — portável py3.11+ (Path.is_junction é 3.12+).
