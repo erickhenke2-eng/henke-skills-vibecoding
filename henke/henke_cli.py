@@ -170,6 +170,13 @@ def main(argv: list[str] | None = None) -> int:
         ledger_p = ns.ledger.resolve() if ns.ledger else (sdir / "LEDGER.json")
         exec_log_p = ns.exec_log.resolve() if ns.exec_log else (sdir / "exec_log.jsonl")
         mode = (ns.mode or os.environ.get("HENKE_MODE") or "").strip().upper()
+        _valid_modes = {"ANALISAR", "PLANEJAR", "EXECUTAR", "EXECUTAR_COMPOUND"}
+        if mode and mode not in _valid_modes:
+            # HENKE_MODE com typo não pode desligar enforcement silenciosamente
+            # (fail-closed; --mode já é validado por choices no argparse).
+            print(f"ERRO: modo desconhecido '{mode}' — esperado um de "
+                  f"{sorted(_valid_modes)}.", file=sys.stderr)
+            return 2
         if mode == "ANALISAR":
             # F-07 (enforced): ANALISAR é read-only contra o objeto auditado
             # (AGENTS.md §2 / PROTOCOLO §2). A evidência pertence a diretório
@@ -178,9 +185,15 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     p.resolve().relative_to(repo_root)
                     return True
-                except (ValueError, OSError):
+                except ValueError:
                     return False
-            _bad = [str(p) for p in (ledger_p, exec_log_p) if _inside_repo(p)]
+                except OSError:
+                    # caminho irresolúvel não é "fora" — assume dentro (fail-closed)
+                    return True
+            # sdir também precisa ser externo: exec grava events.jsonl (e
+            # qualquer consumidor de state_dir) sob ele — flags externas de
+            # ledger/exec-log sozinhas não bastam.
+            _bad = [str(p) for p in (sdir, ledger_p, exec_log_p) if _inside_repo(p)]
             if _bad:
                 print("ERRO: modo ANALISAR não pode gravar evidência dentro "
                       "do repo auditado:", file=sys.stderr)

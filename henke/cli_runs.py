@@ -12,6 +12,7 @@ from henke.cli_kernel import (
     SCRIPTS_DIR,
     _scrub_env,
 )
+from henke.rs_custody import human_approval_of
 
 
 
@@ -98,7 +99,7 @@ def _cmd_list_runs(repo_root: Path, as_json: bool = False) -> int:
             "archetype": str(data.get("archetype") or "não registrado"),
             "outcome_derived": _derive_outcome_safe(rp, data),
             "outcome_declared": str(data.get("outcome") or "não registrado"),
-            "human_approval": str(data.get("human_approval") or data.get("review_status") or "não registrado"),
+            "human_approval": str(human_approval_of(data) or "não registrado"),
             "review_status": str(data.get("review_status") or "não registrado"),
             "updated_at": str(data.get("updated_at") or "não registrado"),
         })

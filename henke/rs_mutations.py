@@ -270,10 +270,14 @@ def record_gate(
         # F-04 (eixo 2): o veredito do revisor Goldfish isolado chega como
         # portão físico — `goldfish_review` com tríade de evidência e exit 0
         # certifica a run. Atestação manual (sem evidência) NUNCA certifica.
-        if (Path(str(gate_name)).stem == "goldfish_review"
-                and int(exit_code) == 0 and evidence_sha is not None
-                and not manual):
-            data["review_status"] = "goldfish_certified"
+        if Path(str(gate_name)).stem == "goldfish_review":
+            if (int(exit_code) == 0 and evidence_sha is not None
+                    and not manual):
+                data["review_status"] = "goldfish_certified"
+            else:
+                # re-gravação sem a tríade revoga a certificação — senão o
+                # status ficaria 'certified' com o portão vermelho.
+                data["review_status"] = "goldfish_unavailable"
         derived, reasons = derive_run_outcome(data)
         data["outcome"] = derived
         data["reasons"] = reasons

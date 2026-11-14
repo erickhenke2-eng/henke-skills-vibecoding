@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import secrets
 import sys
 from henke.cli_kernel import (
     _atomic_write_json,
@@ -56,7 +57,8 @@ def _cmd_goldfish(
                         derived, reasons = derive_run_outcome(data)
                         data["outcome"] = derived
                         data["reasons"] = reasons
-                    except (ImportError, ValueError, OSError) as exc:
+                    except (ImportError, ValueError, OSError, TypeError,
+                            KeyError, AttributeError) as exc:
                         # V-02: engolir Exception apagava o porquê — registra a
                         # falha de derivação no próprio registro da run.
                         data["outcome_derivation_error"] = (
@@ -210,6 +212,10 @@ def _cmd_setup(target_dir: Path) -> int:
         ),
         "CONFIG.json": json.dumps({
             "versao_protocolo": "5.0",
+            # nonce único por repo: âncora cfg: do repo_identity usa este valor —
+            # dois projetos inicializados do mesmo stub não colidem, e editar
+            # stack/economia não muda a identidade (estável a edições).
+            "identidade_repo": secrets.token_hex(8),
             "stack": stack_txt,
             "economia_tokens": {
                 "caveman": "auto",

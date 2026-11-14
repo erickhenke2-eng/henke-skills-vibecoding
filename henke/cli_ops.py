@@ -45,7 +45,9 @@ def _cmd_audit_copy(repo_root: Path, out_dir: Path) -> int:
             continue
         rel = p.relative_to(out_dir).as_posix()
         h.update(rel.encode("utf-8") + b"\0" + str(p.stat().st_size).encode() + b"\0")
-        h.update(p.read_bytes())
+        with open(p, "rb") as _f:  # chunks: .git pode carregar packfiles de GB
+            for _chunk in iter(lambda: _f.read(1 << 20), b""):
+                h.update(_chunk)
         count += 1
     tree_sha = h.hexdigest()
     manifest = {

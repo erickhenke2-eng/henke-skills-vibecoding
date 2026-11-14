@@ -336,7 +336,7 @@ def render_run_report(repo_root: Path, run_ref: str) -> str:
         )
     if review_status == "goldfish_unavailable":
         nao_verificado.append("certificação Goldfish indisponível (revisão isolada não executada)")
-    elif human_approval == "pending":
+    if human_approval == "pending":
         nao_verificado.append("aprovação/revisão humana pendente")
     if ledger_erro:
         nao_verificado.append(f"`.henke/LEDGER.json` ilegível/corrompido: {ledger_erro}")

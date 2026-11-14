@@ -64,10 +64,10 @@ def _tip_path(repo_root: Path | str) -> Path:
     root commit / CONFIG.json, com caminho só como último recurso — F-06)."""
     try:
         from henke.run_state import _config_dir
-        from henke.rs_custody import _legacy_repo_key, _repo_anchor_key
+        from henke.rs_custody import _repo_anchor_key
     except ImportError:
         from run_state import _config_dir  # type: ignore[no-redef]
-        from rs_custody import _legacy_repo_key, _repo_anchor_key  # type: ignore[no-redef]
+        from rs_custody import _repo_anchor_key  # type: ignore[no-redef]
     return _config_dir() / "events-tips" / f"{_repo_anchor_key(repo_root)}.json"
 
 

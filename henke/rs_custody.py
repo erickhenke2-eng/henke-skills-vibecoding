@@ -135,13 +135,28 @@ def repo_identity(repo_root: Path | str | None) -> str | None:
         try:
             cfg = root / ".henke" / "CONFIG.json"
             if cfg.is_file():
+                # identidade_repo (nonce gravado no init) é estável a edições
+                # de stack e único por repo — templates idênticos deixam de
+                # colidir; fallback legado: hash do arquivo (instável a edição,
+                # colide entre clones do mesmo stub — residual documentado).
+                try:
+                    _cfg_d = json.loads(cfg.read_text(encoding="utf-8"))
+                    _nonce = _cfg_d.get("identidade_repo") if isinstance(_cfg_d, dict) else None
+                    if isinstance(_nonce, str) and len(_nonce) >= 8:
+                        return "cfg:" + _nonce
+                except (ValueError, OSError):
+                    pass
                 return "cfg:" + hashlib.sha256(cfg.read_bytes()).hexdigest()
         except OSError:
             pass
         return None
 
     ident = _compute()
-    _REPO_IDENTITY_CACHE[_cache_key] = ident
+    # Só cacheia identidade git: (imutável — root commit nunca muda). cfg:/None
+    # dependem de arquivo que pode surgir ou mudar dentro do processo (primeiro
+    # commit, init de .henke): cachear tornaria o resultado stale.
+    if ident and ident.startswith("git:"):
+        _REPO_IDENTITY_CACHE[_cache_key] = ident
     return ident
 
 
@@ -470,6 +485,8 @@ def load_anchor_sidecar(run_id: str, repo_root: Path | str | None = None) -> dic
                     _alt = repo_identity(Path(_sc_repo))
                     if _alt is None or _alt != repo_identity(repo_root):
                         return None
-            except OSError:
+            except (OSError, TypeError, ValueError):
+                # TypeError/ValueError: sidecar com "repo" truthy não-string
+                # (123, [], {}) — inválido, nunca prova de custódia.
                 return None
     return data
